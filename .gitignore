@@ -9,3 +9,6 @@ dist
 
 .agents
 graphify-out
+.graphifyignore
+*.pem
+*.crx
