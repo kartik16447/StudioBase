@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ScreenVault | Video Player</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: { sans: ["Inter", "sans-serif"] },
+            colors: { brand: "#ef4444" }, // ScreenVault Red
+          },
+        },
+      };
+    </script>
+
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+      /* Custom styles to hide/show elements smoothly */
+      #player {
+        display: none;
+        opacity: 0;
+        transition: opacity 0.5s ease-in-out;
+      }
+      #player.loaded {
+        display: block;
+        opacity: 1;
+      }
+
+      /* Premium video container shadow */
+      .video-shadow {
+        box-shadow:
+          0 25px 50px -12px rgba(0, 0, 0, 0.25),
+          0 0 0 1px rgba(0, 0, 0, 0.05);
+      }
+
+      /* Spinner animation */
+      .spinner {
+        border: 3px solid rgba(255, 255, 255, 0.2);
+        border-top-color: #fff;
+        border-radius: 50%;
+        width: 32px;
+        height: 32px;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body
+    class="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen flex flex-col text-gray-800 antialiased"
+  >
+    <nav
+      class="w-full bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm z-10"
+    >
+      <div class="flex items-center gap-2">
+        <div
+          class="w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-md"
+        >
+          <i class="ph ph-video-camera"></i>
+        </div>
+        <span class="font-bold text-xl tracking-tight text-gray-900"
+          >ScreenVault</span
+        >
+      </div>
+      <div>
+        <button
+          class="text-sm font-medium bg-gray-900 text-white px-4 py-2 rounded-md transition-colors hover:bg-gray-800 shadow-sm ml-2"
+        >
+          Get the Extension
+        </button>
+      </div>
+    </nav>
+
+    <main
+      class="flex-grow flex flex-col items-center pt-10 pb-20 px-4 sm:px-6 lg:px-8 w-full max-w-6xl mx-auto"
+    >
+      <div
+        class="w-full max-w-5xl mb-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4"
+      >
+        <div>
+          <h1
+            id="video-title"
+            class="text-2xl sm:text-3xl font-bold text-gray-900 mb-2"
+          >
+            Loading title...
+          </h1>
+          <p class="text-sm text-gray-500 flex items-center gap-2">
+            <i class="ph ph-calendar-blank"></i>
+            <span id="date-display">Just now</span>
+          </p>
+        </div>
+        <div class="flex gap-3">
+          <button
+            onclick="copyLink()"
+            class="flex items-center gap-2 bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50 transition-colors shadow-sm text-sm"
+          >
+            <i class="ph ph-link text-lg"></i>
+            Copy Link
+          </button>
+        </div>
+      </div>
+
+      <div
+        id="error-state"
+        class="hidden flex flex-col items-center justify-center text-center max-w-md w-full mx-auto my-12"
+      >
+        <div
+          class="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6 border border-red-100"
+        >
+          <i class="ph ph-video-camera-slash text-3xl text-red-500"></i>
+        </div>
+        <h2 id="error-title" class="text-2xl font-bold text-gray-900 mb-2">
+          Video Not Found
+        </h2>
+        <p id="error-desc" class="text-gray-500 text-sm leading-relaxed mb-8">
+          The link might be broken, or the creator may have deleted this
+          recording.
+        </p>
+        <button
+          onclick="window.location.reload()"
+          class="px-6 py-3 bg-gray-900 text-white font-medium rounded-lg hover:bg-gray-800 transition-colors shadow-sm"
+        >
+          Try Refreshing
+        </button>
+      </div>
+
+      <div
+        id="video-wrapper"
+        class="w-full max-w-5xl bg-black rounded-2xl overflow-hidden video-shadow relative aspect-video flex items-center justify-center group hidden"
+      >
+        <div
+          id="loader"
+          class="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 z-10 transition-opacity duration-300"
+        >
+          <div class="spinner mb-4"></div>
+          <p class="text-gray-400 font-medium text-sm animate-pulse">
+            Preparing your video...
+          </p>
+        </div>
+
+        <video
+          id="player"
+          class="w-full h-full object-contain outline-none bg-black"
+          controls
+          autoplay
+          playsinline
+          crossorigin="anonymous"
+          controlsList="nodownload noplaybackrate"
+          disablePictureInPicture
+        ></video>
+      </div>
+
+      <div
+        class="w-full max-w-5xl mt-8 flex items-center justify-between border-t border-gray-200 pt-6"
+      >
+        <div class="flex gap-2">
+          <button
+            class="w-10 h-10 rounded-full bg-white border border-gray-200 flex items-center justify-center text-xl shadow-sm hover:scale-105 transition-transform hover:bg-gray-50"
+          >
+            👍
+          </button>
+          <button
+            class="w-10 h-10 rounded-full bg-white border border-gray-200 flex items-center justify-center text-xl shadow-sm hover:scale-105 transition-transform hover:bg-gray-50"
+          >
+            ❤️
+          </button>
+          <button
+            class="w-10 h-10 rounded-full bg-white border border-gray-200 flex items-center justify-center text-xl shadow-sm hover:scale-105 transition-transform hover:bg-gray-50"
+          >
+            🎉
+          </button>
+        </div>
+        <div class="text-sm text-gray-500 font-medium">0 Views</div>
+      </div>
+    </main>
+
+    <div
+      id="toast"
+      class="fixed bottom-5 right-5 transform translate-y-24 opacity-0 transition-all duration-300 bg-gray-900 text-white px-6 py-3 rounded-lg shadow-xl font-medium flex items-center gap-2 z-50"
+    >
+      <i id="toast-icon" class="ph ph-check-circle text-green-400 text-lg"></i>
+      <span id="toast-msg">Link copied to clipboard!</span>
+    </div>
+
+    <script src="playback.js"></script>
+    <script>
+      // Set today's date dynamically
+      document.getElementById("date-display").textContent =
+        new Date().toLocaleDateString("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+
+      // 10 Random Delightful Messages
+      const delightMessages = [
+        "Hooray! You just saved a meeting. 🎉",
+        "Boom! Knowledge shared instantly. 🚀",
+        "Another meeting avoided. You're welcome. 🙌",
+        "Async communication FTW! ⚡",
+        "Time saved. Context delivered. 🧠",
+        "Look at you, communicating like a pro. 🎬",
+        "One video, zero scheduling conflicts. 🗓️",
+        "They're going to love this update. 💡",
+        "Crystal clear communication delivered. 💎",
+        "That's a wrap! Ready to watch. 🍿",
+      ];
+
+      // Dynamic Toast Function
+      function showToast(
+        message,
+        iconClass = "ph-check-circle",
+        colorClass = "text-green-400",
+      ) {
+        const toast = document.getElementById("toast");
+        document.getElementById("toast-msg").textContent = message;
+
+        const iconEl = document.getElementById("toast-icon");
+        iconEl.className = `ph ${iconClass} ${colorClass} text-lg`;
+
+        toast.classList.remove("translate-y-24", "opacity-0");
+        setTimeout(() => {
+          toast.classList.add("translate-y-24", "opacity-0");
+        }, 1000); // 1 second for snappier feedback
+      }
+
+      function copyLink() {
+        navigator.clipboard.writeText(window.location.href).then(() => {
+          showToast("Link copied to clipboard!", "ph-link", "text-blue-400");
+        });
+      }
+
+      // Error handling UI toggle
+      function showError(title, description) {
+        document.getElementById("video-wrapper").classList.add("hidden");
+        const errState = document.getElementById("error-state");
+        errState.classList.remove("hidden");
+        document.getElementById("error-title").textContent = title;
+        document.getElementById("error-desc").textContent = description;
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const params = new URLSearchParams(window.location.search);
+        const fileId = params.get("id");
+        const urlTitle = params.get("title");
+        const videoWrapper = document.getElementById("video-wrapper");
+        const video = document.getElementById("player");
+        const loader = document.getElementById("loader");
+
+        // Generate a unique session ID for this page load to deduplicate telemetry
+        const sessionId = crypto.randomUUID?.() || Math.random().toString(36).substring(2);
+
+        if (!fileId) {
+          showError(
+            "Invalid Link",
+            "We couldn't find a video ID in this URL. Make sure you copied the entire link.",
+          );
+          return;
+        }
+
+        const titleEl = document.getElementById("video-title");
+
+        if (urlTitle) {
+          titleEl.textContent = decodeURIComponent(urlTitle);
+        } else {
+          async function fetchTitle(fileId, sid) {
+            try {
+              let url = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/meta?id=${fileId}`;
+              if (sid) url += `&sid=${sid}`;
+              
+              const res = await fetch(url);
+              const data = await res.json();
+
+              if (data.name) {
+                titleEl.textContent = data.name.replace(".webm", "");
+              } else {
+                titleEl.textContent = `Recording (${fileId.slice(0, 6)})`;
+              }
+            } catch (e) {
+              console.warn("Title fetch failed");
+              titleEl.textContent = `Recording (${fileId.slice(0, 6)})`;
+            }
+          }
+          fetchTitle(fileId, sessionId);
+        }
+
+        // Show player container
+        videoWrapper.classList.remove("hidden");
+
+        // Use the global SV resolver from playback.js
+        (async () => {
+          try {
+            let url;
+
+            if (window.SV && typeof window.SV.getPlayableUrl === "function") {
+              url = await window.SV.getPlayableUrl(fileId, sessionId);
+            } else {
+              // Internal fallback only if SV resolver is somehow missing (should not happen in production)
+              url = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/?id=${fileId}`;
+              if (sessionId) url += `&sid=${sessionId}`;
+            }
+
+            video.src = url;
+          } catch (e) {
+            console.error("Failed to resolve playable URL:", e);
+            loader.innerHTML = `
+              <div class="text-center p-8">
+                <i class="ph ph-warning-circle text-red-500 text-4xl mb-4"></i>
+                <h2 class="text-xl font-bold text-white mb-2">Connection Failed</h2>
+                <p class="text-gray-400 text-sm">We couldn't establish a secure connection to the stream.</p>
+              </div>
+            `;
+          }
+        })();
+
+
+        // When the video has buffered enough to begin playing smoothly
+        video.addEventListener("loadedmetadata", () => {
+          if (video.classList.contains("loaded")) return;
+
+          loader.style.opacity = "0";
+          setTimeout(() => (loader.style.display = "none"), 300);
+          video.classList.add("loaded");
+
+          const randomMsg =
+            delightMessages[Math.floor(Math.random() * delightMessages.length)];
+          showToast(randomMsg, "ph-lightning", "text-yellow-400");
+        });
+        // Handle stream errors
+        video.addEventListener("error", () => {
+          console.error("Stream failed to load via proxy.");
+          
+          // Record failure telemetry
+          fetch('https://screenvault-proxy.karthik-upadhyay98.workers.dev/event', {
+            method: 'POST',
+            body: JSON.stringify({
+              type: 'browser_video_error',
+              sessionId: sessionId,
+              metadata: { 
+                errorCode: 'BROWSER_VIDEO_ERROR', 
+                errorDetail: video.error ? video.error.code : 'unknown',
+                src: video.src?.slice(0, 60) + '...'
+              }
+            })
+          }).catch(() => {});
+
+          showError(
+            "Playback Error",
+            "We encountered an issue streaming this video. Please try refreshing or check your connection."
+          );
+        });
+      });
+    </script>
+  </body>
+</html>
+```

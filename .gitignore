@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+.env.*
+.cloudflare
+.wrangler
+*.log
+.DS_Store
+
+.agents
+graphify-out

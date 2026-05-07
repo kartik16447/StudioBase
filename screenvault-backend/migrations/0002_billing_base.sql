@@ -1,0 +1,1 @@
+ALTER TABLE usage_stats ADD COLUMN storageUsed INTEGER DEFAULT 0;
