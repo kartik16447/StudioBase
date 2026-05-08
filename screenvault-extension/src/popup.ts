@@ -233,18 +233,38 @@ function renderState(newState: AppState) {
       if (state.startedAt) startLocalTimer(state.startedAt);
       break;
     case "uploading":
+    case "finalizing":
       showScreen(screenUploading);
-      uploadAccountLabel.textContent = `Uploading to ${state.uploadAccount || "Drive"}...`;
-
-      const realProgress = Math.floor(state.uploadProgress || 0);
-      progressFill.style.width = `${realProgress}%`;
-      progressPct.textContent = `${realProgress}%`;
+      if (state.status === "finalizing") {
+        uploadAccountLabel.textContent = "Finalizing video...";
+        progressFill.style.width = "100%";
+        progressPct.textContent = "100%";
+      } else {
+        uploadAccountLabel.textContent = `Uploading to ${state.uploadAccount || "Drive"}...`;
+        const realProgress = Math.floor(state.uploadProgress || 0);
+        progressFill.style.width = `${realProgress}%`;
+        progressPct.textContent = `${realProgress}%`;
+      }
       break;
     case "ready":
+    case "enriching":
+    case "failed_enrichment":
       showScreen(screenSuccess);
-      successMeta.textContent = `Uploaded to ${state.uploadAccount}`;
+      if (state.status === "enriching") {
+        successMeta.textContent = `Uploaded! Polishing thumbnail & preview...`;
+        successMeta.style.color = "var(--blue)";
+      } else if (state.status === "failed_enrichment") {
+        successMeta.textContent = `Uploaded (Enrichment failed)`;
+        successMeta.style.color = "var(--orange)";
+      } else {
+        successMeta.textContent = `Uploaded to ${state.uploadAccount}`;
+        successMeta.style.color = "var(--text-secondary)";
+      }
+
       // Auto-copy only on transition to success or if URL improves
-      if (state.uploadUrl && (prevStatus !== "ready" || state.uploadUrl !== lastAutoCopiedUrl)) {
+      const isActuallyReady = state.status === "ready" || state.status === "enriching" || state.status === "failed_enrichment";
+      const isNewReadyState = prevStatus !== "ready" && prevStatus !== "enriching" && prevStatus !== "failed_enrichment";
+      if (isActuallyReady && state.uploadUrl && (isNewReadyState || state.uploadUrl !== lastAutoCopiedUrl)) {
         svLog("POPUP_LINK_AUTO_COPY", {
           url: state.uploadUrl,
           prevStatus,

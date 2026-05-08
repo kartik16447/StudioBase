@@ -160,9 +160,16 @@
           autoplay
           playsinline
           crossorigin="anonymous"
-          controlsList="nodownload noplaybackrate"
+          controlsList="nodownload"
           disablePictureInPicture
         ></video>
+        <div id="speed-control" class="absolute bottom-16 left-4 bg-black/60 backdrop-blur-md text-white text-[11px] font-bold px-2 py-1 rounded cursor-pointer z-20 border border-white/10 hover:bg-black/80 transition-colors select-none flex items-center gap-1">
+          <i class="ph ph-speedometer"></i>
+          <span id="speed-text">1x</span>
+        </div>
+        <div id="time-display" class="absolute bottom-16 right-4 bg-black/60 backdrop-blur-md text-white text-[11px] font-mono px-2 py-1 rounded hidden z-20 pointer-events-none border border-white/10">
+          0:00 / 0:00
+        </div>
       </div>
 
       <div
@@ -262,108 +269,108 @@
         const video = document.getElementById("player");
         const loader = document.getElementById("loader");
 
-        // Generate a unique session ID for this page load to deduplicate telemetry
-        const sessionId = crypto.randomUUID?.() || Math.random().toString(36).substring(2);
+        const sessionId = params.get("sid") || crypto.randomUUID?.() || Math.random().toString(36).substring(2);
 
         if (!fileId) {
-          showError(
-            "Invalid Link",
-            "We couldn't find a video ID in this URL. Make sure you copied the entire link.",
-          );
+          showError("Invalid Link", "We couldn't find a video ID in this URL.");
           return;
         }
 
         const titleEl = document.getElementById("video-title");
+        const timeDisplay = document.getElementById("time-display");
+        let authoritativeDurationMs = 0;
 
-        if (urlTitle) {
-          titleEl.textContent = decodeURIComponent(urlTitle);
-        } else {
-          async function fetchTitle(fileId, sid) {
-            try {
-              let url = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/meta?id=${fileId}`;
-              if (sid) url += `&sid=${sid}`;
-              
-              const res = await fetch(url);
-              const data = await res.json();
-
-              if (data.name) {
-                titleEl.textContent = data.name.replace(".webm", "");
-              } else {
-                titleEl.textContent = `Recording (${fileId.slice(0, 6)})`;
-              }
-            } catch (e) {
-              console.warn("Title fetch failed");
-              titleEl.textContent = `Recording (${fileId.slice(0, 6)})`;
-            }
+        function formatTime(ms) {
+          if (ms === null || ms === undefined || isNaN(ms) || !isFinite(ms)) return "--:--";
+          const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+          const mins = Math.floor(totalSeconds / 60);
+          const secs = totalSeconds % 60;
+          return `${mins}:${secs.toString().padStart(2, "0")}`;
+        }
+    
+        function updateDurationUI() {
+          let totalMs = authoritativeDurationMs;
+          
+          // Only fallback to native duration if it's valid and finite
+          if (!totalMs && video.duration && isFinite(video.duration)) {
+            totalMs = Math.floor(video.duration * 1000);
           }
-          fetchTitle(fileId, sessionId);
+    
+          if (!totalMs || isNaN(totalMs) || !isFinite(totalMs)) {
+            // Keep hidden if we don't have a valid duration yet
+            return;
+          }
+    
+          const current = Math.floor(video.currentTime * 1000);
+          const currentTimeStr = formatTime(current);
+          const totalTimeStr = formatTime(totalMs);
+          
+          if (currentTimeStr === "--:--" || totalTimeStr === "--:--") return;
+          
+          timeDisplay.textContent = `${currentTimeStr} / ${totalTimeStr}`;
+          timeDisplay.classList.remove("hidden");
         }
 
-        // Show player container
-        videoWrapper.classList.remove("hidden");
-
-        // Use the global SV resolver from playback.js
-        (async () => {
+        async function initPlayer() {
           try {
-            let url;
+            if (urlTitle) titleEl.textContent = decodeURIComponent(urlTitle);
+            videoWrapper.classList.remove("hidden");
 
-            if (window.SV && typeof window.SV.getPlayableUrl === "function") {
-              url = await window.SV.getPlayableUrl(fileId, sessionId);
-            } else {
-              // Internal fallback only if SV resolver is somehow missing (should not happen in production)
-              url = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/?id=${fileId}`;
-              if (sessionId) url += `&sid=${sessionId}`;
+            // 1. Fetch Metadata
+            let metaUrl = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/meta?id=${fileId}&sid=${sessionId}`;
+            const metaRes = await fetch(metaUrl).catch(() => null);
+            if (metaRes && metaRes.ok) {
+              const data = await metaRes.json();
+              if (data.name) titleEl.textContent = data.name.replace(".webm", "");
+              if (data.actualDurationMs) authoritativeDurationMs = data.actualDurationMs;
             }
 
-            video.src = url;
+            // 2. Start Video
+            let streamUrl;
+            if (window.SV && typeof window.SV.getPlayableUrl === "function") {
+              streamUrl = await window.SV.getPlayableUrl(fileId, sessionId);
+            } else {
+              streamUrl = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/?id=${fileId}&sid=${sessionId}`;
+            }
+            video.src = streamUrl;
+            video.load();
           } catch (e) {
-            console.error("Failed to resolve playable URL:", e);
-            loader.innerHTML = `
-              <div class="text-center p-8">
-                <i class="ph ph-warning-circle text-red-500 text-4xl mb-4"></i>
-                <h2 class="text-xl font-bold text-white mb-2">Connection Failed</h2>
-                <p class="text-gray-400 text-sm">We couldn't establish a secure connection to the stream.</p>
-              </div>
-            `;
+            showError("Connection Failed", "We couldn't connect to the stream.");
           }
-        })();
+        }
 
+        video.addEventListener("timeupdate", updateDurationUI);
 
-        // When the video has buffered enough to begin playing smoothly
+        const speeds = [1, 1.25, 1.5, 2];
+        let speedIdx = 0;
+        document.getElementById("speed-control").addEventListener("click", () => {
+          speedIdx = (speedIdx + 1) % speeds.length;
+          video.playbackRate = speeds[speedIdx];
+          document.getElementById("speed-text").textContent = speeds[speedIdx] + "x";
+        });
+
         video.addEventListener("loadedmetadata", () => {
-          if (video.classList.contains("loaded")) return;
-
           loader.style.opacity = "0";
           setTimeout(() => (loader.style.display = "none"), 300);
           video.classList.add("loaded");
-
-          const randomMsg =
-            delightMessages[Math.floor(Math.random() * delightMessages.length)];
-          showToast(randomMsg, "ph-lightning", "text-yellow-400");
+          showToast(delightMessages[Math.floor(Math.random() * delightMessages.length)], "ph-lightning", "text-yellow-400");
         });
-        // Handle stream errors
+
+        let retryCount = 0;
         video.addEventListener("error", () => {
-          console.error("Stream failed to load via proxy.");
-          
-          // Record failure telemetry
+          if (retryCount < 2) {
+            retryCount++;
+            setTimeout(() => { video.load(); }, 1000);
+            return;
+          }
           fetch('https://screenvault-proxy.karthik-upadhyay98.workers.dev/event', {
             method: 'POST',
-            body: JSON.stringify({
-              type: 'browser_video_error',
-              sessionId: sessionId,
-              metadata: { 
-                errorCode: 'BROWSER_VIDEO_ERROR', 
-                errorDetail: video.error ? video.error.code : 'unknown',
-                src: video.src?.slice(0, 60) + '...'
-              }
-            })
+            body: JSON.stringify({ type: 'browser_video_error', sessionId, metadata: { code: video.error?.code } })
           }).catch(() => {});
-
-          showError(
-            "Playback Error",
-            "We encountered an issue streaming this video. Please try refreshing or check your connection."
-          );
+          showError("Playback Error", "We encountered an issue streaming this video. Please try refreshing.");
         });
+
+        initPlayer();
       });
     </script>
   </body>

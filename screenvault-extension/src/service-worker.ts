@@ -106,6 +106,74 @@ async function validateToken(account: StorageAccount): Promise<string> {
   throw new Error("Account needs reconnection");
 }
 
+const inFlightRefreshes = new Map<string, Promise<StorageAccount>>();
+
+async function trySilentRefresh(account: StorageAccount): Promise<StorageAccount> {
+  const accountId = account.id || account.email;
+  if (inFlightRefreshes.has(accountId)) {
+    svLog("TOKEN_REFRESH_DEDUPED", { accountEmail: account.email });
+    return inFlightRefreshes.get(accountId)!;
+  }
+
+  const refreshPromise = (async () => {
+    try {
+      svLog("TOKEN_REFRESH_STARTED", { accountEmail: account.email });
+      const manifest = chrome.runtime.getManifest();
+      const clientId = manifest.oauth2?.client_id;
+      const scopes = manifest.oauth2?.scopes?.join(" ");
+      const redirectUri = chrome.identity.getRedirectURL();
+
+      const authUrl =
+        `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${clientId}&` +
+        `response_type=token&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `scope=${encodeURIComponent(scopes!)}&` +
+        `login_hint=${encodeURIComponent(account.email)}`;
+
+      const responseUrl = await chrome.identity.launchWebAuthFlow({
+        url: authUrl,
+        interactive: false,
+      });
+
+      if (!responseUrl) throw new Error("Silent refresh failed: No response URL");
+
+      const params = new URLSearchParams(responseUrl.split("#")[1]);
+      const token = params.get("access_token");
+
+      if (!token) throw new Error("Silent refresh failed: No access token");
+
+      svLog("TOKEN_REFRESH_SUCCESS", { accountEmail: account.email });
+
+      const updatedAccount = {
+        ...account,
+        accessToken: token,
+        expiresAt: Date.now() + 3500 * 1000,
+        invalid: false,
+        invalidReason: undefined
+      };
+
+      accounts = accounts.map(a => a.id === account.id ? updatedAccount : a);
+      await chrome.storage.local.set({ sv_accounts: accounts });
+      
+      chrome.runtime.sendMessage({
+        type: "ACCOUNTS_UPDATE",
+        accounts,
+      }).catch(() => {});
+
+      return updatedAccount;
+    } catch (err: any) {
+      svLog("TOKEN_REFRESH_FAILED", { accountEmail: account.email, error: err.message });
+      throw err;
+    } finally {
+      inFlightRefreshes.delete(accountId);
+    }
+  })();
+
+  inFlightRefreshes.set(accountId, refreshPromise);
+  return refreshPromise;
+}
+
 async function selectBestAccount(): Promise<StorageAccount | null> {
   if (accounts.length === 0) return null;
 
@@ -118,13 +186,16 @@ async function selectBestAccount(): Promise<StorageAccount | null> {
     if (!acc.lastQuotaUpdate || now - acc.lastQuotaUpdate > FIVE_MINUTES) {
       try {
         const token = acc.accessToken;
-        const quota = await getQuota(token);
-        accounts[i] = {
-          ...acc,
-          quotaTotal: quota.limit,
-          quotaUsed: quota.usage,
-          lastQuotaUpdate: now,
-        };
+        // Only try quota if not obviously expired to prevent unnecessary 401s
+        if (!acc.invalid && acc.expiresAt > now) {
+          const quota = await getQuota(token);
+          accounts[i] = {
+            ...acc,
+            quotaTotal: quota.limit,
+            quotaUsed: quota.usage,
+            lastQuotaUpdate: now,
+          };
+        }
       } catch (err) {
         console.warn(`Quota refresh failed for ${acc.email}:`, err);
       }
@@ -135,34 +206,36 @@ async function selectBestAccount(): Promise<StorageAccount | null> {
   const data_accounts = { sv_accounts: accounts };
   await chrome.storage.local.set(data_accounts);
 
-  // Prioritize manually selected active account
-  const validAccounts = accounts.filter((a) => !a.invalid);
-  const activeAccount = validAccounts.find((a) => a.isActive);
-  if (activeAccount) {
-    console.log(`[SV][ACTIVE_ACCOUNT_SELECTED] Manually active: ${activeAccount.email}`);
-    return activeAccount;
+  let candidate = accounts.find((a) => a.isActive);
+  if (!candidate && accounts.length > 0) {
+    candidate = [...accounts].sort((a, b) => {
+      const aSpace = (a.quotaTotal || 1) - (a.quotaUsed || 0);
+      const bSpace = (b.quotaTotal || 1) - (b.quotaUsed || 0);
+      const aRatio = aSpace / (a.quotaTotal || 1);
+      const bRatio = bSpace / (b.quotaTotal || 1);
+      if (Math.abs(aRatio - bRatio) < 0.02) {
+        return (a.uploadSuccessCount || 0) - (b.uploadSuccessCount || 0);
+      }
+      return bRatio - aRatio;
+    })[0];
   }
 
-  // Fallback: Sort by available space ratio (descending).
-  const selected = [...validAccounts].sort((a, b) => {
-    const aSpace = (a.quotaTotal || 1) - (a.quotaUsed || 0);
-    const bSpace = (b.quotaTotal || 1) - (b.quotaUsed || 0);
-
-    const aRatio = aSpace / (a.quotaTotal || 1);
-    const bRatio = bSpace / (b.quotaTotal || 1);
-
-    // Fairness: If free ratio difference is small (< 2%), rotate based on usage count
-    if (Math.abs(aRatio - bRatio) < 0.02) {
-      return (a.uploadSuccessCount || 0) - (b.uploadSuccessCount || 0);
+  if (candidate) {
+    if (candidate.invalid || candidate.expiresAt < now + 60000) {
+      try {
+        candidate = await trySilentRefresh(candidate);
+      } catch (e) {
+        svLog("SELECTED_ACCOUNT_PINNED", { accountEmail: candidate.email });
+        candidate.invalid = true;
+        candidate.invalidReason = "refresh_failed";
+      }
     }
-
-    return bRatio - aRatio; // Higher ratio first
-  })[0] || null;
-
-  if (selected) {
-    console.log(`[SV][ACTIVE_ACCOUNT_SELECTED] Dynamic selection: ${selected.email}`);
   }
-  return selected;
+
+  if (candidate) {
+    console.log(`[SV][ACTIVE_ACCOUNT_SELECTED] Selection: ${candidate.email}`);
+  }
+  return candidate;
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -175,7 +248,10 @@ async function loadState() {
   try {
     const stored = await chrome.storage.local.get(["sv_state", "sv_accounts"]);
     if (stored.sv_state) state = stored.sv_state as AppState;
-    if (stored.sv_accounts) accounts = stored.sv_accounts as StorageAccount[];
+    if (stored.sv_accounts) {
+      accounts = stored.sv_accounts as StorageAccount[];
+      svLog("SESSION_REHYDRATED", { accountCount: accounts.length });
+    }
 
     const { sv_sessions = {} } = await chrome.storage.local.get("sv_sessions");
     for (const [sid, meta] of Object.entries(
@@ -562,32 +638,41 @@ chrome.runtime.onMessage.addListener(
       selectBestAccount()
         .then(async (bestAccount) => {
           if (bestAccount) {
-            const token = bestAccount.accessToken;
-            
-            // Resolve workspace folder ID
-            let folderId: string | undefined;
-            try {
-              const user = await getCurrentUser();
-              if (user.workspaceId) {
-                folderId = await getWorkspaceFolderId(bestAccount, user.workspaceId);
+            const doAllocate = async (account: StorageAccount) => {
+              let folderId: string | undefined;
+              try {
+                const user = await getCurrentUser();
+                if (user.workspaceId) {
+                  folderId = await getWorkspaceFolderId(account, user.workspaceId);
+                }
+              } catch (err) {
+                console.warn("Failed to resolve workspace folder for pre-allocation:", err);
               }
-            } catch (err) {
-              console.warn("Failed to resolve workspace folder for pre-allocation:", err);
-            }
+              return preAllocateDriveFile(account, account.accessToken, { folderId });
+            };
 
-            const prom = preAllocateDriveFile(bestAccount, token, { folderId });
+            let prom = doAllocate(bestAccount).catch(async (err) => {
+              if (err.message.includes("401") || err.message.includes("Token expired")) {
+                svLog("PREALLOCATION_RETRY", { accountEmail: bestAccount.email });
+                updateState({ errorMessage: "Restoring your account..." });
+                try {
+                  const refreshed = await trySilentRefresh(bestAccount);
+                  updateState({ errorMessage: null });
+                  return await doAllocate(refreshed);
+                } catch (refreshErr) {
+                  await validateToken(bestAccount).catch(() => {});
+                  throw err;
+                }
+              }
+              throw err;
+            });
+
             preAllocationMap.set("latest", prom);
             prom
               .then((data) => {
                 sendResponse({ url: data.url });
               })
               .catch(async (err) => {
-                if (
-                  err.message.includes("401") ||
-                  err.message.includes("Token expired")
-                ) {
-                  await validateToken(bestAccount).catch(() => {});
-                }
                 sendResponse({ error: err.message });
                 preAllocationMap.delete("latest");
               });
@@ -616,10 +701,18 @@ chrome.runtime.onMessage.addListener(
     } else if (msg.type === "SET_SESSION_STATUS") {
       const metaUpdate: Partial<SessionMetadata> = { status: msg.status };
       saveSessionMetadata(msg.sessionId, metaUpdate);
-      if (msg.status === "uploading") {
+      
+      // Keep in processing set during all active processing states
+      const activeStates = ["uploading", "finalizing", "enriching"];
+      if (activeStates.includes(msg.status)) {
         processingSessions.add(msg.sessionId);
       } else {
         processingSessions.delete(msg.sessionId);
+      }
+      
+      // Update global app state if this is the active session
+      if (state.sessionId === msg.sessionId) {
+        updateState({ status: msg.status as AppStatus });
       }
     } else if (msg.type === "SAVE_SESSION_METADATA") {
       saveSessionMetadata(msg.sessionId, msg.metadata);
@@ -926,28 +1019,40 @@ async function startRecording(target: AppState["target"]) {
 
     if (!allocationProm) {
       console.warn("No pre-allocation found, starting fresh allocation");
-      const stored = await chrome.storage.local.get([
-        "sv_accounts",
-      ]);
-      const sv_accounts = (stored.sv_accounts || []) as StorageAccount[];
-      const validAccounts = sv_accounts.filter((a) => !a.invalid);
-      let activeAccount = validAccounts.find((a) => a.isActive) || validAccounts[0];
+      let activeAccount = await selectBestAccount();
 
       if (!activeAccount) {
         throw new Error("No valid account available for recording.");
       }
 
-      const token = activeAccount.accessToken;
-      let folderId: string | undefined;
-      try {
-        const user = await getCurrentUser();
-        if (user.workspaceId) {
-          folderId = await getWorkspaceFolderId(activeAccount, user.workspaceId);
+      const doAllocate = async (account: StorageAccount) => {
+        let folderId: string | undefined;
+        try {
+          const user = await getCurrentUser();
+          if (user.workspaceId) {
+            folderId = await getWorkspaceFolderId(account, user.workspaceId);
+          }
+        } catch (err) {
+          console.warn("Failed to resolve workspace folder:", err);
         }
-      } catch (err) {
-        console.warn("Failed to resolve workspace folder:", err);
-      }
-      allocationProm = preAllocateDriveFile(activeAccount, token, { folderId });
+        return preAllocateDriveFile(account, account.accessToken, { folderId });
+      };
+
+      allocationProm = doAllocate(activeAccount).catch(async (err) => {
+        if (err.message.includes('Token expired') || err.message.includes('401')) {
+          svLog("PREALLOCATION_RETRY", { accountEmail: activeAccount!.email });
+          updateState({ errorMessage: "Restoring your account..." });
+          try {
+            activeAccount = await trySilentRefresh(activeAccount!);
+            updateState({ errorMessage: null });
+            return await doAllocate(activeAccount!);
+          } catch (refreshErr) {
+            await validateToken(activeAccount!).catch(() => {});
+            throw err;
+          }
+        }
+        throw err;
+      });
     }
 
     preAllocationMap.set(sessionId, allocationProm);
@@ -1122,6 +1227,7 @@ function stopRecording() {
           const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
           const encodedTitle = encodeURIComponent(title);
           url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodedTitle}`;
+          if (sessionId) url += `&sid=${sessionId}`;
           console.log(`[SV][BACKEND_AUTHORITY] Forced early link generated: ${url}`);
         }
         svLog("EARLY_LINK_FORCED_READY", { 

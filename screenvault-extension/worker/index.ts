@@ -63,7 +63,7 @@ export default {
     console.log(`[SV][FETCH_START] Decrypted: ${isDecrypted}, ID: ${fileId?.slice(0, 8)}..., Session: ${sessionId || 'none'}`);
 
     // Resolve videoId and workspaceId for linkage
-    const video = (await env.DB.prepare('SELECT id, title, workspaceId, ownerId FROM videos WHERE fileId = ? OR encryptedFileId = ?')
+    const video = (await env.DB.prepare('SELECT id, title, workspaceId, ownerId, actualDurationMs FROM videos WHERE fileId = ? OR encryptedFileId = ?')
       .bind(fileId, rawEncryptedId)
       .first()) as any;
 
@@ -85,7 +85,10 @@ export default {
     // 2. Metadata Route (Resolves video title from DB or generates a fallback)
     if (url.pathname === "/meta") {
       if (video && video.title) {
-        return new Response(JSON.stringify({ name: video.title }), {
+        return new Response(JSON.stringify({ 
+          name: video.title, 
+          actualDurationMs: video.actualDurationMs 
+        }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
@@ -101,7 +104,8 @@ export default {
         headers: {
           ...corsHeaders,
           "Accept-Ranges": "bytes",
-          "Content-Type": "video/webm"
+          "Content-Type": "video/webm",
+          "X-SV-Version": "2.1-bypass-hardened"
         }
       });
     }
@@ -124,28 +128,65 @@ export default {
       };
 
       // Public capability-based streaming via standard UC link with export=download for better reliability
-      let driveUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-      let driveRes = await fetch(driveUrl, fetchOptions);
+      const driveUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+      
+      console.log(`[SV][DRIVE_FETCH] ID: ${fileId?.slice(0, 8)}..., Range: ${rangeHeader || 'none'}`);
 
-      // Handle Virus Scan Warning (Drive returns 200 with HTML containing a confirm token)
+      // 1. Initial check (without Range header) to handle potential Virus Scan Warning
+      let driveRes = await fetch(driveUrl);
       const contentType = driveRes.headers.get("Content-Type") || "";
+
+      // Create a clean response with required streaming headers
+      const responseHeaders = new Headers(corsHeaders);
+      responseHeaders.set("Content-Type", "video/webm");
+      responseHeaders.set("Accept-Ranges", "bytes");
+
       if (driveRes.ok && contentType.includes("text/html")) {
           const driveResClone = driveRes.clone();
           const html = await driveRes.text();
-          const confirmMatch = html.match(/confirm=([a-zA-Z0-9_]+)/);
+          
+          const confirmMatch = html.match(/confirm=([a-zA-Z0-9_]+)/) || 
+                               html.match(/name=['"]confirm['"]\s+value=['"]([a-zA-Z0-9_]+)['"]/) ||
+                               html.match(/value=['"]([a-zA-Z0-9_]+)['"]\s+name=['"]confirm['"]/);
+          
+          const uuidMatch = html.match(/name=['"]uuid['"]\s+value=['"]([a-z0-9-]+)['"]/) ||
+                            html.match(/value=['"]([a-z0-9-]+)['"]\s+name=['"]uuid['"]/);
+
           if (confirmMatch) {
-              console.log(`[SV][DRIVE] Virus scan warning detected, bypassing with token: ${confirmMatch[1]}`);
-              driveRes = await fetch(`${driveUrl}&confirm=${confirmMatch[1]}`, fetchOptions);
+              const confirmToken = confirmMatch[1];
+              const uuidToken = uuidMatch ? uuidMatch[1] : null;
+              
+              if (!uuidToken && html.includes('uuid')) {
+                 await recordPlaybackEvent(env, { type: 'DRIVE_UUID_PARSE_FAILED', ...commonMeta }, { dedupe: true });
+              }
+
+              console.log(`[SV][DRIVE_BYPASS_ATTEMPT] fileId: ${fileId}, confirmToken: ${confirmToken}, uuidToken: ${uuidToken}`);
+              
+              // Use usercontent domain for bypass - much more reliable for streaming
+              let bypassUrl = `https://drive.usercontent.google.com/download?id=${fileId}&confirm=${confirmToken}&export=download`;
+              if (uuidToken) bypassUrl += `&uuid=${uuidToken}`;
+
+              // Final fetch WITH Range header
+              driveRes = await fetch(bypassUrl, fetchOptions);
           } else {
-              console.warn(`[SV][DRIVE] Received HTML but no confirm token found. Returning original response.`);
+              if (html.includes('uc-download') || html.includes('confirm')) {
+                 await recordPlaybackEvent(env, { type: 'DRIVE_CONFIRM_PARSE_FAILED', ...commonMeta }, { dedupe: true });
+                 return new Response(JSON.stringify({ error: "Google Drive bypass failed", code: "DRIVE_BYPASS_FAILED" }), {
+                    status: 502,
+                    headers: { ...corsHeaders, "Content-Type": "application/json" }
+                 });
+              }
               driveRes = driveResClone;
           }
+      } else if (rangeHeader && driveRes.status === 200) {
+          // If first fetch was a full GET (200) but browser wants a Range (206), re-fetch
+          driveRes = await fetch(driveUrl, fetchOptions);
       }
 
       console.log(`[SV][DRIVE_RES] Status: ${driveRes.status}, Type: ${contentType}, Length: ${driveRes.headers.get("Content-Length")}`);
 
       if (!driveRes.ok && driveRes.status !== 206) {
-        console.error(`[SV][DRIVE_FETCH_FAILED] Status: ${driveRes.status} for ID: ${fileId?.slice(0, 8)}...`);
+        console.error(`[SV][DRIVE_FETCH_FAILED] Status: ${driveRes.status}, Range: ${rangeHeader}`);
         
         let eventType = 'playback_failed';
         let errorCode = 'PROXY_FETCH_FAILED';
@@ -156,16 +197,14 @@ export default {
         } else if (driveRes.status === 404) {
             eventType = 'video_not_found';
             errorCode = 'DRIVE_404_NOT_FOUND';
+        } else if (driveRes.status === 416) {
+            errorCode = 'DRIVE_416_RANGE_NOT_SATISFIABLE';
         }
 
         await recordPlaybackEvent(env, {
           type: eventType,
           ...commonMeta,
-          metadata: { 
-            errorCode, 
-            status: driveRes.status,
-            encryptedFileId: rawEncryptedId?.slice(0, 8) + '...'
-          }
+          metadata: { errorCode, status: driveRes.status, range: rangeHeader }
         }, { dedupe: true });
 
         return new Response(`Upstream failure: ${driveRes.status}`, { 
@@ -173,11 +212,6 @@ export default {
           headers: corsHeaders 
         });
       }
-
-      // Create a clean response with required streaming headers
-      const responseHeaders = new Headers(corsHeaders);
-      responseHeaders.set("Content-Type", "video/webm");
-      responseHeaders.set("Accept-Ranges", "bytes");
 
       // Pass through critical streaming headers from upstream
       const headersToPass = ["Content-Range", "Content-Length", "Accept-Ranges"];
@@ -262,23 +296,28 @@ async function recordPlaybackEvent(env: any, data: {
 
     const id = crypto.randomUUID();
     const now = Date.now();
+    const metadataStr = JSON.stringify(data.metadata || {});
     
+    // Ensure we are binding strings or nulls to the correct columns
+    // Table schema: id (0), type (1), userId (2), workspaceId (3), videoId (4), metadata (5), createdAt (6), sessionId (7)
+    const bindValues = [
+      id, 
+      String(data.type), 
+      String(data.userId || 'anonymous'), 
+      String(data.workspaceId || 'public'), 
+      data.videoId ? String(data.videoId) : null, 
+      metadataStr, 
+      now,
+      data.sessionId ? String(data.sessionId) : null, 
+    ];
+
     await env.DB.prepare(
-      'INSERT INTO metrics_events (id, type, userId, workspaceId, videoId, sessionId, metadata, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO metrics_events (id, type, userId, workspaceId, videoId, metadata, createdAt, sessionId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     )
-      .bind(
-        id, 
-        data.type, 
-        data.userId || 'anonymous', 
-        data.workspaceId || 'public', 
-        data.videoId || null, 
-        data.sessionId || null, 
-        JSON.stringify(data.metadata || {}), 
-        now
-      )
+      .bind(...bindValues)
       .run();
-  } catch (e) {
-    console.error('Failed to record playback event:', e);
+  } catch (e: any) {
+    console.error('Failed to record playback event:', e.message, JSON.stringify(data));
   }
 }
 

@@ -1,0 +1,1420 @@
+diff --git a/screenvault-backend/schema.sql b/screenvault-backend/schema.sql
+index 4a04308..5b48ecd 100644
+--- a/screenvault-backend/schema.sql
++++ b/screenvault-backend/schema.sql
+@@ -49,8 +49,12 @@ CREATE TABLE videos (
+   updatedAt INTEGER,
+ 
+   duration INTEGER,
++  actualDurationMs INTEGER,
+   status TEXT DEFAULT 'uploading',
+   thumbnailUrl TEXT,
++  previewUrl TEXT,
++  encryptedFileId TEXT,
++  sessionId TEXT,
+   deletedAt INTEGER
+ );
+ 
+diff --git a/screenvault-backend/src/index.ts b/screenvault-backend/src/index.ts
+index c1678af..580eab0 100644
+--- a/screenvault-backend/src/index.ts
++++ b/screenvault-backend/src/index.ts
+@@ -39,6 +39,7 @@ export default {
+ 		} else if (pathname.startsWith('/videos/')) {
+ 			if (method === 'PATCH') response = await updateVideo(request, env);
+ 			else if (method === 'DELETE') response = await deleteVideo(request, env);
++			else if (method === 'GET') response = await getVideo(request, env);
+ 			else response = jsonError('Method Not Allowed', 'METHOD_NOT_ALLOWED', 405);
+ 		} else if (pathname === '/usage/update' && method === 'POST') {
+ 			response = await updateUsage(request, env);
+@@ -166,7 +167,7 @@ async function handleAdmin(request: Request, env: any) {
+ 
+ 		// --- MODE B: VIDEO/URL INVESTIGATION ---
+ 		if (idFilter) {
+-			const video = (await env.DB.prepare('SELECT id, title, ownerId, workspaceId, accountEmail, status, createdAt FROM videos WHERE encryptedFileId = ? OR id = ?')
++			const video = (await env.DB.prepare('SELECT id, title, ownerId, workspaceId, accountEmail, status, createdAt, duration, actualDurationMs FROM videos WHERE encryptedFileId = ? OR id = ?')
+ 				.bind(idFilter, idFilter)
+ 				.first()) as any;
+ 			
+@@ -337,10 +338,10 @@ async function createVideo(request: Request, env: any) {
+ 		const encryptedFileId = await encryptFileId(fileId, env);
+ 
+ 		await env.DB.prepare(
+-			`INSERT INTO videos (id, fileId, encryptedFileId, title, ownerId, workspaceId, accountEmail, createdAt, updatedAt, duration, status, thumbnailUrl)
+-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
++			`INSERT INTO videos (id, fileId, encryptedFileId, title, ownerId, workspaceId, accountEmail, createdAt, updatedAt, duration, actualDurationMs, status, thumbnailUrl, sessionId)
++       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+ 		)
+-			.bind(id, fileId, encryptedFileId, title, user.id, workspaceId, accountEmail, now, now, duration || 0, 'uploading', body.thumbnailUrl || null)
++			.bind(id, fileId, encryptedFileId, title, user.id, workspaceId, accountEmail, now, now, duration || 0, body.actualDurationMs || null, 'uploading', body.thumbnailUrl || null, sessionId || null)
+ 			.run();
+ 
+ 		await backendLog(env, user.id, 'FILEID_ENCRYPTED', { videoId: id, workspaceId });
+@@ -439,6 +440,47 @@ async function getVideos(request: Request, env: any) {
+ 	}
+ }
+ 
++async function getVideo(request: Request, env: any) {
++	try {
++		const url = new URL(request.url);
++		const id = url.pathname.split('/').filter(Boolean).pop();
++		const sessionId = url.searchParams.get('sid');
++
++		if (!id || id === 'videos') return jsonError('Video ID is required');
++
++		// 1. Try direct ID lookup
++		let video = (await env.DB.prepare('SELECT * FROM videos WHERE id = ? AND deletedAt IS NULL').bind(id).first()) as any;
++
++		// 2. If not found, try encryptedFileId lookup
++		if (!video) {
++			video = (await env.DB.prepare('SELECT * FROM videos WHERE encryptedFileId = ? AND deletedAt IS NULL').bind(id).first()) as any;
++		}
++
++		if (!video) {
++			await recordEvent(env, {
++				type: 'video_not_found',
++				userId: 'anonymous',
++				workspaceId: 'public',
++				metadata: { requestedId: id, sessionId }
++			});
++			return jsonError('Video not found', 'NOT_FOUND', 404);
++		}
++
++		// 3. Record Playback Event
++		await recordEvent(env, {
++			type: 'playback_started',
++			userId: 'anonymous',
++			workspaceId: video.workspaceId,
++			videoId: video.id,
++			sessionId: sessionId || video.sessionId
++		});
++
++		return Response.json(video);
++	} catch (err: any) {
++		return jsonError(err.message);
++	}
++}
++
+ async function updateVideo(request: Request, env: any) {
+ 	try {
+ 		const user = await getUserFromToken(request, env);
+@@ -495,10 +537,18 @@ async function updateVideo(request: Request, env: any) {
+ 			sets.push('previewUrl = ?');
+ 			params.push(body.previewUrl);
+ 		}
++		if ('actualDurationMs' in body) {
++			sets.push('actualDurationMs = ?');
++			params.push(body.actualDurationMs);
++		}
+ 		if (body.delete === true) {
+ 			sets.push('deletedAt = ?');
+ 			params.push(now);
+ 		}
++		if (sessionId) {
++			sets.push('sessionId = ?');
++			params.push(sessionId);
++		}
+ 
+ 		params.push(id);
+ 		await env.DB.prepare(`UPDATE videos SET ${sets.join(', ')} WHERE id = ?`)
+@@ -1178,13 +1228,26 @@ async function recordEvent(env: any, data: { type: string; userId: string; works
+ 	try {
+ 		const id = crypto.randomUUID();
+ 		const now = Date.now();
+-		await env.DB.prepare(
+-			'INSERT INTO metrics_events (id, type, userId, workspaceId, videoId, sessionId, metadata, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+-		)
+-			.bind(id, data.type, data.userId, data.workspaceId, data.videoId || null, data.sessionId || null, JSON.stringify(data.metadata || {}), now)
++		const metadataStr = JSON.stringify(data.metadata || {});
++
++		// Ensure we are binding strings or nulls to the correct columns
++		// Table schema: id (0), type (1), userId (2), workspaceId (3), videoId (4), metadata (5), createdAt (6), sessionId (7)
++		const bindValues = [
++			id,
++			String(data.type),
++			String(data.userId || 'anonymous'),
++			String(data.workspaceId || 'public'),
++			data.videoId ? String(data.videoId) : null,
++			metadataStr,
++			now,
++			data.sessionId ? String(data.sessionId) : null,
++		];
++
++		await env.DB.prepare('INSERT INTO metrics_events (id, type, userId, workspaceId, videoId, metadata, createdAt, sessionId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
++			.bind(...bindValues)
+ 			.run();
+-	} catch (e) {
+-		console.error('Failed to record event:', e);
++	} catch (e: any) {
++		console.error('Failed to record event:', e.message, JSON.stringify(data));
+ 	}
+ }
+ async function listWorkspaceMembers(request: Request, env: any) {
+diff --git a/screenvault-backend/worker-configuration.d.ts b/screenvault-backend/worker-configuration.d.ts
+index 051cbda..436d44c 100644
+--- a/screenvault-backend/worker-configuration.d.ts
++++ b/screenvault-backend/worker-configuration.d.ts
+@@ -1,11 +1,12 @@
+ /* eslint-disable */
+-// Generated by Wrangler by running `wrangler types` (hash: b739a9c19cff1463949c4db47674ed86)
++// Generated by Wrangler by running `wrangler types` (hash: 973863b87c5f17b377119a1dc8be79cf)
+ // Runtime types generated with workerd@1.20260430.1 2026-05-03 nodejs_compat
+ declare namespace Cloudflare {
+ 	interface GlobalProps {
+ 		mainModule: typeof import("./src/index");
+ 	}
+ 	interface Env {
++		DB: D1Database;
+ 	}
+ }
+ interface Env extends Cloudflare.Env {}
+diff --git a/screenvault-extension/src/index.html b/screenvault-extension/src/index.html
+index c5234c9..de59709 100644
+--- a/screenvault-extension/src/index.html
++++ b/screenvault-extension/src/index.html
+@@ -160,9 +160,16 @@
+           autoplay
+           playsinline
+           crossorigin="anonymous"
+-          controlsList="nodownload noplaybackrate"
++          controlsList="nodownload"
+           disablePictureInPicture
+         ></video>
++        <div id="speed-control" class="absolute bottom-16 left-4 bg-black/60 backdrop-blur-md text-white text-[11px] font-bold px-2 py-1 rounded cursor-pointer z-20 border border-white/10 hover:bg-black/80 transition-colors select-none flex items-center gap-1">
++          <i class="ph ph-speedometer"></i>
++          <span id="speed-text">1x</span>
++        </div>
++        <div id="time-display" class="absolute bottom-16 right-4 bg-black/60 backdrop-blur-md text-white text-[11px] font-mono px-2 py-1 rounded hidden z-20 pointer-events-none border border-white/10">
++          0:00 / 0:00
++        </div>
+       </div>
+ 
+       <div
+@@ -262,108 +269,90 @@
+         const video = document.getElementById("player");
+         const loader = document.getElementById("loader");
+ 
+-        // Generate a unique session ID for this page load to deduplicate telemetry
+-        const sessionId = crypto.randomUUID?.() || Math.random().toString(36).substring(2);
++        const sessionId = params.get("sid") || crypto.randomUUID?.() || Math.random().toString(36).substring(2);
+ 
+         if (!fileId) {
+-          showError(
+-            "Invalid Link",
+-            "We couldn't find a video ID in this URL. Make sure you copied the entire link.",
+-          );
++          showError("Invalid Link", "We couldn't find a video ID in this URL.");
+           return;
+         }
+ 
+         const titleEl = document.getElementById("video-title");
++        const timeDisplay = document.getElementById("time-display");
++        let authoritativeDurationMs = 0;
+ 
+-        if (urlTitle) {
+-          titleEl.textContent = decodeURIComponent(urlTitle);
+-        } else {
+-          async function fetchTitle(fileId, sid) {
+-            try {
+-              let url = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/meta?id=${fileId}`;
+-              if (sid) url += `&sid=${sid}`;
+-              
+-              const res = await fetch(url);
+-              const data = await res.json();
+-
+-              if (data.name) {
+-                titleEl.textContent = data.name.replace(".webm", "");
+-              } else {
+-                titleEl.textContent = `Recording (${fileId.slice(0, 6)})`;
+-              }
+-            } catch (e) {
+-              console.warn("Title fetch failed");
+-              titleEl.textContent = `Recording (${fileId.slice(0, 6)})`;
+-            }
+-          }
+-          fetchTitle(fileId, sessionId);
++        function formatTime(ms) {
++          const totalSeconds = Math.floor(ms / 1000);
++          return `${Math.floor(totalSeconds / 60)}:${(totalSeconds % 60).toString().padStart(2, "0")}`;
+         }
+ 
+-        // Show player container
+-        videoWrapper.classList.remove("hidden");
++        function updateDurationUI() {
++          let totalMs = authoritativeDurationMs || Math.floor((video.duration || 0) * 1000);
++          if (!totalMs) return;
++          const current = Math.floor(video.currentTime * 1000);
++          timeDisplay.textContent = `${formatTime(current)} / ${formatTime(totalMs)}`;
++          timeDisplay.classList.remove("hidden");
++        }
+ 
+-        // Use the global SV resolver from playback.js
+-        (async () => {
++        async function initPlayer() {
+           try {
+-            let url;
++            if (urlTitle) titleEl.textContent = decodeURIComponent(urlTitle);
++            videoWrapper.classList.remove("hidden");
++
++            // 1. Fetch Metadata
++            let metaUrl = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/meta?id=${fileId}&sid=${sessionId}`;
++            const metaRes = await fetch(metaUrl).catch(() => null);
++            if (metaRes && metaRes.ok) {
++              const data = await metaRes.json();
++              if (data.name) titleEl.textContent = data.name.replace(".webm", "");
++              if (data.actualDurationMs) authoritativeDurationMs = data.actualDurationMs;
++            }
+ 
++            // 2. Start Video
++            let streamUrl;
+             if (window.SV && typeof window.SV.getPlayableUrl === "function") {
+-              url = await window.SV.getPlayableUrl(fileId, sessionId);
++              streamUrl = await window.SV.getPlayableUrl(fileId, sessionId);
+             } else {
+-              // Internal fallback only if SV resolver is somehow missing (should not happen in production)
+-              url = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/?id=${fileId}`;
+-              if (sessionId) url += `&sid=${sessionId}`;
++              streamUrl = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/?id=${fileId}&sid=${sessionId}`;
+             }
+-
+-            video.src = url;
++            video.src = streamUrl;
++            video.load();
+           } catch (e) {
+-            console.error("Failed to resolve playable URL:", e);
+-            loader.innerHTML = `
+-              <div class="text-center p-8">
+-                <i class="ph ph-warning-circle text-red-500 text-4xl mb-4"></i>
+-                <h2 class="text-xl font-bold text-white mb-2">Connection Failed</h2>
+-                <p class="text-gray-400 text-sm">We couldn't establish a secure connection to the stream.</p>
+-              </div>
+-            `;
++            showError("Connection Failed", "We couldn't connect to the stream.");
+           }
+-        })();
++        }
+ 
++        video.addEventListener("timeupdate", updateDurationUI);
+ 
+-        // When the video has buffered enough to begin playing smoothly
+-        video.addEventListener("loadedmetadata", () => {
+-          if (video.classList.contains("loaded")) return;
++        const speeds = [1, 1.25, 1.5, 2];
++        let speedIdx = 0;
++        document.getElementById("speed-control").addEventListener("click", () => {
++          speedIdx = (speedIdx + 1) % speeds.length;
++          video.playbackRate = speeds[speedIdx];
++          document.getElementById("speed-text").textContent = speeds[speedIdx] + "x";
++        });
+ 
++        video.addEventListener("loadedmetadata", () => {
+           loader.style.opacity = "0";
+           setTimeout(() => (loader.style.display = "none"), 300);
+           video.classList.add("loaded");
+-
+-          const randomMsg =
+-            delightMessages[Math.floor(Math.random() * delightMessages.length)];
+-          showToast(randomMsg, "ph-lightning", "text-yellow-400");
++          showToast(delightMessages[Math.floor(Math.random() * delightMessages.length)], "ph-lightning", "text-yellow-400");
+         });
+-        // Handle stream errors
++
++        let retryCount = 0;
+         video.addEventListener("error", () => {
+-          console.error("Stream failed to load via proxy.");
+-          
+-          // Record failure telemetry
++          if (retryCount < 2) {
++            retryCount++;
++            setTimeout(() => { video.load(); }, 1000);
++            return;
++          }
+           fetch('https://screenvault-proxy.karthik-upadhyay98.workers.dev/event', {
+             method: 'POST',
+-            body: JSON.stringify({
+-              type: 'browser_video_error',
+-              sessionId: sessionId,
+-              metadata: { 
+-                errorCode: 'BROWSER_VIDEO_ERROR', 
+-                errorDetail: video.error ? video.error.code : 'unknown',
+-                src: video.src?.slice(0, 60) + '...'
+-              }
+-            })
++            body: JSON.stringify({ type: 'browser_video_error', sessionId, metadata: { code: video.error?.code } })
+           }).catch(() => {});
+-
+-          showError(
+-            "Playback Error",
+-            "We encountered an issue streaming this video. Please try refreshing or check your connection."
+-          );
++          showError("Playback Error", "We encountered an issue streaming this video. Please try refreshing.");
+         });
++
++        initPlayer();
+       });
+     </script>
+   </body>
+diff --git a/screenvault-extension/src/offscreen.ts b/screenvault-extension/src/offscreen.ts
+index 6c3bd08..bbc0868 100644
+--- a/screenvault-extension/src/offscreen.ts
++++ b/screenvault-extension/src/offscreen.ts
+@@ -26,6 +26,7 @@ let previewCaptured = false;
+ let isStopping = false;
+ let isRecording = false;
+ let maxDurationTimeout: any = null;
++let recordingStartTime: number = 0;
+ 
+ // Passed from service worker via message
+ let offscreenUser: BackendUser | null = null;
+@@ -513,16 +514,13 @@ function startMediaRecorder(stream: MediaStream) {
+   let chunkCount = 0;
+   let lastChunkData: Blob | null = null;
+ 
+-  // Max recording duration: 10 minutes
+-  if (maxDurationTimeout) clearTimeout(maxDurationTimeout);
+-  maxDurationTimeout = setTimeout(() => {
+-    console.warn('Max recording duration reached (10 mins). Stopping.');
+-    stopRecording();
+-  }, 10 * 60 * 1000);
++  const MAX_RECORDING_MS = 10 * 60 * 1000;
+ 
+   recorder.ondataavailable = (e) => {
+     // Task 3: Push ONLY valid chunks (size > 0), maintain order, no duplicates
+-    if (e.data && e.data.size > 0 && activeSessionId && !isStopping) {
++    // REMOVED !isStopping check: We MUST capture the final chunk even if we are in the process of stopping.
++    if (e.data && e.data.size > 0 && activeSessionId) {
++      console.log(`[SV][CHUNK] Received chunk: ${e.data.size} bytes for session: ${activeSessionId}`);
+       // Capture first 2 seconds for instant preview
+       if (!previewCaptured) {
+         previewChunks.push(e.data);
+@@ -573,6 +571,13 @@ function startMediaRecorder(stream: MediaStream) {
+           });
+       }
+     }
++
++    // Authoritative Limit Enforcement (Checked AFTER processing chunk)
++    const elapsedMs = performance.now() - recordingStartTime;
++    if (elapsedMs >= MAX_RECORDING_MS && !isStopping) {
++      console.warn(`[SV][LIMIT] Recording reached ${Math.floor(elapsedMs / 1000)}s. Triggering stop.`);
++      stopRecording();
++    }
+   };
+ 
+   recorder.onstop = async () => {
+@@ -591,12 +596,15 @@ function startMediaRecorder(stream: MediaStream) {
+       await chrome.runtime.sendMessage({ 
+         type: 'SET_SESSION_STATUS', 
+         sessionId: activeSessionId, 
+-        status: 'uploading' 
++        status: 'finalizing' 
+       });
+       await chrome.runtime.sendMessage({ 
+         type: 'SAVE_SESSION_METADATA', 
+         sessionId: activeSessionId, 
+-        metadata: { processingStartedAt: Date.now() } 
++        metadata: { 
++          stoppedAt: Date.now(),
++          processingStartedAt: Date.now() 
++        } 
+       });
+     }
+ 
+@@ -605,85 +613,14 @@ function startMediaRecorder(stream: MediaStream) {
+       maxDurationTimeout = null;
+     }
+ 
+-    // Calculate and save duration
+-    let duration = 0;
+-    if (activeSessionId) {
+-      const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
+-      duration = meta?.startedAt ? Math.floor((Date.now() - meta.startedAt) / 1000) : 0;
+-      await chrome.runtime.sendMessage({ 
+-        type: 'SAVE_SESSION_METADATA', 
+-        sessionId: activeSessionId, 
+-        metadata: { duration } 
+-      });
+-    }
+-
+-    // Finalize recording and upload
++    // Step 2: Critical Path (Duration calculation + Final Blob preparation)
+     const chunks = await getChunks(activeSessionId!);
+     const blob = new Blob(chunks, { type: 'video/webm' });
+     
+-    // Create preview blob from first ~2 seconds
+-    const previewBlob = previewChunks.length > 0 ? new Blob(previewChunks, { type: 'video/webm' }) : null;
+-    previewChunks = []; // Clear for next time
++    // Captured chunks for preview generation (moved to enrichment)
++    const previewBlobForEnrichment = previewChunks.length > 0 ? new Blob(previewChunks, { type: 'video/webm' }) : null;
++    previewChunks = []; 
+     previewCaptured = false;
+-    
+-    // Step 2: Background post-processing (Thumbnail + Preview + Backend Sync)
+-    // We do NOT await this to prevent loader delay
+-    (async () => {
+-      try {
+-        const thumbnailDataUrl = await generateThumbnail(blob);
+-        let previewUrl: string | undefined = undefined;
+-
+-        // Upload preview clip if captured
+-        if (previewBlob && activeAccount) {
+-          try {
+-             const driveRootFolderId = await chrome.runtime.sendMessage({ type: 'GET_WORKSPACE_FOLDER' });
+-             const previewFileId = await uploadFileSimple(previewBlob, `preview-${Date.now()}.webm`, activeAccount, driveRootFolderId);
+-             previewUrl = `https://drive.google.com/file/d/${previewFileId}/preview`;
+-          } catch (err) {
+-             console.warn('Preview upload failed:', err);
+-          }
+-        }
+-
+-        if (activeSessionId) {
+-          await chrome.runtime.sendMessage({ 
+-            type: 'SAVE_SESSION_METADATA', 
+-            sessionId: activeSessionId, 
+-            metadata: { 
+-              thumbnailUrl: thumbnailDataUrl,
+-              previewUrl: previewUrl
+-            } 
+-          });
+-          
+-          const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
+-          if (meta?.backendVideoId && offscreenUser?.accessToken) {
+-            const updateBody: any = {
+-                status: 'ready',
+-                thumbnailUrl: thumbnailDataUrl,
+-                duration: duration,
+-                sessionId: activeSessionId
+-            };
+-            if (previewUrl) updateBody.previewUrl = previewUrl;
+-
+-            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+-              method: 'PATCH',
+-              headers: { 
+-                'Content-Type': 'application/json',
+-                'Authorization': `Bearer ${offscreenUser.accessToken}`
+-              },
+-              body: JSON.stringify(updateBody)
+-            });
+-
+-            await chrome.runtime.sendMessage({
+-              type: 'SAVE_SESSION_METADATA',
+-              sessionId: activeSessionId,
+-              metadata: { backendSynced: true }
+-            });
+-          }
+-        }
+-      } catch (e) {
+-        console.warn('Background post-processing failed:', e);
+-      }
+-    })();
+ 
+     // Task 5 & 6: Clean up all tracks safely
+     const tracks = [
+@@ -708,37 +645,88 @@ function startMediaRecorder(stream: MediaStream) {
+ 
+     try {
+       let finalResult: { url: string; accountEmail: string } | null = null;
++      const stopTimePerf = performance.now();
++      const actualDurationMs = Math.floor(stopTimePerf - recordingStartTime);
+ 
+-      // 1. Try to finalize progressive upload if active
+-      if (progressiveEnabled && resumableUploadUrl && activeAccount) {
++      // 1. Critical Path: Finalize progressive upload
++      // Wait for all chunks to finish uploading before sending the final empty blob
++      await uploadQueue;
++      
++      // If we never successfully uploaded any chunks via progressive, we MUST use fallback
++      if (progressiveEnabled && resumableUploadUrl && activeAccount && uploadedBytes > 0) {
+         try {
++          // Sync final chunk (CRITICAL)
++          const empty = new Blob([], { type: 'video/webm' });
++          await uploadChunkWithRetry(resumableUploadUrl, empty, uploadedBytes, true);
++          const uploadCompleteAt = Date.now();
++          
++          const chunks = await getChunks(currentSessionId);
++          const finalBlob = new Blob(chunks, { type: 'video/webm' });
++          console.log(`[SV][FINALIZE] Session: ${currentSessionId}, Total Chunks: ${chunks.length}, Total Size: ${finalBlob.size}, Uploaded: ${uploadedBytes}`);
++
++          if (finalBlob.size === 0 && uploadedBytes === 0) {
++            throw new Error("Recording produced no data (0 bytes).");
++          }
++
+           const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
++          const duration = meta?.startedAt ? Math.floor((uploadCompleteAt - meta.startedAt) / 1000) : 0;
++          
+           let link = meta?.playerUrl;
+-
+           if (!link) {
+             const idToUse = meta?.encryptedFileId || activeFileId;
+             const titleToUse = meta?.title || sessionTitle || 'Recording';
+-            const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
+-            link = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
++            link = `https://screenvault-player.pages.dev/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
+           }
+ 
+-          // Finalize the upload in the background
+-          const empty = new Blob([], { type: 'video/webm' });
+-          await uploadChunkWithRetry(resumableUploadUrl, empty, uploadedBytes, true);
++          // Sync Backend Status to READY (CRITICAL)
++          if (meta?.backendVideoId && offscreenUser?.accessToken) {
++            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
++              method: 'PATCH',
++              headers: { 
++                'Content-Type': 'application/json',
++                'Authorization': `Bearer ${offscreenUser.accessToken}`
++              },
++              body: JSON.stringify({
++                status: 'ready',
++                duration,
++                actualDurationMs,
++                sessionId: activeSessionId
++              })
++            });
++          }
+           
+-          // SUCCESS: Send completion ONLY after final chunk is accepted
++          const backendFinalizedAt = Date.now();
++
++          // CRITICAL PATH COMPLETE: Show Link
+           chrome.runtime.sendMessage({ 
+             type: 'UPLOAD_COMPLETE', 
+             url: link,
+             account: activeAccount.email
+           } as OffscreenMessage);
+           
+-          await setSessionStatus(currentSessionId, 'ready');
++          const linkReadyAt = Date.now();
++
++          await chrome.runtime.sendMessage({ 
++            type: 'SAVE_SESSION_METADATA', 
++            sessionId: activeSessionId, 
++            metadata: { 
++              duration, 
++              actualDurationMs, 
++              uploadCompleteAt,
++              backendFinalizedAt,
++              linkReadyAt,
++              status: 'ready'
++            } 
++          });
++
++          // BACKGROUND: Start Enrichment
++          enrichSession(activeSessionId!, blob, previewBlobForEnrichment, activeAccount, duration, actualDurationMs);
++
+           await deleteSession(currentSessionId);
+           await deleteChunks(currentSessionId);
+-          return; // EXIT: Standard upload not needed
++          return; 
+         } catch (e) {
+-          console.debug('Progressive finalization failed, switching to standard upload fallback:', e);
++          console.debug('Progressive finalization failed, switching to fallback:', e);
+           resumableUploadUrl = null; 
+         }
+       }
+@@ -758,6 +746,7 @@ function startMediaRecorder(stream: MediaStream) {
+   };
+ 
+   chrome.runtime.sendMessage({ type: 'CAPTURE_STARTED' } as OffscreenMessage);
++  recordingStartTime = performance.now();
+   recorder.start(1000); // 1s chunks
+ }
+ 
+@@ -955,58 +944,10 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
+     const fileId = meta?.fileId || activeFileId;
+ 
+     if (fileId) {
+-      let isReady = false;
+-      for (let i = 0; i < 5; i++) {
+-        await new Promise(r => setTimeout(r, 2000));
+-        const token = await getFreshToken(account.id, false);
+-        isReady = await isFileReady(fileId, token);
+-        if (isReady) break;
+-      }
+-
+-      if (isReady) {
+-        await setSessionStatus(sessionId, 'ready');
+-        
+-        // Final backend update with thumbnail and title
+-        const token = await getFreshToken(account.id, false);
+-        const driveMeta = await getFileMetadata(fileId, token);
+-        const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
+-        
+-        if (meta?.backendVideoId) {
+-          try {
+-            // Priority: Keep locally generated thumbnail if available
+-            const finalUpdate: any = { 
+-              status: 'ready',
+-              title: sessionTitle,
+-              sessionId
+-            };
+-
+-            // Only use drive thumbnail if we don't already have one locally synced
+-            if (!meta.thumbnailUrl && driveMeta?.thumbnailLink) {
+-              finalUpdate.thumbnailUrl = driveMeta.thumbnailLink;
+-            }
+-
+-            // FIX: Direct fetch instead of safeFetch
+-            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+-              method: 'PATCH',
+-              headers: { 
+-                'Content-Type': 'application/json',
+-                'Authorization': `Bearer ${account.accessToken}`
+-              },
+-              body: JSON.stringify(finalUpdate)
+-            });
+-          } catch (err) {
+-            console.warn('Final metadata update failed:', err);
+-          }
+-        }
+-      }
++      // BACKGROUND: Enrichment (Thumbnail + Preview + Metadata)
++      enrichSession(sessionId, blob, null, account, meta?.duration || 0, meta?.actualDurationMs || 0);
+     }
+ 
+-    // Task 1: Cleanup on success
+-    await deleteChunks(sessionId);
+-    
+-    // NEW: Notify service worker to remove session metadata NOW that sync is done
+-    chrome.runtime.sendMessage({ type: 'DELETE_SESSION', sessionId });
+-
+     return result;
+   } catch (e: any) {
+     await setSessionStatus(sessionId, 'failed');
+@@ -1014,32 +955,22 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
+     const errorMsg = e instanceof Error ? e.message : String(e);
+     // NEW: Update backend on failure
+     chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId }).then(async (meta) => {
+-      if (meta?.backendVideoId && !meta.backendSynced) {
+-        const user = offscreenUser;
+-        if (user?.accessToken) {
+-          try {
+-            // FIX: Direct fetch instead of safeFetch to avoid storage access in offscreen context
+-            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+-              method: 'PATCH',
+-              headers: { 
+-                'Content-Type': 'application/json',
+-                'Authorization': `Bearer ${user.accessToken}`
+-              },
+-              body: JSON.stringify({ 
+-                status: 'failed',
+-                error: errorMsg,
+-                sessionId
+-              })
+-            });
+-            
+-            await chrome.runtime.sendMessage({
+-              type: "SAVE_SESSION_METADATA",
+-              sessionId,
+-              metadata: { backendSynced: true }
+-            });
+-          } catch (err) {
+-            console.warn('Backend failure update failed:', err);
+-          }
++      if (meta?.backendVideoId && offscreenUser?.accessToken) {
++        try {
++          await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
++            method: 'PATCH',
++            headers: { 
++              'Content-Type': 'application/json',
++              'Authorization': `Bearer ${offscreenUser.accessToken}`
++            },
++            body: JSON.stringify({ 
++              status: 'failed',
++              error: errorMsg,
++              sessionId
++            })
++          });
++        } catch (err) {
++          console.warn('Backend failure update failed:', err);
+         }
+       }
+     }).catch(() => {});
+@@ -1089,3 +1020,98 @@ async function syncAccountRootFolder(accountId: string, driveRootFolderId: strin
+     console.warn('Failed to sync account root folder to backend:', err);
+   }
+ }
++
++/**
++ * BACKGROUND ENRICHMENT
++ * Non-blocking tasks to enhance video metadata after it's confirmed playable.
++ */
++async function enrichSession(
++  sessionId: string, 
++  blob: Blob, 
++  previewBlob: Blob | null, 
++  account: StorageAccount,
++  duration: number,
++  actualDurationMs: number
++) {
++  try {
++    await chrome.runtime.sendMessage({ type: 'SET_SESSION_STATUS', sessionId, status: 'enriching' });
++    svLog("ENRICHMENT_START", { sessionId, timestamp: Date.now() });
++
++    // 1. Generate Thumbnail
++    let thumbnailUrl: string | undefined;
++    try {
++      thumbnailUrl = await generateThumbnail(blob);
++    } catch (err) {
++      console.warn('[ENRICH] Thumbnail failed:', err);
++    }
++    
++    // 2. Upload Preview Clip
++    let previewUrl: string | undefined;
++    if (previewBlob) {
++      try {
++        const driveRootFolderId = await chrome.runtime.sendMessage({ type: 'GET_WORKSPACE_FOLDER' });
++        const previewFileId = await uploadFileSimple(previewBlob, `preview-${Date.now()}.webm`, account, driveRootFolderId);
++        previewUrl = `https://drive.google.com/file/d/${previewFileId}/preview`;
++      } catch (err) {
++        console.warn('[ENRICH] Preview failed:', err);
++      }
++    }
++
++    // 3. Final Backend Patch (Polish)
++    const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
++    if (meta?.backendVideoId && offscreenUser?.accessToken) {
++      const updateBody: any = {
++        status: 'ready',
++        duration,
++        actualDurationMs
++      };
++      if (thumbnailUrl) updateBody.thumbnailUrl = thumbnailUrl;
++      if (previewUrl) updateBody.previewUrl = previewUrl;
++      if (sessionTitle) updateBody.title = sessionTitle;
++
++      await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
++        method: 'PATCH',
++        headers: { 
++          'Content-Type': 'application/json',
++          'Authorization': `Bearer ${offscreenUser.accessToken}`
++        },
++        body: JSON.stringify(updateBody)
++      });
++    }
++
++    await chrome.runtime.sendMessage({ 
++      type: 'SAVE_SESSION_METADATA', 
++      sessionId, 
++      metadata: { 
++        thumbnailUrl,
++        previewUrl,
++        status: 'ready',
++        enrichmentFinishedAt: Date.now()
++      } 
++    });
++    
++    // 4. Latency Auditing
++    const finalMeta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
++    const latency = {
++      stopToUploadComplete: (finalMeta.uploadCompleteAt || 0) - (finalMeta.stoppedAt || 0),
++      stopToBackendFinalized: (finalMeta.backendFinalizedAt || 0) - (finalMeta.stoppedAt || 0),
++      stopToLinkReady: (finalMeta.linkReadyAt || 0) - (finalMeta.stoppedAt || 0),
++      stopToEnrichmentFinished: (finalMeta.enrichmentFinishedAt || 0) - (finalMeta.stoppedAt || 0),
++      totalDuration: finalMeta.actualDurationMs || 0
++    };
++
++    svLog("ENRICHMENT_SUCCESS", { 
++      sessionId, 
++      latency,
++      timestamp: Date.now() 
++    });
++    
++    // Cleanup local chunks now that everything is synced
++    await deleteChunks(sessionId).catch(() => {});
++    chrome.runtime.sendMessage({ type: 'DELETE_SESSION', sessionId });
++
++  } catch (err) {
++    console.error('[ENRICH] Failed:', err);
++    await chrome.runtime.sendMessage({ type: 'SET_SESSION_STATUS', sessionId, status: 'failed_enrichment' });
++  }
++}
+diff --git a/screenvault-extension/src/popup.ts b/screenvault-extension/src/popup.ts
+index 2efe1f9..c049016 100644
+--- a/screenvault-extension/src/popup.ts
++++ b/screenvault-extension/src/popup.ts
+@@ -233,18 +233,37 @@ function renderState(newState: AppState) {
+       if (state.startedAt) startLocalTimer(state.startedAt);
+       break;
+     case "uploading":
++    case "finalizing":
+       showScreen(screenUploading);
+-      uploadAccountLabel.textContent = `Uploading to ${state.uploadAccount || "Drive"}...`;
+-
+-      const realProgress = Math.floor(state.uploadProgress || 0);
+-      progressFill.style.width = `${realProgress}%`;
+-      progressPct.textContent = `${realProgress}%`;
++      if (state.status === "finalizing") {
++        uploadAccountLabel.textContent = "Finalizing video...";
++        progressFill.style.width = "100%";
++        progressPct.textContent = "100%";
++      } else {
++        uploadAccountLabel.textContent = `Uploading to ${state.uploadAccount || "Drive"}...`;
++        const realProgress = Math.floor(state.uploadProgress || 0);
++        progressFill.style.width = `${realProgress}%`;
++        progressPct.textContent = `${realProgress}%`;
++      }
+       break;
+     case "ready":
++    case "enriching":
++    case "failed_enrichment":
+       showScreen(screenSuccess);
+-      successMeta.textContent = `Uploaded to ${state.uploadAccount}`;
++      if (state.status === "enriching") {
++        successMeta.textContent = `Uploaded! Polishing thumbnail & preview...`;
++        successMeta.style.color = "var(--blue)";
++      } else if (state.status === "failed_enrichment") {
++        successMeta.textContent = `Uploaded (Enrichment failed)`;
++        successMeta.style.color = "var(--orange)";
++      } else {
++        successMeta.textContent = `Uploaded to ${state.uploadAccount}`;
++        successMeta.style.color = "var(--text-secondary)";
++      }
++
+       // Auto-copy only on transition to success or if URL improves
+-      if (state.uploadUrl && (prevStatus !== "ready" || state.uploadUrl !== lastAutoCopiedUrl)) {
++      const isActuallyReady = state.status === "ready" || state.status === "enriching" || state.status === "failed_enrichment";
++      if (isActuallyReady && state.uploadUrl && (prevStatus !== "ready" && prevStatus !== "enriching" || state.uploadUrl !== lastAutoCopiedUrl)) {
+         svLog("POPUP_LINK_AUTO_COPY", {
+           url: state.uploadUrl,
+           prevStatus,
+diff --git a/screenvault-extension/src/service-worker.ts b/screenvault-extension/src/service-worker.ts
+index 9b0be1b..5ae0b1a 100644
+--- a/screenvault-extension/src/service-worker.ts
++++ b/screenvault-extension/src/service-worker.ts
+@@ -106,6 +106,59 @@ async function validateToken(account: StorageAccount): Promise<string> {
+   throw new Error("Account needs reconnection");
+ }
+ 
++async function trySilentRefresh(account: StorageAccount): Promise<StorageAccount> {
++  try {
++    svLog("TOKEN_REFRESH_STARTED", { accountEmail: account.email });
++    const manifest = chrome.runtime.getManifest();
++    const clientId = manifest.oauth2?.client_id;
++    const scopes = manifest.oauth2?.scopes?.join(" ");
++    const redirectUri = chrome.identity.getRedirectURL();
++
++    const authUrl =
++      `https://accounts.google.com/o/oauth2/v2/auth?` +
++      `client_id=${clientId}&` +
++      `response_type=token&` +
++      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
++      `scope=${encodeURIComponent(scopes!)}&` +
++      `login_hint=${encodeURIComponent(account.email)}`;
++
++    const responseUrl = await chrome.identity.launchWebAuthFlow({
++      url: authUrl,
++      interactive: false,
++    });
++
++    if (!responseUrl) throw new Error("Silent refresh failed: No response URL");
++
++    const params = new URLSearchParams(responseUrl.split("#")[1]);
++    const token = params.get("access_token");
++
++    if (!token) throw new Error("Silent refresh failed: No access token");
++
++    svLog("TOKEN_REFRESH_SUCCESS", { accountEmail: account.email });
++
++    const updatedAccount = {
++      ...account,
++      accessToken: token,
++      expiresAt: Date.now() + 3500 * 1000,
++      invalid: false,
++      invalidReason: undefined
++    };
++
++    accounts = accounts.map(a => a.id === account.id ? updatedAccount : a);
++    await chrome.storage.local.set({ sv_accounts: accounts });
++    
++    chrome.runtime.sendMessage({
++      type: "ACCOUNTS_UPDATE",
++      accounts,
++    }).catch(() => {});
++
++    return updatedAccount;
++  } catch (err: any) {
++    svLog("TOKEN_REFRESH_FAILED", { accountEmail: account.email, error: err.message });
++    throw err;
++  }
++}
++
+ async function selectBestAccount(): Promise<StorageAccount | null> {
+   if (accounts.length === 0) return null;
+ 
+@@ -118,13 +171,16 @@ async function selectBestAccount(): Promise<StorageAccount | null> {
+     if (!acc.lastQuotaUpdate || now - acc.lastQuotaUpdate > FIVE_MINUTES) {
+       try {
+         const token = acc.accessToken;
+-        const quota = await getQuota(token);
+-        accounts[i] = {
+-          ...acc,
+-          quotaTotal: quota.limit,
+-          quotaUsed: quota.usage,
+-          lastQuotaUpdate: now,
+-        };
++        // Only try quota if not obviously expired to prevent unnecessary 401s
++        if (!acc.invalid && acc.expiresAt > now) {
++          const quota = await getQuota(token);
++          accounts[i] = {
++            ...acc,
++            quotaTotal: quota.limit,
++            quotaUsed: quota.usage,
++            lastQuotaUpdate: now,
++          };
++        }
+       } catch (err) {
+         console.warn(`Quota refresh failed for ${acc.email}:`, err);
+       }
+@@ -135,34 +191,35 @@ async function selectBestAccount(): Promise<StorageAccount | null> {
+   const data_accounts = { sv_accounts: accounts };
+   await chrome.storage.local.set(data_accounts);
+ 
+-  // Prioritize manually selected active account
+-  const validAccounts = accounts.filter((a) => !a.invalid);
+-  const activeAccount = validAccounts.find((a) => a.isActive);
+-  if (activeAccount) {
+-    console.log(`[SV][ACTIVE_ACCOUNT_SELECTED] Manually active: ${activeAccount.email}`);
+-    return activeAccount;
++  let candidate = accounts.find((a) => a.isActive);
++  if (!candidate && accounts.length > 0) {
++    candidate = [...accounts].sort((a, b) => {
++      const aSpace = (a.quotaTotal || 1) - (a.quotaUsed || 0);
++      const bSpace = (b.quotaTotal || 1) - (b.quotaUsed || 0);
++      const aRatio = aSpace / (a.quotaTotal || 1);
++      const bRatio = bSpace / (b.quotaTotal || 1);
++      if (Math.abs(aRatio - bRatio) < 0.02) {
++        return (a.uploadSuccessCount || 0) - (b.uploadSuccessCount || 0);
++      }
++      return bRatio - aRatio;
++    })[0];
+   }
+ 
+-  // Fallback: Sort by available space ratio (descending).
+-  const selected = [...validAccounts].sort((a, b) => {
+-    const aSpace = (a.quotaTotal || 1) - (a.quotaUsed || 0);
+-    const bSpace = (b.quotaTotal || 1) - (b.quotaUsed || 0);
+-
+-    const aRatio = aSpace / (a.quotaTotal || 1);
+-    const bRatio = bSpace / (b.quotaTotal || 1);
+-
+-    // Fairness: If free ratio difference is small (< 2%), rotate based on usage count
+-    if (Math.abs(aRatio - bRatio) < 0.02) {
+-      return (a.uploadSuccessCount || 0) - (b.uploadSuccessCount || 0);
++  if (candidate) {
++    if (candidate.invalid || candidate.expiresAt < now + 60000) {
++      try {
++        candidate = await trySilentRefresh(candidate);
++      } catch (e) {
++        const validAccounts = accounts.filter((a) => !a.invalid && a.expiresAt >= now);
++        candidate = validAccounts.find((a) => a.isActive) || validAccounts[0] || null;
++      }
+     }
++  }
+ 
+-    return bRatio - aRatio; // Higher ratio first
+-  })[0] || null;
+-
+-  if (selected) {
+-    console.log(`[SV][ACTIVE_ACCOUNT_SELECTED] Dynamic selection: ${selected.email}`);
++  if (candidate) {
++    console.log(`[SV][ACTIVE_ACCOUNT_SELECTED] Selection: ${candidate.email}`);
+   }
+-  return selected;
++  return candidate;
+ }
+ 
+ chrome.runtime.onInstalled.addListener(async () => {
+@@ -175,7 +232,10 @@ async function loadState() {
+   try {
+     const stored = await chrome.storage.local.get(["sv_state", "sv_accounts"]);
+     if (stored.sv_state) state = stored.sv_state as AppState;
+-    if (stored.sv_accounts) accounts = stored.sv_accounts as StorageAccount[];
++    if (stored.sv_accounts) {
++      accounts = stored.sv_accounts as StorageAccount[];
++      svLog("SESSION_REHYDRATED", { accountCount: accounts.length });
++    }
+ 
+     const { sv_sessions = {} } = await chrome.storage.local.get("sv_sessions");
+     for (const [sid, meta] of Object.entries(
+@@ -562,32 +622,41 @@ chrome.runtime.onMessage.addListener(
+       selectBestAccount()
+         .then(async (bestAccount) => {
+           if (bestAccount) {
+-            const token = bestAccount.accessToken;
+-            
+-            // Resolve workspace folder ID
+-            let folderId: string | undefined;
+-            try {
+-              const user = await getCurrentUser();
+-              if (user.workspaceId) {
+-                folderId = await getWorkspaceFolderId(bestAccount, user.workspaceId);
++            const doAllocate = async (account: StorageAccount) => {
++              let folderId: string | undefined;
++              try {
++                const user = await getCurrentUser();
++                if (user.workspaceId) {
++                  folderId = await getWorkspaceFolderId(account, user.workspaceId);
++                }
++              } catch (err) {
++                console.warn("Failed to resolve workspace folder for pre-allocation:", err);
+               }
+-            } catch (err) {
+-              console.warn("Failed to resolve workspace folder for pre-allocation:", err);
+-            }
++              return preAllocateDriveFile(account, account.accessToken, { folderId });
++            };
++
++            let prom = doAllocate(bestAccount).catch(async (err) => {
++              if (err.message.includes("401") || err.message.includes("Token expired")) {
++                svLog("PREALLOCATION_RETRY", { accountEmail: bestAccount.email });
++                updateState({ errorMessage: "Restoring your account..." });
++                try {
++                  const refreshed = await trySilentRefresh(bestAccount);
++                  updateState({ errorMessage: null });
++                  return await doAllocate(refreshed);
++                } catch (refreshErr) {
++                  await validateToken(bestAccount).catch(() => {});
++                  throw err;
++                }
++              }
++              throw err;
++            });
+ 
+-            const prom = preAllocateDriveFile(bestAccount, token, { folderId });
+             preAllocationMap.set("latest", prom);
+             prom
+               .then((data) => {
+                 sendResponse({ url: data.url });
+               })
+               .catch(async (err) => {
+-                if (
+-                  err.message.includes("401") ||
+-                  err.message.includes("Token expired")
+-                ) {
+-                  await validateToken(bestAccount).catch(() => {});
+-                }
+                 sendResponse({ error: err.message });
+                 preAllocationMap.delete("latest");
+               });
+@@ -616,11 +685,19 @@ chrome.runtime.onMessage.addListener(
+     } else if (msg.type === "SET_SESSION_STATUS") {
+       const metaUpdate: Partial<SessionMetadata> = { status: msg.status };
+       saveSessionMetadata(msg.sessionId, metaUpdate);
+-      if (msg.status === "uploading") {
++      
++      // Keep in processing set during all active processing states
++      const activeStates = ["uploading", "finalizing", "enriching"];
++      if (activeStates.includes(msg.status)) {
+         processingSessions.add(msg.sessionId);
+       } else {
+         processingSessions.delete(msg.sessionId);
+       }
++      
++      // Update global app state if this is the active session
++      if (state.sessionId === msg.sessionId) {
++        updateState({ status: msg.status as AppStatus });
++      }
+     } else if (msg.type === "SAVE_SESSION_METADATA") {
+       saveSessionMetadata(msg.sessionId, msg.metadata);
+     } else if (msg.type === "REMOVE_SESSION_METADATA") {
+@@ -926,28 +1003,40 @@ async function startRecording(target: AppState["target"]) {
+ 
+     if (!allocationProm) {
+       console.warn("No pre-allocation found, starting fresh allocation");
+-      const stored = await chrome.storage.local.get([
+-        "sv_accounts",
+-      ]);
+-      const sv_accounts = (stored.sv_accounts || []) as StorageAccount[];
+-      const validAccounts = sv_accounts.filter((a) => !a.invalid);
+-      let activeAccount = validAccounts.find((a) => a.isActive) || validAccounts[0];
++      let activeAccount = await selectBestAccount();
+ 
+       if (!activeAccount) {
+         throw new Error("No valid account available for recording.");
+       }
+ 
+-      const token = activeAccount.accessToken;
+-      let folderId: string | undefined;
+-      try {
+-        const user = await getCurrentUser();
+-        if (user.workspaceId) {
+-          folderId = await getWorkspaceFolderId(activeAccount, user.workspaceId);
++      const doAllocate = async (account: StorageAccount) => {
++        let folderId: string | undefined;
++        try {
++          const user = await getCurrentUser();
++          if (user.workspaceId) {
++            folderId = await getWorkspaceFolderId(account, user.workspaceId);
++          }
++        } catch (err) {
++          console.warn("Failed to resolve workspace folder:", err);
+         }
+-      } catch (err) {
+-        console.warn("Failed to resolve workspace folder:", err);
+-      }
+-      allocationProm = preAllocateDriveFile(activeAccount, token, { folderId });
++        return preAllocateDriveFile(account, account.accessToken, { folderId });
++      };
++
++      allocationProm = doAllocate(activeAccount).catch(async (err) => {
++        if (err.message.includes('Token expired') || err.message.includes('401')) {
++          svLog("PREALLOCATION_RETRY", { accountEmail: activeAccount!.email });
++          updateState({ errorMessage: "Restoring your account..." });
++          try {
++            activeAccount = await trySilentRefresh(activeAccount!);
++            updateState({ errorMessage: null });
++            return await doAllocate(activeAccount!);
++          } catch (refreshErr) {
++            await validateToken(activeAccount!).catch(() => {});
++            throw err;
++          }
++        }
++        throw err;
++      });
+     }
+ 
+     preAllocationMap.set(sessionId, allocationProm);
+@@ -1122,6 +1211,7 @@ function stopRecording() {
+           const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
+           const encodedTitle = encodeURIComponent(title);
+           url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodedTitle}`;
++          if (sessionId) url += `&sid=${sessionId}`;
+           console.log(`[SV][BACKEND_AUTHORITY] Forced early link generated: ${url}`);
+         }
+         svLog("EARLY_LINK_FORCED_READY", { 
+diff --git a/screenvault-extension/src/types.ts b/screenvault-extension/src/types.ts
+index 6a257fb..ef3ae27 100644
+--- a/screenvault-extension/src/types.ts
++++ b/screenvault-extension/src/types.ts
+@@ -4,7 +4,10 @@ export type AppStatus =
+   | 'idle'
+   | 'recording'
+   | 'uploading'
++  | 'finalizing'
+   | 'ready'
++  | 'enriching'
++  | 'failed_enrichment'
+   | 'failed'
+   | 'error';
+   
+@@ -20,10 +23,21 @@ export interface SessionMetadata {
+   fileId: string;
+   title?: string;
+   accountId: string;
++  
++  // Telemetry
+   startedAt: number;
+-  status: 'recording' | 'uploading' | 'ready' | 'failed';
++  stoppedAt?: number;
++  uploadStartedAt?: number;
++  uploadCompleteAt?: number;
++  backendFinalizedAt?: number;
++  linkReadyAt?: number;
++  enrichmentFinishedAt?: number;
++
++  status: 'recording' | 'uploading' | 'finalizing' | 'ready' | 'enriching' | 'failed_enrichment' | 'error';
++  
+   processingStartedAt?: number;
+   duration?: number;
++  actualDurationMs?: number;
+   backendVideoId?: string;
+   previewUrl?: string;
+   playerUrl?: string;
+@@ -93,7 +107,8 @@ export interface BackendVideo {
+   webViewLink?: string;
+   accountEmail?: string;
+   account_email?: string; // Legacy snake_case from worker
+-  status: string;
++  status: 'uploading' | 'finalizing' | 'ready' | 'enriching' | 'failed' | 'deleted';
++  actualDurationMs?: number;
+   ownerId: string;
+   createdAt: number;
+ }
+diff --git a/screenvault-extension/worker/index.ts b/screenvault-extension/worker/index.ts
+index fc28286..38aa76e 100644
+--- a/screenvault-extension/worker/index.ts
++++ b/screenvault-extension/worker/index.ts
+@@ -63,7 +63,7 @@ export default {
+     console.log(`[SV][FETCH_START] Decrypted: ${isDecrypted}, ID: ${fileId?.slice(0, 8)}..., Session: ${sessionId || 'none'}`);
+ 
+     // Resolve videoId and workspaceId for linkage
+-    const video = (await env.DB.prepare('SELECT id, title, workspaceId, ownerId FROM videos WHERE fileId = ? OR encryptedFileId = ?')
++    const video = (await env.DB.prepare('SELECT id, title, workspaceId, ownerId, actualDurationMs FROM videos WHERE fileId = ? OR encryptedFileId = ?')
+       .bind(fileId, rawEncryptedId)
+       .first()) as any;
+ 
+@@ -85,7 +85,10 @@ export default {
+     // 2. Metadata Route (Resolves video title from DB or generates a fallback)
+     if (url.pathname === "/meta") {
+       if (video && video.title) {
+-        return new Response(JSON.stringify({ name: video.title }), {
++        return new Response(JSON.stringify({ 
++          name: video.title, 
++          actualDurationMs: video.actualDurationMs 
++        }), {
+           headers: { ...corsHeaders, "Content-Type": "application/json" }
+         });
+       }
+@@ -101,7 +104,8 @@ export default {
+         headers: {
+           ...corsHeaders,
+           "Accept-Ranges": "bytes",
+-          "Content-Type": "video/webm"
++          "Content-Type": "video/webm",
++          "X-SV-Version": "2.1-bypass-hardened"
+         }
+       });
+     }
+@@ -124,28 +128,54 @@ export default {
+       };
+ 
+       // Public capability-based streaming via standard UC link with export=download for better reliability
+-      let driveUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+-      let driveRes = await fetch(driveUrl, fetchOptions);
++      const driveUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
++      
++      console.log(`[SV][DRIVE_FETCH] ID: ${fileId?.slice(0, 8)}..., Range: ${rangeHeader || 'none'}`);
+ 
+-      // Handle Virus Scan Warning (Drive returns 200 with HTML containing a confirm token)
++      // 1. Initial check (without Range header) to handle potential Virus Scan Warning
++      let driveRes = await fetch(driveUrl);
+       const contentType = driveRes.headers.get("Content-Type") || "";
++
++      // Create a clean response with required streaming headers
++      const responseHeaders = new Headers(corsHeaders);
++      responseHeaders.set("Content-Type", "video/webm");
++      responseHeaders.set("Accept-Ranges", "bytes");
++
+       if (driveRes.ok && contentType.includes("text/html")) {
+           const driveResClone = driveRes.clone();
+           const html = await driveRes.text();
+-          const confirmMatch = html.match(/confirm=([a-zA-Z0-9_]+)/);
++          
++          const confirmMatch = html.match(/confirm=([a-zA-Z0-9_]+)/) || 
++                               html.match(/name=['"]confirm['"]\s+value=['"]([a-zA-Z0-9_]+)['"]/) ||
++                               html.match(/value=['"]([a-zA-Z0-9_]+)['"]\s+name=['"]confirm['"]/);
++          
++          const uuidMatch = html.match(/name=['"]uuid['"]\s+value=['"]([a-z0-9-]+)['"]/) ||
++                            html.match(/value=['"]([a-z0-9-]+)['"]\s+name=['"]uuid['"]/);
++
+           if (confirmMatch) {
+-              console.log(`[SV][DRIVE] Virus scan warning detected, bypassing with token: ${confirmMatch[1]}`);
+-              driveRes = await fetch(`${driveUrl}&confirm=${confirmMatch[1]}`, fetchOptions);
++              const confirmToken = confirmMatch[1];
++              const uuidToken = uuidMatch ? uuidMatch[1] : null;
++              
++              console.log(`[SV][DRIVE_BYPASS_ATTEMPT] fileId: ${fileId}, confirmToken: ${confirmToken}, uuidToken: ${uuidToken}`);
++              
++              // Use usercontent domain for bypass - much more reliable for streaming
++              let bypassUrl = `https://drive.usercontent.google.com/download?id=${fileId}&confirm=${confirmToken}&export=download`;
++              if (uuidToken) bypassUrl += `&uuid=${uuidToken}`;
++
++              // Final fetch WITH Range header
++              driveRes = await fetch(bypassUrl, fetchOptions);
+           } else {
+-              console.warn(`[SV][DRIVE] Received HTML but no confirm token found. Returning original response.`);
+               driveRes = driveResClone;
+           }
++      } else if (rangeHeader && driveRes.status === 200) {
++          // If first fetch was a full GET (200) but browser wants a Range (206), re-fetch
++          driveRes = await fetch(driveUrl, fetchOptions);
+       }
+ 
+       console.log(`[SV][DRIVE_RES] Status: ${driveRes.status}, Type: ${contentType}, Length: ${driveRes.headers.get("Content-Length")}`);
+ 
+       if (!driveRes.ok && driveRes.status !== 206) {
+-        console.error(`[SV][DRIVE_FETCH_FAILED] Status: ${driveRes.status} for ID: ${fileId?.slice(0, 8)}...`);
++        console.error(`[SV][DRIVE_FETCH_FAILED] Status: ${driveRes.status}, Range: ${rangeHeader}`);
+         
+         let eventType = 'playback_failed';
+         let errorCode = 'PROXY_FETCH_FAILED';
+@@ -156,16 +186,14 @@ export default {
+         } else if (driveRes.status === 404) {
+             eventType = 'video_not_found';
+             errorCode = 'DRIVE_404_NOT_FOUND';
++        } else if (driveRes.status === 416) {
++            errorCode = 'DRIVE_416_RANGE_NOT_SATISFIABLE';
+         }
+ 
+         await recordPlaybackEvent(env, {
+           type: eventType,
+           ...commonMeta,
+-          metadata: { 
+-            errorCode, 
+-            status: driveRes.status,
+-            encryptedFileId: rawEncryptedId?.slice(0, 8) + '...'
+-          }
++          metadata: { errorCode, status: driveRes.status, range: rangeHeader }
+         }, { dedupe: true });
+ 
+         return new Response(`Upstream failure: ${driveRes.status}`, { 
+@@ -174,11 +202,6 @@ export default {
+         });
+       }
+ 
+-      // Create a clean response with required streaming headers
+-      const responseHeaders = new Headers(corsHeaders);
+-      responseHeaders.set("Content-Type", "video/webm");
+-      responseHeaders.set("Accept-Ranges", "bytes");
+-
+       // Pass through critical streaming headers from upstream
+       const headersToPass = ["Content-Range", "Content-Length", "Accept-Ranges"];
+       headersToPass.forEach(h => {
+@@ -262,23 +285,28 @@ async function recordPlaybackEvent(env: any, data: {
+ 
+     const id = crypto.randomUUID();
+     const now = Date.now();
++    const metadataStr = JSON.stringify(data.metadata || {});
+     
++    // Ensure we are binding strings or nulls to the correct columns
++    // Table schema: id (0), type (1), userId (2), workspaceId (3), videoId (4), metadata (5), createdAt (6), sessionId (7)
++    const bindValues = [
++      id, 
++      String(data.type), 
++      String(data.userId || 'anonymous'), 
++      String(data.workspaceId || 'public'), 
++      data.videoId ? String(data.videoId) : null, 
++      metadataStr, 
++      now,
++      data.sessionId ? String(data.sessionId) : null, 
++    ];
++
+     await env.DB.prepare(
+-      'INSERT INTO metrics_events (id, type, userId, workspaceId, videoId, sessionId, metadata, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
++      'INSERT INTO metrics_events (id, type, userId, workspaceId, videoId, metadata, createdAt, sessionId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+     )
+-      .bind(
+-        id, 
+-        data.type, 
+-        data.userId || 'anonymous', 
+-        data.workspaceId || 'public', 
+-        data.videoId || null, 
+-        data.sessionId || null, 
+-        JSON.stringify(data.metadata || {}), 
+-        now
+-      )
++      .bind(...bindValues)
+       .run();
+-  } catch (e) {
+-    console.error('Failed to record playback event:', e);
++  } catch (e: any) {
++    console.error('Failed to record playback event:', e.message, JSON.stringify(data));
+   }
+ }
+ 
+diff --git a/screenvault-extension/worker/wrangler.toml b/screenvault-extension/worker/wrangler.toml
+deleted file mode 100644
+index c18ec90..0000000
+--- a/screenvault-extension/worker/wrangler.toml
++++ /dev/null
+@@ -1,11 +0,0 @@
+-name = "screenvault-proxy"
+-main = "index.ts"
+-compatibility_date = "2024-04-15"
+-
+-[observability]
+-enabled = true
+-
+-[[d1_databases]]
+-binding = "DB"
+-database_name = "screenvault-db"
+-database_id = "80df44f9-5aa6-44bd-9c5f-42f98023b285"

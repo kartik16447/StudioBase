@@ -26,6 +26,7 @@ let previewCaptured = false;
 let isStopping = false;
 let isRecording = false;
 let maxDurationTimeout: any = null;
+let recordingStartTime: number = 0;
 
 // Passed from service worker via message
 let offscreenUser: BackendUser | null = null;
@@ -442,6 +443,7 @@ function startMediaRecorder(stream: MediaStream) {
   if (isRecording) return;
   isRecording = true;
   isStopping = false;
+  let hasFinishedChunkProcessing = false;
 
   const preferredCodec = 'video/webm;codecs=vp8,opus';
   const fallbackCodec = 'video/webm';
@@ -513,16 +515,17 @@ function startMediaRecorder(stream: MediaStream) {
   let chunkCount = 0;
   let lastChunkData: Blob | null = null;
 
-  // Max recording duration: 10 minutes
-  if (maxDurationTimeout) clearTimeout(maxDurationTimeout);
-  maxDurationTimeout = setTimeout(() => {
-    console.warn('Max recording duration reached (10 mins). Stopping.');
-    stopRecording();
-  }, 10 * 60 * 1000);
+  const MAX_RECORDING_MS = 10 * 60 * 1000;
 
   recorder.ondataavailable = (e) => {
     // Task 3: Push ONLY valid chunks (size > 0), maintain order, no duplicates
-    if (e.data && e.data.size > 0 && activeSessionId && !isStopping) {
+    // REMOVED !isStopping check: We MUST capture the final chunk even if we are in the process of stopping.
+    if (hasFinishedChunkProcessing) {
+      svLog("LATE_CHUNK_IGNORED", { sessionId: activeSessionId, size: e?.data?.size, timestamp: Date.now() });
+      return;
+    }
+    if (e.data && e.data.size > 0 && activeSessionId) {
+      console.log(`[SV][CHUNK] Received chunk: ${e.data.size} bytes for session: ${activeSessionId}`);
       // Capture first 2 seconds for instant preview
       if (!previewCaptured) {
         previewChunks.push(e.data);
@@ -573,117 +576,64 @@ function startMediaRecorder(stream: MediaStream) {
           });
       }
     }
+
+    // Authoritative Limit Enforcement (Checked AFTER processing chunk)
+    const elapsedMs = performance.now() - recordingStartTime;
+    if (elapsedMs >= MAX_RECORDING_MS && !isStopping) {
+      console.warn(`[SV][LIMIT] Recording reached ${Math.floor(elapsedMs / 1000)}s. Triggering stop.`);
+      stopRecording();
+    }
   };
 
-  recorder.onstop = async () => {
-    // Task 4: Guard against multiple finalizing calls
-    if (!isRecording) return;
-    isRecording = false;
-    isStopping = true;
+    recorder.onstop = async () => {
+      const stopTimePerf = performance.now();
+      const actualDurationMs = Math.floor(stopTimePerf - recordingStartTime);
+      const durationSeconds = Math.floor(actualDurationMs / 1000);
 
-    svLog("OFFSCREEN_ONSTOP_TRIGGERED", {
-      sessionId: activeSessionId,
-      fileId: activeFileId,
-      timestamp: Date.now()
-    });
+      hasFinishedChunkProcessing = true;
+      // Task 4: Guard against multiple finalizing calls
+      if (!isRecording) return;
+      isRecording = false;
+      isStopping = true;
 
-    if (activeSessionId) {
-      await chrome.runtime.sendMessage({ 
-        type: 'SET_SESSION_STATUS', 
-        sessionId: activeSessionId, 
-        status: 'uploading' 
+      svLog("OFFSCREEN_ONSTOP_TRIGGERED", {
+        sessionId: activeSessionId,
+        fileId: activeFileId,
+        actualDurationMs,
+        timestamp: Date.now()
       });
-      await chrome.runtime.sendMessage({ 
-        type: 'SAVE_SESSION_METADATA', 
-        sessionId: activeSessionId, 
-        metadata: { processingStartedAt: Date.now() } 
-      });
-    }
+
+      if (activeSessionId) {
+        await chrome.runtime.sendMessage({ 
+          type: 'SET_SESSION_STATUS', 
+          sessionId: activeSessionId, 
+          status: 'finalizing' 
+        });
+        await chrome.runtime.sendMessage({ 
+          type: 'SAVE_SESSION_METADATA', 
+          sessionId: activeSessionId, 
+          metadata: { 
+            stoppedAt: Date.now(),
+            actualDurationMs,
+            duration: durationSeconds,
+            processingStartedAt: Date.now() 
+          } 
+        });
+      }
 
     if (maxDurationTimeout) {
       clearTimeout(maxDurationTimeout);
       maxDurationTimeout = null;
     }
 
-    // Calculate and save duration
-    let duration = 0;
-    if (activeSessionId) {
-      const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
-      duration = meta?.startedAt ? Math.floor((Date.now() - meta.startedAt) / 1000) : 0;
-      await chrome.runtime.sendMessage({ 
-        type: 'SAVE_SESSION_METADATA', 
-        sessionId: activeSessionId, 
-        metadata: { duration } 
-      });
-    }
-
-    // Finalize recording and upload
+    // Step 2: Critical Path (Duration calculation + Final Blob preparation)
     const chunks = await getChunks(activeSessionId!);
     const blob = new Blob(chunks, { type: 'video/webm' });
     
-    // Create preview blob from first ~2 seconds
-    const previewBlob = previewChunks.length > 0 ? new Blob(previewChunks, { type: 'video/webm' }) : null;
-    previewChunks = []; // Clear for next time
+    // Captured chunks for preview generation (moved to enrichment)
+    const previewBlobForEnrichment = previewChunks.length > 0 ? new Blob(previewChunks, { type: 'video/webm' }) : null;
+    previewChunks = []; 
     previewCaptured = false;
-    
-    // Step 2: Background post-processing (Thumbnail + Preview + Backend Sync)
-    // We do NOT await this to prevent loader delay
-    (async () => {
-      try {
-        const thumbnailDataUrl = await generateThumbnail(blob);
-        let previewUrl: string | undefined = undefined;
-
-        // Upload preview clip if captured
-        if (previewBlob && activeAccount) {
-          try {
-             const driveRootFolderId = await chrome.runtime.sendMessage({ type: 'GET_WORKSPACE_FOLDER' });
-             const previewFileId = await uploadFileSimple(previewBlob, `preview-${Date.now()}.webm`, activeAccount, driveRootFolderId);
-             previewUrl = `https://drive.google.com/file/d/${previewFileId}/preview`;
-          } catch (err) {
-             console.warn('Preview upload failed:', err);
-          }
-        }
-
-        if (activeSessionId) {
-          await chrome.runtime.sendMessage({ 
-            type: 'SAVE_SESSION_METADATA', 
-            sessionId: activeSessionId, 
-            metadata: { 
-              thumbnailUrl: thumbnailDataUrl,
-              previewUrl: previewUrl
-            } 
-          });
-          
-          const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
-          if (meta?.backendVideoId && offscreenUser?.accessToken) {
-            const updateBody: any = {
-                status: 'ready',
-                thumbnailUrl: thumbnailDataUrl,
-                duration: duration,
-                sessionId: activeSessionId
-            };
-            if (previewUrl) updateBody.previewUrl = previewUrl;
-
-            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
-              method: 'PATCH',
-              headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${offscreenUser.accessToken}`
-              },
-              body: JSON.stringify(updateBody)
-            });
-
-            await chrome.runtime.sendMessage({
-              type: 'SAVE_SESSION_METADATA',
-              sessionId: activeSessionId,
-              metadata: { backendSynced: true }
-            });
-          }
-        }
-      } catch (e) {
-        console.warn('Background post-processing failed:', e);
-      }
-    })();
 
     // Task 5 & 6: Clean up all tracks safely
     const tracks = [
@@ -708,37 +658,89 @@ function startMediaRecorder(stream: MediaStream) {
 
     try {
       let finalResult: { url: string; accountEmail: string } | null = null;
+      const stopTimePerf = performance.now();
+      const actualDurationMs = Math.floor(stopTimePerf - recordingStartTime);
 
-      // 1. Try to finalize progressive upload if active
-      if (progressiveEnabled && resumableUploadUrl && activeAccount) {
+      // 1. Critical Path: Finalize progressive upload
+      // Wait for all chunks to finish uploading before sending the final empty blob
+      await uploadQueue;
+      
+      // If we never successfully uploaded any chunks via progressive, we MUST use fallback
+      if (progressiveEnabled && resumableUploadUrl && activeAccount && uploadedBytes > 0) {
         try {
-          const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
-          let link = meta?.playerUrl;
+          // Sync final chunk (CRITICAL)
+          const empty = new Blob([], { type: 'video/webm' });
+          await uploadChunkWithRetry(resumableUploadUrl, empty, uploadedBytes, true);
+          const uploadCompleteAt = Date.now();
+          
+          const chunks = await getChunks(currentSessionId);
+          const finalBlob = new Blob(chunks, { type: 'video/webm' });
+          console.log(`[SV][FINALIZE] Session: ${currentSessionId}, Total Chunks: ${chunks.length}, Total Size: ${finalBlob.size}, Uploaded: ${uploadedBytes}`);
 
+          if (finalBlob.size === 0 && uploadedBytes === 0) {
+            throw new Error("Recording produced no data (0 bytes).");
+          }
+
+          const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
+          const duration = meta?.duration || durationSeconds;
+          const finalActualDurationMs = meta?.actualDurationMs || actualDurationMs;
+          
+          let link = meta?.playerUrl;
           if (!link) {
             const idToUse = meta?.encryptedFileId || activeFileId;
             const titleToUse = meta?.title || sessionTitle || 'Recording';
-            const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
-            link = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
+            link = `https://screenvault-player.pages.dev/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
           }
 
-          // Finalize the upload in the background
-          const empty = new Blob([], { type: 'video/webm' });
-          await uploadChunkWithRetry(resumableUploadUrl, empty, uploadedBytes, true);
+          // Sync Backend Status to READY (CRITICAL)
+          if (meta?.backendVideoId && offscreenUser?.accessToken) {
+            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+              method: 'PATCH',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${offscreenUser.accessToken}`
+              },
+              body: JSON.stringify({
+                status: 'ready',
+                duration,
+                actualDurationMs: finalActualDurationMs,
+                sessionId: activeSessionId
+              })
+            });
+          }
           
-          // SUCCESS: Send completion ONLY after final chunk is accepted
+          const backendFinalizedAt = Date.now();
+
+          // CRITICAL PATH COMPLETE: Show Link
           chrome.runtime.sendMessage({ 
             type: 'UPLOAD_COMPLETE', 
             url: link,
             account: activeAccount.email
           } as OffscreenMessage);
           
-          await setSessionStatus(currentSessionId, 'ready');
+          const linkReadyAt = Date.now();
+
+          await chrome.runtime.sendMessage({ 
+            type: 'SAVE_SESSION_METADATA', 
+            sessionId: activeSessionId, 
+            metadata: { 
+              duration, 
+              actualDurationMs: finalActualDurationMs, 
+              uploadCompleteAt,
+              backendFinalizedAt,
+              linkReadyAt,
+              status: 'ready'
+            } 
+          });
+
+          // BACKGROUND: Start Enrichment
+          enrichSession(activeSessionId!, blob, previewBlobForEnrichment, activeAccount, duration, finalActualDurationMs);
+
           await deleteSession(currentSessionId);
           await deleteChunks(currentSessionId);
-          return; // EXIT: Standard upload not needed
+          return; 
         } catch (e) {
-          console.debug('Progressive finalization failed, switching to standard upload fallback:', e);
+          console.debug('Progressive finalization failed, switching to fallback:', e);
           resumableUploadUrl = null; 
         }
       }
@@ -758,6 +760,7 @@ function startMediaRecorder(stream: MediaStream) {
   };
 
   chrome.runtime.sendMessage({ type: 'CAPTURE_STARTED' } as OffscreenMessage);
+  recordingStartTime = performance.now();
   recorder.start(1000); // 1s chunks
 }
 
@@ -890,7 +893,12 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
       try {
         // 1. Update Video Status
         if (meta.backendVideoId && !meta.backendSynced) {
-          const updateBody: any = { status: 'ready', sessionId };
+          const updateBody: any = { 
+            status: 'ready', 
+            sessionId,
+            duration: meta.duration || 0,
+            actualDurationMs: meta.actualDurationMs || 0
+          };
           if (sessionTitle) updateBody.title = sessionTitle;
 
           svLog("BACKEND_PATCH_START", {
@@ -955,57 +963,9 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
     const fileId = meta?.fileId || activeFileId;
 
     if (fileId) {
-      let isReady = false;
-      for (let i = 0; i < 5; i++) {
-        await new Promise(r => setTimeout(r, 2000));
-        const token = await getFreshToken(account.id, false);
-        isReady = await isFileReady(fileId, token);
-        if (isReady) break;
-      }
-
-      if (isReady) {
-        await setSessionStatus(sessionId, 'ready');
-        
-        // Final backend update with thumbnail and title
-        const token = await getFreshToken(account.id, false);
-        const driveMeta = await getFileMetadata(fileId, token);
-        const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
-        
-        if (meta?.backendVideoId) {
-          try {
-            // Priority: Keep locally generated thumbnail if available
-            const finalUpdate: any = { 
-              status: 'ready',
-              title: sessionTitle,
-              sessionId
-            };
-
-            // Only use drive thumbnail if we don't already have one locally synced
-            if (!meta.thumbnailUrl && driveMeta?.thumbnailLink) {
-              finalUpdate.thumbnailUrl = driveMeta.thumbnailLink;
-            }
-
-            // FIX: Direct fetch instead of safeFetch
-            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
-              method: 'PATCH',
-              headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${account.accessToken}`
-              },
-              body: JSON.stringify(finalUpdate)
-            });
-          } catch (err) {
-            console.warn('Final metadata update failed:', err);
-          }
-        }
-      }
+      // BACKGROUND: Enrichment (Thumbnail + Preview + Metadata)
+      enrichSession(sessionId, blob, null, account, meta?.duration || 0, meta?.actualDurationMs || 0);
     }
-
-    // Task 1: Cleanup on success
-    await deleteChunks(sessionId);
-    
-    // NEW: Notify service worker to remove session metadata NOW that sync is done
-    chrome.runtime.sendMessage({ type: 'DELETE_SESSION', sessionId });
 
     return result;
   } catch (e: any) {
@@ -1014,32 +974,22 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
     const errorMsg = e instanceof Error ? e.message : String(e);
     // NEW: Update backend on failure
     chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId }).then(async (meta) => {
-      if (meta?.backendVideoId && !meta.backendSynced) {
-        const user = offscreenUser;
-        if (user?.accessToken) {
-          try {
-            // FIX: Direct fetch instead of safeFetch to avoid storage access in offscreen context
-            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
-              method: 'PATCH',
-              headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${user.accessToken}`
-              },
-              body: JSON.stringify({ 
-                status: 'failed',
-                error: errorMsg,
-                sessionId
-              })
-            });
-            
-            await chrome.runtime.sendMessage({
-              type: "SAVE_SESSION_METADATA",
-              sessionId,
-              metadata: { backendSynced: true }
-            });
-          } catch (err) {
-            console.warn('Backend failure update failed:', err);
-          }
+      if (meta?.backendVideoId && offscreenUser?.accessToken) {
+        try {
+          await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+            method: 'PATCH',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${offscreenUser.accessToken}`
+            },
+            body: JSON.stringify({ 
+              status: 'failed',
+              error: errorMsg,
+              sessionId
+            })
+          });
+        } catch (err) {
+          console.warn('Backend failure update failed:', err);
         }
       }
     }).catch(() => {});
@@ -1087,5 +1037,129 @@ async function syncAccountRootFolder(accountId: string, driveRootFolderId: strin
     console.log(`Account ${accountId} root folder mapped to ${driveRootFolderId}`);
   } catch (err) {
     console.warn('Failed to sync account root folder to backend:', err);
+  }
+}
+
+/**
+ * BACKGROUND ENRICHMENT
+ * Non-blocking tasks to enhance video metadata after it's confirmed playable.
+ */
+async function enrichSession(
+  sessionId: string, 
+  blob: Blob, 
+  previewBlob: Blob | null, 
+  account: StorageAccount,
+  duration: number,
+  actualDurationMs: number
+) {
+  let enrichmentFinished = false;
+  const watchdog = setTimeout(async () => {
+    if (!enrichmentFinished) {
+      svLog("ENRICHMENT_TIMEOUT", { sessionId, timestamp: Date.now() });
+      await chrome.runtime.sendMessage({ type: 'SET_SESSION_STATUS', sessionId, status: 'failed_enrichment' });
+    }
+  }, 60000);
+
+  try {
+    await chrome.runtime.sendMessage({ type: 'SET_SESSION_STATUS', sessionId, status: 'enriching' });
+    svLog("ENRICHMENT_START", { sessionId, timestamp: Date.now() });
+
+    // 1. Generate Thumbnail
+    let thumbnailUrl: string | undefined;
+    try {
+      thumbnailUrl = await generateThumbnail(blob) || undefined;
+    } catch (err) {
+      console.warn('[ENRICH] Thumbnail failed:', err);
+    }
+    
+    // 2. Upload Preview Clip
+    let previewUrl: string | undefined;
+    if (previewBlob) {
+      try {
+        const driveRootFolderId = await chrome.runtime.sendMessage({ type: 'GET_WORKSPACE_FOLDER' });
+        const previewFileId = await uploadFileSimple(previewBlob, `preview-${Date.now()}.webm`, account, driveRootFolderId);
+        previewUrl = `https://drive.google.com/file/d/${previewFileId}/preview`;
+      } catch (err) {
+        console.warn('[ENRICH] Preview failed:', err);
+      }
+    }
+
+    // 3. Final Backend Patch (Polish)
+    const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
+    if (meta?.backendVideoId && offscreenUser?.accessToken) {
+      const updateBody: any = {
+        status: 'ready',
+        duration,
+        actualDurationMs
+      };
+      if (thumbnailUrl) updateBody.thumbnailUrl = thumbnailUrl;
+      if (previewUrl) updateBody.previewUrl = previewUrl;
+      if (sessionTitle) updateBody.title = sessionTitle;
+
+      const patchBackend = async () => {
+        const res = await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+          method: 'PATCH',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${offscreenUser!.accessToken}`
+          },
+          body: JSON.stringify(updateBody)
+        });
+        if (!res.ok) throw new Error(`Patch failed with status ${res.status}`);
+      };
+
+      try {
+        await patchBackend();
+      } catch (err) {
+        console.warn('[ENRICH] First patch failed, retrying once...', err);
+        try {
+          await new Promise(r => setTimeout(r, 1000));
+          await patchBackend();
+        } catch (retryErr) {
+          console.error('[ENRICH] Patch retry failed, skipping to preserve usability.', retryErr);
+        }
+      }
+    }
+
+    enrichmentFinished = true;
+    clearTimeout(watchdog);
+
+    await chrome.runtime.sendMessage({ 
+      type: 'SAVE_SESSION_METADATA', 
+      sessionId, 
+      metadata: { 
+        thumbnailUrl,
+        previewUrl,
+        status: 'ready',
+        enrichmentFinishedAt: Date.now()
+      } 
+    });
+    
+    // 4. Latency Auditing
+    const finalMeta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
+    const latency = {
+      stopToUploadComplete: (finalMeta.uploadCompleteAt || 0) - (finalMeta.stoppedAt || 0),
+      stopToBackendFinalized: (finalMeta.backendFinalizedAt || 0) - (finalMeta.stoppedAt || 0),
+      stopToLinkReady: (finalMeta.linkReadyAt || 0) - (finalMeta.stoppedAt || 0),
+      stopToEnrichmentFinished: (finalMeta.enrichmentFinishedAt || 0) - (finalMeta.stoppedAt || 0),
+      totalDuration: finalMeta.actualDurationMs || 0
+    };
+
+    svLog("ENRICHMENT_SUCCESS", { 
+      sessionId, 
+      latency,
+      timestamp: Date.now() 
+    });
+    
+    // Cleanup local chunks now that everything is synced
+    await deleteChunks(sessionId).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'DELETE_SESSION', sessionId });
+
+  } catch (err) {
+    enrichmentFinished = true;
+    clearTimeout(watchdog);
+    console.error('[ENRICH] Failed:', err);
+    svLog("ENRICHMENT_FAILURE", { sessionId, error: String(err), timestamp: Date.now() });
+    await chrome.runtime.sendMessage({ type: 'SET_SESSION_STATUS', sessionId, status: 'failed_enrichment' });
   }
 }

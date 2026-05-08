@@ -39,6 +39,7 @@ export default {
 		} else if (pathname.startsWith('/videos/')) {
 			if (method === 'PATCH') response = await updateVideo(request, env);
 			else if (method === 'DELETE') response = await deleteVideo(request, env);
+			else if (method === 'GET') response = await getVideo(request, env);
 			else response = jsonError('Method Not Allowed', 'METHOD_NOT_ALLOWED', 405);
 		} else if (pathname === '/usage/update' && method === 'POST') {
 			response = await updateUsage(request, env);
@@ -166,7 +167,7 @@ async function handleAdmin(request: Request, env: any) {
 
 		// --- MODE B: VIDEO/URL INVESTIGATION ---
 		if (idFilter) {
-			const video = (await env.DB.prepare('SELECT id, title, ownerId, workspaceId, accountEmail, status, createdAt FROM videos WHERE encryptedFileId = ? OR id = ?')
+			const video = (await env.DB.prepare('SELECT id, title, ownerId, workspaceId, accountEmail, status, createdAt, duration, actualDurationMs FROM videos WHERE encryptedFileId = ? OR id = ?')
 				.bind(idFilter, idFilter)
 				.first()) as any;
 			
@@ -337,10 +338,10 @@ async function createVideo(request: Request, env: any) {
 		const encryptedFileId = await encryptFileId(fileId, env);
 
 		await env.DB.prepare(
-			`INSERT INTO videos (id, fileId, encryptedFileId, title, ownerId, workspaceId, accountEmail, createdAt, updatedAt, duration, status, thumbnailUrl)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO videos (id, fileId, encryptedFileId, title, ownerId, workspaceId, accountEmail, createdAt, updatedAt, duration, actualDurationMs, status, thumbnailUrl, sessionId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
-			.bind(id, fileId, encryptedFileId, title, user.id, workspaceId, accountEmail, now, now, duration || 0, 'uploading', body.thumbnailUrl || null)
+			.bind(id, fileId, encryptedFileId, title, user.id, workspaceId, accountEmail, now, now, duration || 0, body.actualDurationMs || null, 'uploading', body.thumbnailUrl || null, sessionId || null)
 			.run();
 
 		await backendLog(env, user.id, 'FILEID_ENCRYPTED', { videoId: id, workspaceId });
@@ -439,6 +440,47 @@ async function getVideos(request: Request, env: any) {
 	}
 }
 
+async function getVideo(request: Request, env: any) {
+	try {
+		const url = new URL(request.url);
+		const id = url.pathname.split('/').filter(Boolean).pop();
+		const sessionId = url.searchParams.get('sid');
+
+		if (!id || id === 'videos') return jsonError('Video ID is required');
+
+		// 1. Try direct ID lookup
+		let video = (await env.DB.prepare('SELECT * FROM videos WHERE id = ? AND deletedAt IS NULL').bind(id).first()) as any;
+
+		// 2. If not found, try encryptedFileId lookup
+		if (!video) {
+			video = (await env.DB.prepare('SELECT * FROM videos WHERE encryptedFileId = ? AND deletedAt IS NULL').bind(id).first()) as any;
+		}
+
+		if (!video) {
+			await recordEvent(env, {
+				type: 'video_not_found',
+				userId: 'anonymous',
+				workspaceId: 'public',
+				metadata: { requestedId: id, sessionId }
+			});
+			return jsonError('Video not found', 'NOT_FOUND', 404);
+		}
+
+		// 3. Record Playback Event
+		await recordEvent(env, {
+			type: 'playback_started',
+			userId: 'anonymous',
+			workspaceId: video.workspaceId,
+			videoId: video.id,
+			sessionId: sessionId || video.sessionId
+		});
+
+		return Response.json(video);
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
 async function updateVideo(request: Request, env: any) {
 	try {
 		const user = await getUserFromToken(request, env);
@@ -495,9 +537,17 @@ async function updateVideo(request: Request, env: any) {
 			sets.push('previewUrl = ?');
 			params.push(body.previewUrl);
 		}
+		if ('actualDurationMs' in body) {
+			sets.push('actualDurationMs = ?');
+			params.push(body.actualDurationMs);
+		}
 		if (body.delete === true) {
 			sets.push('deletedAt = ?');
 			params.push(now);
+		}
+		if (sessionId) {
+			sets.push('sessionId = ?');
+			params.push(sessionId);
 		}
 
 		params.push(id);
@@ -1178,13 +1228,26 @@ async function recordEvent(env: any, data: { type: string; userId: string; works
 	try {
 		const id = crypto.randomUUID();
 		const now = Date.now();
-		await env.DB.prepare(
-			'INSERT INTO metrics_events (id, type, userId, workspaceId, videoId, sessionId, metadata, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-		)
-			.bind(id, data.type, data.userId, data.workspaceId, data.videoId || null, data.sessionId || null, JSON.stringify(data.metadata || {}), now)
+		const metadataStr = JSON.stringify(data.metadata || {});
+
+		// Ensure we are binding strings or nulls to the correct columns
+		// Table schema: id (0), type (1), userId (2), workspaceId (3), videoId (4), metadata (5), createdAt (6), sessionId (7)
+		const bindValues = [
+			id,
+			String(data.type),
+			String(data.userId || 'anonymous'),
+			String(data.workspaceId || 'public'),
+			data.videoId ? String(data.videoId) : null,
+			metadataStr,
+			now,
+			data.sessionId ? String(data.sessionId) : null,
+		];
+
+		await env.DB.prepare('INSERT INTO metrics_events (id, type, userId, workspaceId, videoId, metadata, createdAt, sessionId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+			.bind(...bindValues)
 			.run();
-	} catch (e) {
-		console.error('Failed to record event:', e);
+	} catch (e: any) {
+		console.error('Failed to record event:', e.message, JSON.stringify(data));
 	}
 }
 async function listWorkspaceMembers(request: Request, env: any) {

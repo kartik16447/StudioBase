@@ -49,8 +49,12 @@ CREATE TABLE videos (
   updatedAt INTEGER,
 
   duration INTEGER,
+  actualDurationMs INTEGER,
   status TEXT DEFAULT 'uploading',
   thumbnailUrl TEXT,
+  previewUrl TEXT,
+  encryptedFileId TEXT,
+  sessionId TEXT,
   deletedAt INTEGER
 );
 

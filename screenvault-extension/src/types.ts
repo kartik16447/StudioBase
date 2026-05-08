@@ -4,7 +4,10 @@ export type AppStatus =
   | 'idle'
   | 'recording'
   | 'uploading'
+  | 'finalizing'
   | 'ready'
+  | 'enriching'
+  | 'failed_enrichment'
   | 'failed'
   | 'error';
   
@@ -20,10 +23,21 @@ export interface SessionMetadata {
   fileId: string;
   title?: string;
   accountId: string;
+  
+  // Telemetry
   startedAt: number;
-  status: 'recording' | 'uploading' | 'ready' | 'failed';
+  stoppedAt?: number;
+  uploadStartedAt?: number;
+  uploadCompleteAt?: number;
+  backendFinalizedAt?: number;
+  linkReadyAt?: number;
+  enrichmentFinishedAt?: number;
+
+  status: 'recording' | 'uploading' | 'finalizing' | 'ready' | 'enriching' | 'failed_enrichment' | 'error';
+  
   processingStartedAt?: number;
   duration?: number;
+  actualDurationMs?: number;
   backendVideoId?: string;
   previewUrl?: string;
   playerUrl?: string;
@@ -93,7 +107,8 @@ export interface BackendVideo {
   webViewLink?: string;
   accountEmail?: string;
   account_email?: string; // Legacy snake_case from worker
-  status: string;
+  status: 'uploading' | 'finalizing' | 'ready' | 'enriching' | 'failed' | 'deleted';
+  actualDurationMs?: number;
   ownerId: string;
   createdAt: number;
 }
