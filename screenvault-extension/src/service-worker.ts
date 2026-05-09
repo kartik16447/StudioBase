@@ -155,7 +155,15 @@ async function trySilentRefresh(account: StorageAccount): Promise<StorageAccount
 
       accounts = accounts.map(a => a.id === account.id ? updatedAccount : a);
       await chrome.storage.local.set({ sv_accounts: accounts });
-      
+
+      // Keep sv_user.accessToken in sync so backend calls don't use a stale token
+      if (updatedAccount.isPrimary) {
+        const stored = await chrome.storage.local.get("sv_user");
+        if (stored.sv_user) {
+          await chrome.storage.local.set({ sv_user: { ...stored.sv_user, accessToken: token } });
+        }
+      }
+
       chrome.runtime.sendMessage({
         type: "ACCOUNTS_UPDATE",
         accounts,

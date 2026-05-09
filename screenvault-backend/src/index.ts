@@ -1362,15 +1362,19 @@ async function updateAccount(request: Request, env: any) {
 }
 
 async function handleExtensionLogs(request: Request, env: any) {
+	let user: any;
 	try {
-		const user = await getUserFromToken(request, env);
-		const body = (await request.json()) as any;
-		const { tag, data, timestamp, sessionId } = body;
+		user = await getUserFromToken(request, env);
+	} catch (err: any) {
+		return jsonError(err.message, 'UNAUTHORIZED', 401);
+	}
 
-		// This will appear in 'wrangler tail'
+	try {
+		const body = (await request.json()) as any;
+		const { tag, data, sessionId } = body;
+
 		console.log(`[EXT][${tag}][${user.email}]${sessionId ? ' [' + sessionId + ']' : ''}`, JSON.stringify(data));
 
-		// Persist to D1
 		try {
 			const result = await env.DB.prepare('INSERT INTO debug_logs (userId, tag, data, source, sessionId) VALUES (?, ?, ?, ?, ?)')
 				.bind(user.id, tag, JSON.stringify(data), 'extension', sessionId || null)
