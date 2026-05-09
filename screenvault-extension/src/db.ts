@@ -183,5 +183,5 @@ export async function recoverSession(sessionId: string): Promise<Blob> {
   if (blobs.length === 0) {
     throw new Error(`No chunks found for session ${sessionId}`);
   }
-  return new Blob(blobs, { type: blobs[0].type });
+  return new Blob(blobs, { type: 'video/webm' });
 }

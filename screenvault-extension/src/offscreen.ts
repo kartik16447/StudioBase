@@ -36,9 +36,6 @@ let offscreenAccounts: StorageAccount[] = [];
 let sessionTitle: string = "Screen Recording";
 let activeFolderId: string | null = null;
 
-const ENABLE_RESUME = false;
-// POST-based resumable sessions create a new file during recording (avoids PATCH 503).
-// After all chunks land, Drive returns the new file ID which replaces the placeholder.
 const ENABLE_PROGRESSIVE_UPLOAD = true;
 
 console.log("Offscreen context initialized");
@@ -314,60 +311,6 @@ async function uploadWithRetry(
     }
     
     try {
-      // Check for existing resumable URL in metadata for the current session
-      if (ENABLE_RESUME && activeSessionId) {
-        const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
-        if (meta?.uploadUrl && !meta.status?.includes('ready')) {
-          console.warn('Attempting to resume existing upload...');
-          try {
-            const { received: serverOffset } = await getUploadStatus(meta.uploadUrl, blob.size);
-            if (serverOffset < blob.size) {
-              const remaining = blob.slice(serverOffset);
-              await uploadResumableChunk(meta.uploadUrl, remaining, serverOffset, true); // final=true, result ignored
-              
-              const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
-              const fileId = meta.fileId || activeFileId;
-              const idToUse = meta.encryptedFileId || fileId;
-              const title = meta.title || 'Screen Recording';
-              const url = meta.playerUrl || `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(title)}`;
-
-              svLog("UPLOAD_FINAL_COMPLETE", {
-                sessionId: activeSessionId,
-                fileId,
-                url,
-                method: 'resumable_resume',
-                timestamp: Date.now()
-              });
-
-              return { 
-                url, 
-                accountEmail: accounts[0].email 
-              };
-            } else {
-               // Already finished?
-              const fileId = meta.fileId || activeFileId;
-              const idToUse = meta.encryptedFileId || fileId;
-              const title = meta.title || 'Screen Recording';
-              const url = meta.playerUrl || `https://screenvault-player.pages.dev/?id=${idToUse}&title=${encodeURIComponent(title)}`;
-
-              svLog("UPLOAD_FINAL_COMPLETE", {
-                sessionId: activeSessionId,
-                fileId,
-                url,
-                method: 'resumable_already_finished',
-                timestamp: Date.now()
-              });
-
-              return { 
-                url, 
-                accountEmail: accounts[0].email 
-              };
-            }
-          } catch (e) {
-            console.warn('Resume failed, falling back to fresh upload:', e);
-          }
-        }
-      }
       return await uploadWithFallback(blob, accounts, onProgress);
     } catch (err: any) {
       lastError = err;

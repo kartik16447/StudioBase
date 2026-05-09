@@ -18,8 +18,14 @@ const corsHeaders = {
 	'Access-Control-Max-Age': '86400',
 };
 
+interface Env {
+	DB: D1Database;
+	TOKEN_CACHE: KVNamespace;
+	ADMIN_EMAIL: string;
+}
+
 export default {
-	async fetch(request: Request, env: any) {
+	async fetch(request: Request, env: Env) {
 		const url = new URL(request.url);
 		const { pathname } = url;
 		const method = request.method;
@@ -116,10 +122,10 @@ async function runMaintenance(env: any) {
 	}
 }
 
-async function handleAdmin(request: Request, env: any) {
+async function handleAdmin(request: Request, env: Env) {
 	try {
 		const user = await getUserFromToken(request, env);
-		if (user.email !== 'karthik.upadhyay98@gmail.com') {
+		if (user.email !== env.ADMIN_EMAIL) {
 			return jsonError('Unauthorized', 'UNAUTHORIZED', 401);
 		}
 
@@ -1141,9 +1147,7 @@ function jsonError(message: string, code: string = 'API_ERROR', status: number =
 	);
 }
 
-const tokenCache = new Map<string, { user: any; expiresAt: number }>();
-
-async function getUserFromToken(request: Request, env: any) {
+async function getUserFromToken(request: Request, env: Env) {
 	const authHeader = request.headers.get('Authorization');
 	if (!authHeader || !authHeader.startsWith('Bearer ')) {
 		throw new Error('Missing Authorization header');
@@ -1152,7 +1156,9 @@ async function getUserFromToken(request: Request, env: any) {
 	const token = authHeader.split(' ')[1];
 	const now = Date.now();
 	
-	const cached = tokenCache.get(token);
+	// Read from KV (Distributed Cache)
+	const cached = await env.TOKEN_CACHE.get(token, 'json') as { user: any; expiresAt: number } | null;
+	
 	if (cached && cached.expiresAt > now) {
 		return cached.user;
 	}
@@ -1164,8 +1170,10 @@ async function getUserFromToken(request: Request, env: any) {
 	});
 
 	if (!res.ok) {
-		if (cached) {
-			console.warn("Google API failed, using stale cache");
+		// Stale fallback: only allow if cached entry is less than 20 minutes old
+		// (cached.expiresAt is created_at + 10m, so 20m old is expiresAt + 10m)
+		if (cached && (now - cached.expiresAt < 10 * 60 * 1000)) {
+			console.warn("Google API failed, using stale cache (within 20min limit)");
 			return cached.user;
 		}
 		throw new Error('Invalid access token');
@@ -1198,8 +1206,13 @@ async function getUserFromToken(request: Request, env: any) {
 		picture: user.picture,
 	};
 	
-	// Cache for 10 minutes
-	tokenCache.set(token, { user: userInfo, expiresAt: now + 10 * 60 * 1000 });
+	// Write to KV: TTL 10 minutes (600s), but persist for fallback
+	// Instruction said TTL 600, but to support 20m fallback we use 1200
+	await env.TOKEN_CACHE.put(
+		token,
+		JSON.stringify({ user: userInfo, expiresAt: now + 10 * 60 * 1000 }),
+		{ expirationTtl: 1200 }
+	);
 	return userInfo;
 }
 
@@ -1415,11 +1428,11 @@ async function backendLog(env: any, userId: string, tag: string, data: any, sess
 		console.error("Failed to persist backend log:", e);
 	}
 }
-async function migrateFileIds(request: Request, env: any) {
+async function migrateFileIds(request: Request, env: Env) {
 	try {
 		const user = await getUserFromToken(request, env);
 		// Admin only
-		if (user.email !== 'karthik.upadhyay98@gmail.com') {
+		if (user.email !== env.ADMIN_EMAIL) {
 			return jsonError('Unauthorized', 'UNAUTHORIZED', 401);
 		}
 

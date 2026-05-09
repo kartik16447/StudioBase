@@ -842,29 +842,27 @@ export function LibraryPage() {
 
   if (loading)
     return (
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "60vh",
-          color: "#A1A1AA",
+      <div style={{ padding: "2rem" }}>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
           gap: "1.5rem",
-        }}
-      >
-        <div
-          style={{
-            width: "40px",
-            height: "40px",
-            border: "3px solid rgba(255,255,255,0.1)",
-            borderTopColor: "#3b82f6",
-            borderRadius: "50%",
-            animation: "spin 1s linear infinite",
-          }}
-        ></div>
-        <p style={{ fontWeight: 500 }}>Loading workspace library...</p>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        }}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: "16px",
+              overflow: "hidden",
+            }}>
+              <div className="skeleton" style={{ height: "160px", borderRadius: 0 }} />
+              <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                <div className="skeleton" style={{ height: "14px", width: "70%" }} />
+                <div className="skeleton" style={{ height: "12px", width: "45%" }} />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     );
 
@@ -976,6 +974,18 @@ export function LibraryPage() {
 
   return (
     <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
+      <style>{`
+        @keyframes shimmer {
+          0% { background-position: -800px 0; }
+          100% { background-position: 800px 0; }
+        }
+        .skeleton {
+          background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+          background-size: 800px 100%;
+          animation: shimmer 1.4s infinite linear;
+          border-radius: 8px;
+        }
+      `}</style>
       <div
         style={{
           display: "flex",
@@ -1250,6 +1260,9 @@ export function LibraryPage() {
                   display: "flex",
                   flexDirection: "column",
                   gap: "0.75rem",
+                  maxHeight: "50vh",
+                  overflowY: "auto",
+                  paddingRight: "4px",
                 }}
               >
                 {members.map((member) => (
@@ -1259,49 +1272,55 @@ export function LibraryPage() {
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
-                      padding: "1rem",
+                      padding: "0.75rem 1rem",
                       background: "rgba(255,255,255,0.03)",
                       borderRadius: "1rem",
                       border: "1px solid rgba(255,255,255,0.05)",
+                      gap: "0.75rem",
                     }}
                   >
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      <div
-                        style={{
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: 0 }}>
+                      <div style={{
+                        width: "36px",
+                        height: "36px",
+                        borderRadius: "50%",
+                        background: "rgba(59,130,246,0.15)",
+                        border: "1px solid rgba(59,130,246,0.3)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "0.85rem",
+                        fontWeight: 700,
+                        color: "#3b82f6",
+                        flexShrink: 0,
+                      }}>
+                        {(member.email || "?").charAt(0).toUpperCase()}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{
                           color: "#fff",
                           fontWeight: 500,
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        }}
-                      >
-                        {member.email}
+                          fontSize: "0.875rem",
+                          wordBreak: "break-all",
+                        }}>
+                          {member.email}
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "3px" }}>
                         {member.userId === user?.userId && (
-                          <span
-                            style={{
-                              fontSize: "0.7rem",
-                              color: "#3b82f6",
-                              background: "rgba(59,130,246,0.1)",
-                              padding: "2px 6px",
-                              borderRadius: "4px",
-                            }}
-                          >
-                            (You)
-                          </span>
+                          <span style={{
+                            fontSize: "0.65rem", color: "#3b82f6",
+                            background: "rgba(59,130,246,0.1)",
+                            padding: "1px 6px", borderRadius: "4px", whiteSpace: "nowrap",
+                          }}>You</span>
                         )}
                         {member.role === "owner" && (
-                          <span
-                            style={{
-                              fontSize: "0.7rem",
-                              color: "#f59e0b",
-                              background: "rgba(245,158,11,0.1)",
-                              padding: "2px 6px",
-                              borderRadius: "4px",
-                            }}
-                          >
-                            Owner
-                          </span>
+                          <span style={{
+                            fontSize: "0.65rem", color: "#f59e0b",
+                            background: "rgba(245,158,11,0.1)",
+                            padding: "1px 6px", borderRadius: "4px", whiteSpace: "nowrap",
+                          }}>Owner</span>
                         )}
+                        </div>
                       </div>
                     </div>
                     {user?.workspaceRole === "owner" &&
@@ -2220,32 +2239,27 @@ export function LibraryPage() {
               }}
             >
               {loadingMore && (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    color: "#A1A1AA",
-                    fontSize: "0.9rem",
-                  }}
-                >
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    style={{ animation: "spin 1s linear infinite" }}
-                  >
-                    <circle cx="12" cy="12" r="10" opacity="0.2"></circle>
-                    <path
-                      d="M12 2a10 10 0 0 1 10 10"
-                      strokeDasharray="15"
-                      strokeLinecap="round"
-                    ></path>
-                  </svg>
-                  Loading more...
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+                  gap: "1.5rem",
+                  width: "100%",
+                  marginTop: "0",
+                }}>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: "16px",
+                      overflow: "hidden",
+                    }}>
+                      <div className="skeleton" style={{ height: "160px", borderRadius: 0 }} />
+                      <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                        <div className="skeleton" style={{ height: "14px", width: "70%" }} />
+                        <div className="skeleton" style={{ height: "12px", width: "45%" }} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -2290,7 +2304,8 @@ export function LibraryPage() {
                         gap: "8px",
                       }}
                     >
-                      {account.email}
+                      <span style={{ minWidth: 0, wordBreak: "break-all" }}>{account.email}</span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "4px" }}>
                       {account.email === user?.email && (
                         <span
                           style={{
@@ -2301,6 +2316,7 @@ export function LibraryPage() {
                             borderRadius: "4px",
                             textTransform: "uppercase",
                             fontWeight: 700,
+                            whiteSpace: "nowrap",
                           }}
                         >
                           Primary
@@ -2316,11 +2332,13 @@ export function LibraryPage() {
                             borderRadius: "4px",
                             textTransform: "uppercase",
                             fontWeight: 700,
+                            whiteSpace: "nowrap",
                           }}
                         >
                           Active
                         </span>
                       )}
+                      </div>
                     </div>
                     <div
                       style={{
