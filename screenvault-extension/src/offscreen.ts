@@ -35,6 +35,10 @@ let offscreenUser: BackendUser | null = null;
 let offscreenAccounts: StorageAccount[] = [];
 let sessionTitle: string = "Screen Recording";
 let activeFolderId: string | null = null;
+let activeBackendVideoId: string | null = null;
+let activePlayerUrl: string | null = null;
+let activeEncryptedFileId: string | null = null;
+let tokenPrefetched = false;
 
 const ENABLE_PROGRESSIVE_UPLOAD = true;
 
@@ -242,6 +246,10 @@ async function uploadWithFallback(
           });
           if (res.ok) {
             const data = await res.json();
+            activeBackendVideoId = data.id;
+            activePlayerUrl = data.playerUrl;
+            activeEncryptedFileId = data.encryptedFileId;
+
             await chrome.runtime.sendMessage({
               type: 'SAVE_SESSION_METADATA',
               sessionId: activeSessionId,
@@ -537,6 +545,7 @@ function startMediaRecorder(stream: MediaStream) {
   let chunkCount = 0;
   let lastChunkData: Blob | null = null;
 
+  const TOKEN_PREFETCH_MS = 8 * 60 * 1000;
   const MAX_RECORDING_MS = 10 * 60 * 1000;
 
   recorder.ondataavailable = (e) => {
@@ -615,6 +624,13 @@ function startMediaRecorder(stream: MediaStream) {
 
     // Authoritative Limit Enforcement (Checked AFTER processing chunk)
     const elapsedMs = performance.now() - recordingStartTime;
+
+    // STEP 3: Pre-warm token
+    if (elapsedMs >= TOKEN_PREFETCH_MS && !tokenPrefetched && activeAccount) {
+      tokenPrefetched = true;
+      getFreshToken(activeAccount.id, false).catch(() => {});
+    }
+
     if (elapsedMs >= MAX_RECORDING_MS && !isStopping) {
       console.warn(`[SV][LIMIT] Recording reached ${Math.floor(elapsedMs / 1000)}s. Triggering stop.`);
       stopRecording();
@@ -731,9 +747,8 @@ function startMediaRecorder(stream: MediaStream) {
           }
 
           const uploadCompleteAt = Date.now();
-          const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
-          const duration = meta?.duration || durationSeconds;
-          const finalActualDurationMs = meta?.actualDurationMs || actualDurationMs;
+          const duration = durationSeconds;
+          const finalActualDurationMs = actualDurationMs;
 
           svLog("PROGRESSIVE_UPLOAD_COMPLETE", {
             sessionId: activeSessionId,
@@ -751,11 +766,25 @@ function startMediaRecorder(stream: MediaStream) {
             freshToken = offscreenUser?.accessToken || '';
           }
 
-          // Update backend DB: swap fileId to the real uploaded file.
-          // The player URL (encrypted placeholder ID) still works because the proxy
-          // resolves via encryptedFileId → video record → current fileId.
-          if (meta?.backendVideoId && freshToken) {
-            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+          // STEP 4: Fire UPLOAD_COMPLETE immediately after token resolve
+          let link = activePlayerUrl;
+          if (!link) {
+            const idToUse = activeEncryptedFileId || activeFileId;
+            const titleToUse = sessionTitle || 'Recording';
+            link = `https://screenvault.karthik-upadhyay98.workers.dev/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
+          }
+
+          chrome.runtime.sendMessage({
+            type: 'UPLOAD_COMPLETE',
+            url: link,
+            account: activeAccount.email
+          } as OffscreenMessage);
+
+          const linkReadyAt = Date.now();
+
+          // Update backend DB in background
+          if (activeBackendVideoId && freshToken) {
+            fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${activeBackendVideoId}`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${freshToken}` },
               body: JSON.stringify({
@@ -765,6 +794,10 @@ function startMediaRecorder(stream: MediaStream) {
                 actualDurationMs: finalActualDurationMs,
                 sessionId: activeSessionId
               })
+            }).then(() => {
+                svLog("BACKEND_FINALIZATION_COMPLETE", { sessionId: activeSessionId, timestamp: Date.now() });
+            }).catch(e => {
+                svLog("BACKEND_FINALIZATION_FAILED", { sessionId: activeSessionId, error: String(e) });
             });
           }
 
@@ -774,22 +807,6 @@ function startMediaRecorder(stream: MediaStream) {
           }
 
           const backendFinalizedAt = Date.now();
-
-          let link = meta?.playerUrl;
-          if (!link) {
-            const idToUse = meta?.encryptedFileId || activeFileId;
-            const titleToUse = meta?.title || sessionTitle || 'Recording';
-            link = `https://screenvault.karthik-upadhyay98.workers.dev/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
-          }
-
-          // CRITICAL PATH COMPLETE: Show Link
-          chrome.runtime.sendMessage({
-            type: 'UPLOAD_COMPLETE',
-            url: link,
-            account: activeAccount.email
-          } as OffscreenMessage);
-
-          const linkReadyAt = Date.now();
 
           await chrome.runtime.sendMessage({
             type: 'SAVE_SESSION_METADATA',
@@ -832,6 +849,10 @@ function startMediaRecorder(stream: MediaStream) {
 
   chrome.runtime.sendMessage({ type: 'CAPTURE_STARTED' } as OffscreenMessage);
   recordingStartTime = performance.now();
+  activeBackendVideoId = null;
+  activePlayerUrl = null;
+  activeEncryptedFileId = null;
+  tokenPrefetched = false;
   recorder.start(1000); // 1s chunks
 }
 
@@ -967,7 +988,7 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
         }
 
         // 1. Update Video Status
-        if (meta.backendVideoId && !meta.backendSynced) {
+        if (activeBackendVideoId && !meta.backendSynced) {
           const updateBody: any = {
             status: 'ready',
             sessionId,
@@ -978,12 +999,12 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
 
           svLog("BACKEND_PATCH_START", {
             sessionId,
-            backendVideoId: meta.backendVideoId,
+            backendVideoId: activeBackendVideoId,
             updateBody,
             timestamp: Date.now()
           });
 
-          await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+          await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${activeBackendVideoId}`, {
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
@@ -994,7 +1015,7 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
 
           svLog("BACKEND_PATCH_SUCCESS", {
             sessionId,
-            backendVideoId: meta.backendVideoId,
+            backendVideoId: activeBackendVideoId,
             timestamp: Date.now()
           });
 
@@ -1159,7 +1180,7 @@ async function enrichSession(
 
     // 3. Final Backend Patch (Polish)
     const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
-    if (meta?.backendVideoId) {
+    if (activeBackendVideoId) {
       let enrichToken: string;
       try {
         enrichToken = await getFreshToken(account?.id, false);
@@ -1177,7 +1198,7 @@ async function enrichSession(
       if (sessionTitle) updateBody.title = sessionTitle;
 
       const patchBackend = async () => {
-        const res = await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+        const res = await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${activeBackendVideoId}`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
