@@ -285,7 +285,7 @@ async function uploadWithRetry(
             const serverOffset = await getUploadStatus(meta.uploadUrl, blob.size);
             if (serverOffset < blob.size) {
               const remaining = blob.slice(serverOffset);
-              await uploadResumableChunk(meta.uploadUrl, remaining, serverOffset, true);
+              await uploadResumableChunk(meta.uploadUrl, remaining, serverOffset, true); // final=true, result ignored
               
               const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
               const fileId = meta.fileId || activeFileId;
@@ -359,29 +359,33 @@ async function uploadWithRetry(
   throw lastError || new Error('Upload failed after multiple attempts');
 }
 
-async function uploadChunkWithRetry(url: string, chunk: Blob, offset: number, isFinal: boolean, maxRetries = 2) {
+// Returns true if Drive signalled upload complete (200/201 on a non-final chunk),
+// meaning all bytes are committed and we should skip remaining progressive chunks.
+async function uploadChunkWithRetry(url: string, chunk: Blob, offset: number, isFinal: boolean, maxRetries = 3): Promise<boolean> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      await uploadResumableChunk(url, chunk, offset, isFinal);
-      consecutiveFailures = 0; // Reset on any success
-      
+      const uploadComplete = await uploadResumableChunk(url, chunk, offset, isFinal);
+      consecutiveFailures = 0;
+
       svLog("UPLOAD_CHUNK_PROGRESS", {
         sessionId: activeSessionId,
         offset,
         size: chunk.size,
         isFinal,
+        uploadComplete,
         timestamp: Date.now()
       });
 
-      return;
+      return uploadComplete;
     } catch (err) {
       if (attempt === maxRetries) {
         consecutiveFailures++;
         throw err;
       }
-      const delay = attempt === 0 ? 500 : 1000;
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = 1000 * Math.pow(2, attempt);
       await new Promise(r => setTimeout(r, delay));
-      console.debug(`Chunk upload retry ${attempt + 1} for offset ${offset}`);
+      console.warn(`[SV] Chunk retry ${attempt + 1} at offset ${offset}`);
     }
   }
 }
@@ -572,21 +576,24 @@ function startMediaRecorder(stream: MediaStream) {
           expectedOffset += blobToUpload.size;
 
           uploadQueue = uploadQueue
-            .then(() => {
+            .then(async () => {
               if (!progressiveEnabled || !resumableUploadUrl || consecutiveFailures >= 3) {
                 progressiveEnabled = false;
                 return;
               }
-              return uploadChunkWithRetry(resumableUploadUrl!, blobToUpload, offset, false).then(async () => {
-                uploadedBytes += blobToUpload.size;
-                if (activeSessionId) {
-                  await chrome.runtime.sendMessage({
-                    type: 'SAVE_SESSION_METADATA',
-                    sessionId: activeSessionId,
-                    metadata: { uploadedBytes: offset + blobToUpload.size }
-                  });
-                }
-              });
+              const driveComplete = await uploadChunkWithRetry(resumableUploadUrl!, blobToUpload, offset, false);
+              uploadedBytes += blobToUpload.size;
+              if (activeSessionId) {
+                await chrome.runtime.sendMessage({
+                  type: 'SAVE_SESSION_METADATA',
+                  sessionId: activeSessionId,
+                  metadata: { uploadedBytes: offset + blobToUpload.size }
+                });
+              }
+              if (driveComplete) {
+                // Drive closed the session early (returned 200/201) — all data committed
+                progressiveEnabled = false;
+              }
             })
             .catch(err => {
               console.error('[SV][PROGRESSIVE_CHUNK_FAIL]', err?.message, { offset, size: blobToUpload.size });

@@ -199,27 +199,30 @@ export async function initResumableUpload(fileId: string, accessToken: string): 
   return res.headers.get('Location') || '';
 }
 
+// Returns true if Drive signalled the upload is complete (200/201),
+// false if it returned 308 (more chunks expected).
 export async function uploadResumableChunk(
-  uploadUrl: string, 
-  chunk: Blob, 
-  startByte: number, 
+  uploadUrl: string,
+  chunk: Blob,
+  startByte: number,
   isFinal: boolean
-): Promise<void> {
+): Promise<boolean> {
   const endByte = startByte + chunk.size - 1;
   const totalStr = isFinal ? (startByte + chunk.size).toString() : '*';
-  
+
+  // Do NOT set Content-Length manually — the browser sets it from the body.
+  // Setting it explicitly can confuse Drive's session state.
   const res = await fetch(uploadUrl, {
     method: 'PUT',
     headers: {
-       'Content-Range': `bytes ${startByte}-${endByte}/${totalStr}`,
-       'Content-Length': chunk.size.toString()
+      'Content-Range': `bytes ${startByte}-${endByte}/${totalStr}`,
     },
     body: chunk
   });
-  
-  if (res.status !== 308 && !res.ok) {
-     throw new Error(`Chunk upload failed: ${res.status}`);
-  }
+
+  if (res.status === 308) return false; // more chunks expected
+  if (res.ok) return true;              // 200/201 — Drive considers upload complete
+  throw new Error(`Chunk upload failed: ${res.status}`);
 }
 
 export async function getUploadStatus(uploadUrl: string, totalSize: number): Promise<number> {
