@@ -1,3 +1,5 @@
+import { svLog } from './logger';
+
 const DB_NAME = 'screenvault';
 const DB_VERSION = 1;
 const STORE_NAME = 'chunks';
@@ -30,7 +32,12 @@ export function initDB(): Promise<IDBDatabase> {
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 export function getDB(): Promise<IDBDatabase> {
-  if (!dbPromise) dbPromise = initDB();
+  if (!dbPromise) {
+    dbPromise = initDB().catch(err => {
+      svLog("IDB_OPEN_FAILED", { error: err.message }).catch(() => {});
+      throw err;
+    });
+  }
   return dbPromise;
 }
 

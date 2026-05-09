@@ -1330,6 +1330,9 @@ function stopRecording() {
             encryptedId = (refreshed.sv_sessions || {})[sessionId]?.encryptedFileId;
             if (encryptedId) break;
           }
+          if (!encryptedId) {
+            svLog("SID_ONLY_LINK_GENERATED", { sessionId, reason: "encryptedId_timeout" }, sessionId);
+          }
         }
 
         const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';

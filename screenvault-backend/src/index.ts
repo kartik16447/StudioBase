@@ -196,11 +196,13 @@ async function handleAdmin(request: Request, env: Env) {
 		// 1. Total Stats
 		const totalUsers = (await env.DB.prepare('SELECT COUNT(*) as count FROM users').first()) as any;
 		const totalVideos = (await env.DB.prepare('SELECT COUNT(*) as count FROM videos').first()) as any;
-		const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-		const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+		const now = Date.now();
+		const oneDayAgo = now - 24 * 60 * 60 * 1000;
+		const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+		const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
 		const activeUsers = (await env.DB.prepare('SELECT COUNT(DISTINCT userId) as count FROM metrics_events WHERE createdAt >= ?').bind(oneDayAgo).first()) as any;
 
-		// 2. Playback Stats (Operational only, exclude noise, deduplicate by session, 7d window)
+		// 2. Playback Stats (Operational only, exclude noise, deduplicate by session, 30d window)
 		const playbackStats = (await env.DB.prepare(`
 			SELECT 
 				COUNT(DISTINCT CASE WHEN type = 'playback_started' THEN sessionId ELSE NULL END) as started,
@@ -209,7 +211,7 @@ async function handleAdmin(request: Request, env: Env) {
 					THEN sessionId ELSE NULL END) as failed
 			FROM metrics_events
 			WHERE createdAt >= ?
-		`).bind(sevenDaysAgo).first()) as any;
+		`).bind(thirtyDaysAgo).first()) as any;
 
 		const topPlaybackErrors = (await env.DB.prepare(`
 			SELECT json_extract(metadata, '$.errorCode') as error, COUNT(DISTINCT sessionId) as count 
@@ -218,9 +220,9 @@ async function handleAdmin(request: Request, env: Env) {
 			AND COALESCE(json_extract(metadata, '$.errorCode'), '') != 'BROWSER_VIDEO_ERROR'
 			AND createdAt >= ?
 			GROUP BY error ORDER BY count DESC LIMIT 5
-		`).bind(sevenDaysAgo).all()).results || [];
+		`).bind(thirtyDaysAgo).all()).results || [];
 
-		// 3. Upload Stats (Deduplicate by session, 7d window)
+		// 3. Upload Stats (Deduplicate by session, 30d window)
 		const uploadStats = (await env.DB.prepare(`
 			SELECT 
 				COUNT(DISTINCT CASE WHEN type = 'recording_started' THEN sessionId ELSE NULL END) as started,
@@ -228,16 +230,46 @@ async function handleAdmin(request: Request, env: Env) {
 				COUNT(DISTINCT CASE WHEN type = 'upload_failed' THEN sessionId ELSE NULL END) as failed
 			FROM metrics_events
 			WHERE createdAt >= ?
-		`).bind(sevenDaysAgo).first()) as any;
+		`).bind(thirtyDaysAgo).first()) as any;
 
 		const topUploadErrors = (await env.DB.prepare(`
 			SELECT json_extract(metadata, '$.error') as error, COUNT(DISTINCT sessionId) as count 
 			FROM metrics_events WHERE type = 'upload_failed'
 			AND createdAt >= ?
 			GROUP BY error ORDER BY count DESC LIMIT 5
-		`).bind(sevenDaysAgo).all()).results || [];
+		`).bind(thirtyDaysAgo).all()).results || [];
 
-		// 4. Trace / Recent Events
+		// 4. Infrastructure Health Stats (last 24h/7d)
+		// A. KV Cache (24h)
+		const kvHits = (await env.DB.prepare('SELECT COUNT(*) as count FROM debug_logs WHERE tag = "KV_CACHE_HIT" AND timestamp >= datetime(?, "unixepoch")').bind(Math.floor(oneDayAgo/1000)).first()) as any;
+		const kvMisses = (await env.DB.prepare('SELECT COUNT(*) as count FROM debug_logs WHERE tag = "KV_CACHE_MISS" AND timestamp >= datetime(?, "unixepoch")').bind(Math.floor(oneDayAgo/1000)).first()) as any;
+		const hitTotal = (kvHits?.count || 0) + (kvMisses?.count || 0);
+
+		// B. Chunk Failures (7d)
+		const chunkFailuresTotal = (await env.DB.prepare('SELECT COUNT(*) as count FROM debug_logs WHERE tag = "UPLOAD_CHUNK_FAILED" AND timestamp >= datetime(?, "unixepoch")').bind(Math.floor(sevenDaysAgo/1000)).first()) as any;
+		const topChunkErrors = (await env.DB.prepare(`
+			SELECT json_extract(data, '$.error') as error, COUNT(*) as count 
+			FROM debug_logs WHERE tag = "UPLOAD_CHUNK_FAILED" 
+			AND timestamp >= datetime(?, "unixepoch")
+			GROUP BY error ORDER BY count DESC LIMIT 5
+		`).bind(Math.floor(sevenDaysAgo/1000)).all()).results || [];
+
+		// C. sid-only links (7d)
+		const sidOnlyRes = (await env.DB.prepare('SELECT sessionId FROM debug_logs WHERE tag = "SID_ONLY_LINK_GENERATED" AND timestamp >= datetime(?, "unixepoch") ORDER BY timestamp DESC').bind(Math.floor(sevenDaysAgo/1000)).all()) as any;
+		const sidOnlySessions = (sidOnlyRes.results || []).map((r: any) => r.sessionId);
+
+		// D. Pinning Failures (7d)
+		const pinFailuresRes = (await env.DB.prepare('SELECT sessionId FROM debug_logs WHERE tag = "RECOVERY_ACCOUNT_MISSING" AND timestamp >= datetime(?, "unixepoch") ORDER BY timestamp DESC').bind(Math.floor(sevenDaysAgo/1000)).all()) as any;
+		const pinFailuresSessions = (pinFailuresRes.results || []).map((r: any) => r.sessionId);
+
+		// E. IDB Errors (7d)
+		const idbErrors = (await env.DB.prepare('SELECT COUNT(*) as count FROM debug_logs WHERE tag = "IDB_OPEN_FAILED" AND timestamp >= datetime(?, "unixepoch")').bind(Math.floor(sevenDaysAgo/1000)).first()) as any;
+
+		// F. Stuck Videos (>10m processing)
+		const tenMinAgo = now - 10 * 60 * 1000;
+		const stuckVideos = (await env.DB.prepare('SELECT id, title, createdAt FROM videos WHERE status = "processing" AND createdAt < ? ORDER BY createdAt ASC LIMIT 20').bind(tenMinAgo).all()).results || [];
+
+		// 5. Trace / Recent Events
 		let recentEventsQuery = 'SELECT userId, type, sessionId, metadata, createdAt FROM metrics_events';
 		let recentEventsParams: any[] = [];
 		if (sessionIdFilter) {
@@ -258,15 +290,42 @@ async function handleAdmin(request: Request, env: Env) {
 			totalUsers: totalUsers?.count || 0,
 			activeUsers: activeUsers?.count || 0,
 			totalVideos: totalVideos?.count || 0,
+			windowDays: 30,
 			upload: {
 				...uploadStats,
 				successRate: (uploadStats.success + uploadStats.failed) > 0 ? Math.round((uploadStats.success / (uploadStats.success + uploadStats.failed)) * 100) : 100,
-				topErrors: topUploadErrors
+				topErrors: topUploadErrors,
+				chunkFailures: {
+					total: chunkFailuresTotal?.count || 0,
+					topErrors: topChunkErrors
+				}
 			},
 			playback: {
 				...playbackStats,
 				successRate: (playbackStats.started + playbackStats.failed) > 0 ? Math.round((playbackStats.started / (playbackStats.started + playbackStats.failed)) * 100) : 100,
 				topErrors: topPlaybackErrors
+			},
+			infrastructure: {
+				kvCache: {
+					hits: kvHits?.count || 0,
+					misses: kvMisses?.count || 0,
+					hitRate: hitTotal > 0 ? Math.round(((kvHits?.count || 0) / hitTotal) * 100) : 0
+				},
+				sidOnlyLinks: {
+					count: sidOnlySessions.length,
+					recentSessions: sidOnlySessions.slice(0, 5)
+				},
+				accountPinningFailures: {
+					count: pinFailuresSessions.length,
+					recentSessions: pinFailuresSessions.slice(0, 5)
+				},
+				idbErrors: {
+					count: idbErrors?.count || 0
+				}
+			},
+			stuckVideos: {
+				count: stuckVideos.length,
+				items: stuckVideos
 			},
 			recentEvents,
 			sessionLogs
@@ -1160,8 +1219,11 @@ async function getUserFromToken(request: Request, env: Env) {
 	const cached = await env.TOKEN_CACHE.get(token, 'json') as { user: any; expiresAt: number } | null;
 	
 	if (cached && cached.expiresAt > now) {
+		backendLog(env, cached.user.id, "KV_CACHE_HIT", { source: "kv" });
 		return cached.user;
 	}
+
+	backendLog(env, undefined, "KV_CACHE_MISS", { reason: cached ? "expired" : "missing" });
 
 	const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
 		headers: {
@@ -1418,7 +1480,7 @@ async function handleExtensionLogs(request: Request, env: any) {
 	}
 }
 
-async function backendLog(env: any, userId: string, tag: string, data: any, sessionId?: string) {
+async function backendLog(env: any, userId: string | null | undefined, tag: string, data: any, sessionId?: string) {
 	try {
 		console.log(`[SV][${tag}]${sessionId ? ' [' + sessionId + ']' : ''}`, JSON.stringify(data));
 		await env.DB.prepare('INSERT INTO debug_logs (userId, tag, data, source, sessionId) VALUES (?, ?, ?, ?, ?)')
