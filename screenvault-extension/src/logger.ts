@@ -35,15 +35,22 @@ export async function svLog(tag: string, data: any) {
 
   // 3. Send to Backend for terminal visibility (wrangler tail)
   try {
-    const { sv_user, sv_state } = await chrome.storage.local.get(["sv_user", "sv_state"]);
+    const { sv_user, sv_state, sv_accounts } = await chrome.storage.local.get(["sv_user", "sv_state", "sv_accounts"]);
     const sessionId = sv_state?.sessionId;
 
-    if (sv_user?.accessToken) {
+    // Prefer a non-expired account token over sv_user (which may be stale if
+    // the primary account is idle while a secondary is actively recording)
+    const now = Date.now();
+    const accounts: any[] = sv_accounts || [];
+    const freshAccount = accounts.find(a => !a.invalid && a.expiresAt > now + 60_000);
+    const activeToken = freshAccount?.accessToken ?? sv_user?.accessToken;
+
+    if (activeToken) {
       await fetch('https://screenvault-backend.karthik-upadhyay98.workers.dev/logs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sv_user.accessToken}`
+          'Authorization': `Bearer ${activeToken}`
         },
         body: JSON.stringify({
           ...logMessage,
