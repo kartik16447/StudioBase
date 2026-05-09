@@ -192,11 +192,18 @@ export async function initResumableUpload(fileId: string, accessToken: string): 
     method: 'PATCH',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    }
+      'Content-Type': 'application/json',
+      'X-Upload-Content-Type': 'video/webm',
+    },
+    body: JSON.stringify({}),
   });
-  if (!res.ok) throw new Error('Failed to init resumable upload');
-  return res.headers.get('Location') || '';
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Failed to init resumable upload: ${res.status} ${errText}`);
+  }
+  const location = res.headers.get('Location');
+  if (!location) throw new Error('Drive did not return a resumable upload URL');
+  return location;
 }
 
 // Returns true if Drive signalled the upload is complete (200/201),

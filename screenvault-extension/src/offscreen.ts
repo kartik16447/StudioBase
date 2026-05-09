@@ -34,6 +34,10 @@ let offscreenAccounts: StorageAccount[] = [];
 let sessionTitle: string = "Screen Recording";
 
 const ENABLE_RESUME = false;
+// Progressive (chunked-during-recording) upload is disabled because Drive resumable
+// sessions on pre-allocated files return 503 on the second chunk consistently.
+// The reliable path is: full-blob upload after recording stops.
+const ENABLE_PROGRESSIVE_UPLOAD = false;
 
 console.log("Offscreen context initialized");
 console.log("Storage available:", !!chrome?.storage);
@@ -219,16 +223,53 @@ async function uploadWithFallback(
       console.log(`[SV][OFFSCREEN_UPLOAD] Starting data upload to ${fileId} using ${account.email}`);
       await uploadDataToExistingFile(fileId, blob, account, onProgress, token);
       
-      const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
+      let meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
       let url = meta?.playerUrl;
-      
+
+      // If syncBackend failed during recording, the video record and encrypted ID won't exist yet.
+      // Try to create it now that the file content is actually uploaded.
+      if (!meta?.encryptedFileId && fileId && offscreenUser?.workspaceId) {
+        try {
+          const syncToken = await getFreshToken(account.id, false).catch(() => offscreenUser?.accessToken || '');
+          const res = await fetch('https://screenvault-backend.karthik-upadhyay98.workers.dev/videos', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${syncToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fileId,
+              workspaceId: offscreenUser.workspaceId,
+              title: meta?.title || sessionTitle || 'Recording',
+              accountEmail: account.email,
+              sessionId: activeSessionId
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            await chrome.runtime.sendMessage({
+              type: 'SAVE_SESSION_METADATA',
+              sessionId: activeSessionId,
+              metadata: {
+                backendVideoId: data.id,
+                playerUrl: data.playerUrl,
+                encryptedFileId: data.encryptedFileId,
+                backendSynced: true
+              }
+            });
+            url = data.playerUrl;
+            meta = { ...meta, encryptedFileId: data.encryptedFileId };
+            svLog("FALLBACK_BACKEND_SYNC_SUCCESS", { sessionId: activeSessionId, videoId: data.id, timestamp: Date.now() });
+          }
+        } catch (e) {
+          svLog("FALLBACK_BACKEND_SYNC_FAILED", { sessionId: activeSessionId, error: String(e), timestamp: Date.now() });
+        }
+      }
+
       if (!url) {
         const idToUse = meta?.encryptedFileId || fileId;
         const titleToUse = meta?.title || sessionTitle || 'Recording';
         const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
         url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
       }
-      
+
       svLog("UPLOAD_FINAL_COMPLETE", {
         sessionId: activeSessionId,
         fileId,
@@ -493,36 +534,35 @@ function startMediaRecorder(stream: MediaStream) {
   uploadChunkBufferSize = 0;
 
   if (activeFileId && activeAccount) {
-    // Smart Improvement: Track last used account via message
-    if (activeAccount) {
-      chrome.runtime.sendMessage({
-        type: "SAVE_SESSION_METADATA",
-        sessionId: activeSessionId!,
-        metadata: { accountEmail: activeAccount.email }
-      });
-    }
+    chrome.runtime.sendMessage({
+      type: "SAVE_SESSION_METADATA",
+      sessionId: activeSessionId!,
+      metadata: { accountEmail: activeAccount.email }
+    });
 
-    getFreshToken(activeAccount.id, false)
-      .then(token => initResumableUpload(activeFileId!, token))
-      .then(async (url) => { 
-        resumableUploadUrl = url;
-        progressiveEnabled = true;
-        if (activeSessionId) {
-          await chrome.runtime.sendMessage({
-            type: 'SAVE_SESSION_METADATA',
-            sessionId: activeSessionId,
-            metadata: { 
-              uploadUrl: url, 
-              uploadedBytes: 0,
-              accountEmail: activeAccount?.email || offscreenUser?.email
-            }
-          });
-        }
-      })
-      .catch(e => {
-        console.error('Failed to init progressive upload:', e);
-        progressiveEnabled = false;
-      });
+    if (ENABLE_PROGRESSIVE_UPLOAD) {
+      getFreshToken(activeAccount.id, false)
+        .then(token => initResumableUpload(activeFileId!, token))
+        .then(async (url) => {
+          resumableUploadUrl = url;
+          progressiveEnabled = true;
+          if (activeSessionId) {
+            await chrome.runtime.sendMessage({
+              type: 'SAVE_SESSION_METADATA',
+              sessionId: activeSessionId,
+              metadata: {
+                uploadUrl: url,
+                uploadedBytes: 0,
+                accountEmail: activeAccount?.email || offscreenUser?.email
+              }
+            });
+          }
+        })
+        .catch(e => {
+          console.error('Failed to init progressive upload:', e);
+          progressiveEnabled = false;
+        });
+    }
   }
 
   let chunkCount = 0;
@@ -737,20 +777,28 @@ function startMediaRecorder(stream: MediaStream) {
           }
 
           // Sync Backend Status to READY (CRITICAL)
-          if (meta?.backendVideoId && offscreenUser?.accessToken) {
-            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
-              method: 'PATCH',
-              headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${offscreenUser.accessToken}`
-              },
-              body: JSON.stringify({
-                status: 'ready',
-                duration,
-                actualDurationMs: finalActualDurationMs,
-                sessionId: activeSessionId
-              })
-            });
+          if (meta?.backendVideoId) {
+            let progressiveFreshToken: string;
+            try {
+              progressiveFreshToken = await getFreshToken(activeAccount?.id, false);
+            } catch {
+              progressiveFreshToken = offscreenUser?.accessToken || '';
+            }
+            if (progressiveFreshToken) {
+              await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${progressiveFreshToken}`
+                },
+                body: JSON.stringify({
+                  status: 'ready',
+                  duration,
+                  actualDurationMs: finalActualDurationMs,
+                  sessionId: activeSessionId
+                })
+              });
+            }
           }
           
           const backendFinalizedAt = Date.now();
@@ -935,10 +983,18 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
       }
 
       try {
+        // Always fetch a fresh token so stale sv_user.accessToken doesn't cause 401/400
+        let freshToken: string;
+        try {
+          freshToken = await getFreshToken(activeAccount?.id, false);
+        } catch {
+          freshToken = user.accessToken;
+        }
+
         // 1. Update Video Status
         if (meta.backendVideoId && !meta.backendSynced) {
-          const updateBody: any = { 
-            status: 'ready', 
+          const updateBody: any = {
+            status: 'ready',
             sessionId,
             duration: meta.duration || 0,
             actualDurationMs: meta.actualDurationMs || 0
@@ -952,12 +1008,11 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
             timestamp: Date.now()
           });
 
-          // FIX: Direct fetch
           await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
             method: 'PATCH',
-            headers: { 
+            headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${user.accessToken}`
+              'Authorization': `Bearer ${freshToken}`
             },
             body: JSON.stringify(updateBody)
           });
@@ -967,7 +1022,7 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
             backendVideoId: meta.backendVideoId,
             timestamp: Date.now()
           });
-          
+
           await chrome.runtime.sendMessage({
             type: "SAVE_SESSION_METADATA",
             sessionId,
@@ -977,12 +1032,11 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
 
         // 2. Track Usage Stats
         if (meta && !meta.usageSynced && user.workspaceId) {
-          // FIX: Direct fetch instead of safeFetch to avoid storage error
           await fetch('https://screenvault-backend.karthik-upadhyay98.workers.dev/usage/update', {
             method: 'POST',
-            headers: { 
+            headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${user.accessToken}`
+              'Authorization': `Bearer ${freshToken}`
             },
             body: JSON.stringify({
               workspaceId: user.workspaceId,
@@ -1130,7 +1184,14 @@ async function enrichSession(
 
     // 3. Final Backend Patch (Polish)
     const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
-    if (meta?.backendVideoId && offscreenUser?.accessToken) {
+    if (meta?.backendVideoId) {
+      let enrichToken: string;
+      try {
+        enrichToken = await getFreshToken(account?.id, false);
+      } catch {
+        enrichToken = offscreenUser?.accessToken || '';
+      }
+
       const updateBody: any = {
         status: 'ready',
         duration,
@@ -1143,9 +1204,9 @@ async function enrichSession(
       const patchBackend = async () => {
         const res = await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
           method: 'PATCH',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${offscreenUser!.accessToken}`
+            'Authorization': `Bearer ${enrichToken}`
           },
           body: JSON.stringify(updateBody)
         });

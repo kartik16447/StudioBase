@@ -271,8 +271,13 @@ async function handleAdmin(request: Request, env: any) {
 }
 
 async function createVideo(request: Request, env: any) {
+	let user: any;
 	try {
-		const user = await getUserFromToken(request, env);
+		user = await getUserFromToken(request, env);
+	} catch (err: any) {
+		return jsonError(err.message, 'UNAUTHORIZED', 401);
+	}
+	try {
 		const body = (await request.json()) as any;
 		const { fileId, title, workspaceId, duration, accountEmail, sessionId } = body;
 		
@@ -629,8 +634,13 @@ async function deleteVideo(request: Request, env: any) {
 
 
 async function updateUsage(request: Request, env: any) {
+	let user: any;
 	try {
-		const user = await getUserFromToken(request, env);
+		user = await getUserFromToken(request, env);
+	} catch (err: any) {
+		return jsonError(err.message, 'UNAUTHORIZED', 401);
+	}
+	try {
 		const body = (await request.json()) as any;
 		const { workspaceId, duration, recordedAt } = body;
 

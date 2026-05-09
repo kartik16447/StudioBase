@@ -516,7 +516,14 @@ chrome.runtime.onMessage.addListener(
           console.warn("Using invalid account prevented:", account.id);
           return sendResponse({ error: "Account needs reconnection" });
         }
-        sendResponse(account.accessToken);
+        // Proactively refresh if the token is within 60 s of expiry
+        if (account.expiresAt < Date.now() + 60_000) {
+          trySilentRefresh(account)
+            .then(refreshed => sendResponse(refreshed.accessToken))
+            .catch(() => sendResponse(account.accessToken));
+        } else {
+          sendResponse(account.accessToken);
+        }
       } else {
         sendResponse({ error: "Account not found" });
       }
@@ -1074,13 +1081,28 @@ async function startRecording(target: AppState["target"]) {
     const syncBackend = async () => {
       try {
         const { sv_user } = (await chrome.storage.local.get("sv_user")) as { sv_user: BackendUser };
-        if (sv_user?.accessToken && sv_user?.workspaceId) {
-          const title = (target as any).userTitle || target.tabTitle || (allocation.fileName?.replace(".webm", "") ?? "");
-          
-          const res = await fetch("https://screenvault-backend.karthik-upadhyay98.workers.dev/videos", {
+        if (!sv_user?.workspaceId) return;
+
+        // Ensure we have a fresh primary token before calling the backend
+        let activeToken = sv_user.accessToken;
+        const primaryAccount = accounts.find(a => a.isPrimary);
+        if (primaryAccount && (primaryAccount.invalid || primaryAccount.expiresAt < Date.now() + 60_000)) {
+          try {
+            const refreshed = await trySilentRefresh(primaryAccount);
+            activeToken = refreshed.accessToken;
+            // sv_user is updated inside trySilentRefresh for isPrimary accounts
+          } catch (e) {
+            svLog("SYNC_BACKEND_TOKEN_REFRESH_FAILED", { error: String(e) });
+          }
+        }
+
+        const title = (target as any).userTitle || target.tabTitle || (allocation.fileName?.replace(".webm", "") ?? "");
+
+        const postVideo = async (token: string) => {
+          return fetch("https://screenvault-backend.karthik-upadhyay98.workers.dev/videos", {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${sv_user.accessToken}`,
+              Authorization: `Bearer ${token}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
@@ -1091,28 +1113,43 @@ async function startRecording(target: AppState["target"]) {
               sessionId,
             }),
           });
+        };
 
-          if (res.ok) {
-            const data = await res.json();
-            const backendVideoId = data.id;
-            const playerUrl = data.playerUrl;
-            const encryptedFileId = data.encryptedFileId;
+        let res = await postVideo(activeToken);
 
-            // Store references in metadata for later use
-            await saveSessionMetadata(sessionId, {
-              backendVideoId,
-              playerUrl,
-              encryptedFileId,
-              fileId: allocation.id,
-              accountEmail: allocation.account.email,
-              backendSynced: true,
-            });
-
-            // Update volatile state if still recording
-            if (state.sessionId === sessionId) {
-              updateState({ backendVideoId });
-            }
+        // If token was rejected, do one emergency refresh and retry
+        if (res.status === 401 && primaryAccount) {
+          try {
+            const refreshed = await trySilentRefresh(primaryAccount);
+            activeToken = refreshed.accessToken;
+            res = await postVideo(activeToken);
+          } catch (e) {
+            svLog("SYNC_BACKEND_TOKEN_RETRY_FAILED", { error: String(e) });
           }
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          const backendVideoId = data.id;
+          const playerUrl = data.playerUrl;
+          const encryptedFileId = data.encryptedFileId;
+
+          // Store references in metadata for later use
+          await saveSessionMetadata(sessionId, {
+            backendVideoId,
+            playerUrl,
+            encryptedFileId,
+            fileId: allocation.id,
+            accountEmail: allocation.account.email,
+            backendSynced: true,
+          });
+
+          // Update volatile state if still recording
+          if (state.sessionId === sessionId) {
+            updateState({ backendVideoId });
+          }
+        } else {
+          svLog("SYNC_BACKEND_VIDEO_POST_FAILED", { status: res.status, body: await res.text().catch(() => '') });
         }
       } catch (err) {
         console.warn("Deferred backend sync failed:", err);
@@ -1130,7 +1167,7 @@ async function startRecording(target: AppState["target"]) {
     const metaSaveProm = saveSessionMetadata(sessionId, {
       sessionId,
       fileId,
-      title: allocation.fileName,
+      title,
       accountId: allocation.account.id,
       accountEmail: allocation.account.email,
       startedAt,
