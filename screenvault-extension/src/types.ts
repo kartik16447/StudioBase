@@ -16,6 +16,7 @@ export interface PreAllocationResult {
   url: string;
   fileName: string;
   account: StorageAccount;
+  folderId?: string;
 }
 
 export interface SessionMetadata {
@@ -142,15 +143,16 @@ export type WorkerMessage =
 
 // Messages between service worker ↔ offscreen
 export type OffscreenMessage =
-  | { 
-      type: 'START_SCREEN'; 
-      fileId: string; 
-      sessionId: string; 
-      includeMic?: boolean; 
+  | {
+      type: 'START_SCREEN';
+      fileId: string;
+      sessionId: string;
+      includeMic?: boolean;
       account: StorageAccount;
       sv_user?: BackendUser;
       sv_accounts?: StorageAccount[];
       title?: string;
+      folderId?: string;
     }
   | { type: 'STOP'; account: StorageAccount | null }
   | { type: 'CAPTURE_STARTED' }

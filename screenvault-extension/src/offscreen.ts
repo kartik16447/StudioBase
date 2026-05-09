@@ -1,12 +1,14 @@
 import { OffscreenMessage, StorageAccount, SessionMetadata, BackendUser } from './types';
-import { 
-  preAllocateDriveFile, 
-  uploadDataToExistingFile, 
-  isFileReady, 
+import {
+  preAllocateDriveFile,
+  uploadDataToExistingFile,
+  isFileReady,
   getFileMetadata,
-  initResumableUpload, 
+  initResumableUploadPost,
   uploadResumableChunk,
   getUploadStatus,
+  makeFilePublic,
+  deleteFile,
   ensureWorkspaceMapping,
   uploadFileSimple
 } from './google-drive';
@@ -32,12 +34,12 @@ let recordingStartTime: number = 0;
 let offscreenUser: BackendUser | null = null;
 let offscreenAccounts: StorageAccount[] = [];
 let sessionTitle: string = "Screen Recording";
+let activeFolderId: string | null = null;
 
 const ENABLE_RESUME = false;
-// Progressive (chunked-during-recording) upload is disabled because Drive resumable
-// sessions on pre-allocated files return 503 on the second chunk consistently.
-// The reliable path is: full-blob upload after recording stops.
-const ENABLE_PROGRESSIVE_UPLOAD = false;
+// POST-based resumable sessions create a new file during recording (avoids PATCH 503).
+// After all chunks land, Drive returns the new file ID which replaces the placeholder.
+const ENABLE_PROGRESSIVE_UPLOAD = true;
 
 console.log("Offscreen context initialized");
 console.log("Storage available:", !!chrome?.storage);
@@ -82,6 +84,7 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
     offscreenUser = message.sv_user || null;
     offscreenAccounts = message.sv_accounts || [];
     sessionTitle = message.title || "Screen Recording";
+    activeFolderId = message.folderId || null;
     
     // Sync the new sessionId to the service worker to preserve title/context
     chrome.runtime.sendMessage({
@@ -323,7 +326,7 @@ async function uploadWithRetry(
         if (meta?.uploadUrl && !meta.status?.includes('ready')) {
           console.warn('Attempting to resume existing upload...');
           try {
-            const serverOffset = await getUploadStatus(meta.uploadUrl, blob.size);
+            const { received: serverOffset } = await getUploadStatus(meta.uploadUrl, blob.size);
             if (serverOffset < blob.size) {
               const remaining = blob.slice(serverOffset);
               await uploadResumableChunk(meta.uploadUrl, remaining, serverOffset, true); // final=true, result ignored
@@ -400,12 +403,10 @@ async function uploadWithRetry(
   throw lastError || new Error('Upload failed after multiple attempts');
 }
 
-// Returns true if Drive signalled upload complete (200/201 on a non-final chunk),
-// meaning all bytes are committed and we should skip remaining progressive chunks.
-async function uploadChunkWithRetry(url: string, chunk: Blob, offset: number, isFinal: boolean, maxRetries = 3): Promise<boolean> {
+async function uploadChunkWithRetry(url: string, chunk: Blob, offset: number, isFinal: boolean, maxRetries = 3): Promise<{ done: boolean; fileId?: string }> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const uploadComplete = await uploadResumableChunk(url, chunk, offset, isFinal);
+      const result = await uploadResumableChunk(url, chunk, offset, isFinal);
       consecutiveFailures = 0;
 
       svLog("UPLOAD_CHUNK_PROGRESS", {
@@ -413,11 +414,11 @@ async function uploadChunkWithRetry(url: string, chunk: Blob, offset: number, is
         offset,
         size: chunk.size,
         isFinal,
-        uploadComplete,
+        done: result.done,
         timestamp: Date.now()
       });
 
-      return uploadComplete;
+      return result;
     } catch (err) {
       if (attempt === maxRetries) {
         consecutiveFailures++;
@@ -429,6 +430,7 @@ async function uploadChunkWithRetry(url: string, chunk: Blob, offset: number, is
       console.warn(`[SV] Chunk retry ${attempt + 1} at offset ${offset}`);
     }
   }
+  return { done: false };
 }
 
 async function generateThumbnail(blob: Blob, retry = true): Promise<string | null> {
@@ -541,8 +543,10 @@ function startMediaRecorder(stream: MediaStream) {
     });
 
     if (ENABLE_PROGRESSIVE_UPLOAD) {
+      const now = new Date().toISOString().slice(0, 10);
+      const fileName = `screenvault-${now}.webm`;
       getFreshToken(activeAccount.id, false)
-        .then(token => initResumableUpload(activeFileId!, token))
+        .then(token => initResumableUploadPost(token, fileName, activeFolderId || undefined))
         .then(async (url) => {
           resumableUploadUrl = url;
           progressiveEnabled = true;
@@ -621,7 +625,7 @@ function startMediaRecorder(stream: MediaStream) {
                 progressiveEnabled = false;
                 return;
               }
-              const driveComplete = await uploadChunkWithRetry(resumableUploadUrl!, blobToUpload, offset, false);
+              const result = await uploadChunkWithRetry(resumableUploadUrl!, blobToUpload, offset, false);
               uploadedBytes += blobToUpload.size;
               if (activeSessionId) {
                 await chrome.runtime.sendMessage({
@@ -630,7 +634,7 @@ function startMediaRecorder(stream: MediaStream) {
                   metadata: { uploadedBytes: offset + blobToUpload.size }
                 });
               }
-              if (driveComplete) {
+              if (result.done) {
                 // Drive closed the session early (returned 200/201) — all data committed
                 progressiveEnabled = false;
               }
@@ -731,44 +735,81 @@ function startMediaRecorder(stream: MediaStream) {
       // 1. Critical Path: Finalize progressive upload
       await uploadQueue;
 
-      // Flush any remaining buffered data (sub-256KB tail that wasn't enqueued during recording)
-      if (progressiveEnabled && resumableUploadUrl && uploadChunkBuffer.length > 0) {
-        const tail = new Blob(uploadChunkBuffer, { type: 'video/webm' });
-        uploadChunkBuffer = [];
-        uploadChunkBufferSize = 0;
-        const offset = expectedOffset;
-        expectedOffset += tail.size;
+      if (progressiveEnabled && resumableUploadUrl && activeAccount) {
         try {
-          await uploadChunkWithRetry(resumableUploadUrl, tail, offset, false);
-          uploadedBytes += tail.size;
-        } catch (e: any) {
-          console.error('[SV][PROGRESSIVE_TAIL_FAIL]', e?.message);
-          progressiveEnabled = false;
-        }
-      }
+          let newFileId: string | undefined;
 
-      // If we never successfully uploaded any chunks via progressive, we MUST use fallback
-      if (progressiveEnabled && resumableUploadUrl && activeAccount && uploadedBytes > 0) {
-        try {
-          // Finalize: Drive accepts bytes */{total} as the completion signal
-          const serverConfirmedBytes = await getUploadStatus(resumableUploadUrl, uploadedBytes);
-          if (serverConfirmedBytes < uploadedBytes) {
-            throw new Error(`Upload incomplete: server has ${serverConfirmedBytes}/${uploadedBytes} bytes`);
+          if (uploadChunkBuffer.length > 0) {
+            // Send tail as the FINAL chunk — Drive returns new file ID in the 200/201 body
+            const tail = new Blob(uploadChunkBuffer, { type: 'video/webm' });
+            uploadChunkBuffer = [];
+            uploadChunkBufferSize = 0;
+            const offset = expectedOffset;
+            expectedOffset += tail.size;
+            const result = await uploadChunkWithRetry(resumableUploadUrl, tail, offset, true /* FINAL */);
+            uploadedBytes = expectedOffset;
+            newFileId = result.fileId;
+          } else if (uploadedBytes > 0) {
+            // All data already uploaded as non-final chunks — finalize via status query.
+            // Drive returns 200/201 with file body when all bytes are present.
+            const status = await getUploadStatus(resumableUploadUrl, uploadedBytes);
+            if (status.received < uploadedBytes) {
+              throw new Error(`Upload incomplete: server has ${status.received}/${uploadedBytes} bytes`);
+            }
+            newFileId = status.fileId;
+          } else {
+            throw new Error('No progressive data to finalize');
           }
+
+          if (!newFileId) {
+            throw new Error('Drive did not return new file ID after upload');
+          }
+
           const uploadCompleteAt = Date.now();
-          
-          const chunks = await getChunks(currentSessionId);
-          const finalBlob = new Blob(chunks, { type: 'video/webm' });
-          console.log(`[SV][FINALIZE] Session: ${currentSessionId}, Total Chunks: ${chunks.length}, Total Size: ${finalBlob.size}, Uploaded: ${uploadedBytes}`);
-
-          if (finalBlob.size === 0 && uploadedBytes === 0) {
-            throw new Error("Recording produced no data (0 bytes).");
-          }
-
           const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
           const duration = meta?.duration || durationSeconds;
           const finalActualDurationMs = meta?.actualDurationMs || actualDurationMs;
-          
+
+          svLog("PROGRESSIVE_UPLOAD_COMPLETE", {
+            sessionId: activeSessionId,
+            newFileId,
+            placeholderFileId: activeFileId,
+            uploadedBytes,
+            timestamp: uploadCompleteAt
+          });
+
+          // Fetch fresh token for Drive + backend calls
+          let freshToken: string;
+          try {
+            freshToken = await getFreshToken(activeAccount.id, false);
+          } catch {
+            freshToken = offscreenUser?.accessToken || '';
+          }
+
+          // Update backend DB: swap fileId to the real uploaded file.
+          // The player URL (encrypted placeholder ID) still works because the proxy
+          // resolves via encryptedFileId → video record → current fileId.
+          if (meta?.backendVideoId && freshToken) {
+            await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${freshToken}` },
+              body: JSON.stringify({
+                fileId: newFileId,
+                status: 'ready',
+                duration,
+                actualDurationMs: finalActualDurationMs,
+                sessionId: activeSessionId
+              })
+            });
+          }
+
+          // Delete placeholder in background (no content, just metadata)
+          if (activeFileId && freshToken) {
+            deleteFile(activeFileId, freshToken).catch(() => {});
+          }
+
+          const backendFinalizedAt = Date.now();
+
           let link = meta?.playerUrl;
           if (!link) {
             const idToUse = meta?.encryptedFileId || activeFileId;
@@ -776,53 +817,26 @@ function startMediaRecorder(stream: MediaStream) {
             link = `https://screenvault-player.pages.dev/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
           }
 
-          // Sync Backend Status to READY (CRITICAL)
-          if (meta?.backendVideoId) {
-            let progressiveFreshToken: string;
-            try {
-              progressiveFreshToken = await getFreshToken(activeAccount?.id, false);
-            } catch {
-              progressiveFreshToken = offscreenUser?.accessToken || '';
-            }
-            if (progressiveFreshToken) {
-              await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
-                method: 'PATCH',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${progressiveFreshToken}`
-                },
-                body: JSON.stringify({
-                  status: 'ready',
-                  duration,
-                  actualDurationMs: finalActualDurationMs,
-                  sessionId: activeSessionId
-                })
-              });
-            }
-          }
-          
-          const backendFinalizedAt = Date.now();
-
           // CRITICAL PATH COMPLETE: Show Link
-          chrome.runtime.sendMessage({ 
-            type: 'UPLOAD_COMPLETE', 
+          chrome.runtime.sendMessage({
+            type: 'UPLOAD_COMPLETE',
             url: link,
             account: activeAccount.email
           } as OffscreenMessage);
-          
+
           const linkReadyAt = Date.now();
 
-          await chrome.runtime.sendMessage({ 
-            type: 'SAVE_SESSION_METADATA', 
-            sessionId: activeSessionId, 
-            metadata: { 
-              duration, 
-              actualDurationMs: finalActualDurationMs, 
+          await chrome.runtime.sendMessage({
+            type: 'SAVE_SESSION_METADATA',
+            sessionId: activeSessionId,
+            metadata: {
+              duration,
+              actualDurationMs: finalActualDurationMs,
               uploadCompleteAt,
               backendFinalizedAt,
               linkReadyAt,
               status: 'ready'
-            } 
+            }
           });
 
           // BACKGROUND: Start Enrichment
@@ -830,10 +844,10 @@ function startMediaRecorder(stream: MediaStream) {
 
           await deleteSession(currentSessionId);
           await deleteChunks(currentSessionId);
-          return; 
+          return;
         } catch (e) {
-          console.debug('Progressive finalization failed, switching to fallback:', e);
-          resumableUploadUrl = null; 
+          console.debug('[SV][PROGRESSIVE_FINALIZE_FAIL] Switching to fallback:', e);
+          resumableUploadUrl = null;
         }
       }
 

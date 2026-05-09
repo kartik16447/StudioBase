@@ -62,10 +62,17 @@ export default {
 
     console.log(`[SV][FETCH_START] Decrypted: ${isDecrypted}, ID: ${fileId?.slice(0, 8)}..., Session: ${sessionId || 'none'}`);
 
-    // Resolve videoId and workspaceId for linkage
-    const video = (await env.DB.prepare('SELECT id, title, workspaceId, ownerId, actualDurationMs FROM videos WHERE fileId = ? OR encryptedFileId = ?')
+    // Resolve videoId and workspaceId for linkage, and get current fileId.
+    // fileId in the DB may differ from the decrypted URL param when progressive upload
+    // replaced the placeholder with the real uploaded file.
+    const video = (await env.DB.prepare('SELECT id, title, workspaceId, ownerId, actualDurationMs, fileId FROM videos WHERE fileId = ? OR encryptedFileId = ?')
       .bind(fileId, rawEncryptedId)
       .first()) as any;
+
+    // Always stream from the DB's current fileId (may have been updated after POST upload)
+    if (video?.fileId && isDecrypted) {
+      fileId = video.fileId;
+    }
 
     const commonMeta = {
       videoId: video?.id,

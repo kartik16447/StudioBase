@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT:$?\")"
+    ]
+  }
+}

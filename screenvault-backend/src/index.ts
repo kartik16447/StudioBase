@@ -534,6 +534,10 @@ async function updateVideo(request: Request, env: any) {
 			sets.push('status = ?');
 			params.push(body.status);
 		}
+		if (body.fileId) {
+			sets.push('fileId = ?');
+			params.push(body.fileId);
+		}
 		if (body.title) {
 			sets.push('title = ?');
 			params.push(body.title);

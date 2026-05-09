@@ -1197,6 +1197,7 @@ async function startRecording(target: AppState["target"]) {
         sv_user: storage.sv_user,
         sv_accounts: storage.sv_accounts,
         title,
+        folderId: allocation.folderId,
       } as OffscreenMessage);
     };
 

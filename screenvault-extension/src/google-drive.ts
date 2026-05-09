@@ -49,7 +49,8 @@ export async function preAllocateDriveFile(account: StorageAccount, accessToken?
       id: file.id,
       url: customUrl,
       fileName,
-      account
+      account,
+      folderId
     };
   } catch (err) {
     console.warn('Error setting permissions or getting URL:', err);
@@ -206,19 +207,51 @@ export async function initResumableUpload(fileId: string, accessToken: string): 
   return location;
 }
 
-// Returns true if Drive signalled the upload is complete (200/201),
-// false if it returned 308 (more chunks expected).
+/**
+ * POST-based resumable upload session — creates a brand-new file.
+ * Use this for progressive upload during recording (avoids 503 from PATCH-based sessions).
+ * Drive finalizes and returns the new file ID when the last chunk arrives.
+ */
+export async function initResumableUploadPost(
+  accessToken: string,
+  fileName: string,
+  folderId?: string
+): Promise<string> {
+  const metadata: any = { name: fileName, mimeType: 'video/webm' };
+  if (folderId) metadata.parents = [folderId];
+
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'X-Upload-Content-Type': 'video/webm',
+    },
+    body: JSON.stringify(metadata),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Failed to init POST resumable upload: ${res.status} ${errText}`);
+  }
+
+  const location = res.headers.get('Location');
+  if (!location) throw new Error('Drive did not return a resumable upload URL');
+  return location;
+}
+
+// Returns { done: true, fileId } when Drive signals upload complete (200/201).
+// Returns { done: false } when Drive signals more chunks expected (308).
 export async function uploadResumableChunk(
   uploadUrl: string,
   chunk: Blob,
   startByte: number,
   isFinal: boolean
-): Promise<boolean> {
+): Promise<{ done: boolean; fileId?: string }> {
   const endByte = startByte + chunk.size - 1;
   const totalStr = isFinal ? (startByte + chunk.size).toString() : '*';
 
   // Do NOT set Content-Length manually — the browser sets it from the body.
-  // Setting it explicitly can confuse Drive's session state.
   const res = await fetch(uploadUrl, {
     method: 'PUT',
     headers: {
@@ -227,12 +260,19 @@ export async function uploadResumableChunk(
     body: chunk
   });
 
-  if (res.status === 308) return false; // more chunks expected
-  if (res.ok) return true;              // 200/201 — Drive considers upload complete
+  if (res.status === 308) return { done: false };
+  if (res.ok) {
+    let fileId: string | undefined;
+    try {
+      const data = await res.json();
+      fileId = data.id;
+    } catch {}
+    return { done: true, fileId };
+  }
   throw new Error(`Chunk upload failed: ${res.status}`);
 }
 
-export async function getUploadStatus(uploadUrl: string, totalSize: number): Promise<number> {
+export async function getUploadStatus(uploadUrl: string, totalSize: number): Promise<{ received: number; fileId?: string }> {
   const res = await fetch(uploadUrl, {
     method: 'PUT',
     headers: {
@@ -242,13 +282,18 @@ export async function getUploadStatus(uploadUrl: string, totalSize: number): Pro
 
   if (res.status === 308) {
     const range = res.headers.get('Range');
-    if (!range) return 0;
+    if (!range) return { received: 0 };
     const match = range.match(/bytes=0-(\d+)/);
-    return match ? parseInt(match[1], 10) + 1 : 0;
+    return { received: match ? parseInt(match[1], 10) + 1 : 0 };
   } else if (res.status === 200 || res.status === 201) {
-    return totalSize;
+    let fileId: string | undefined;
+    try {
+      const data = await res.json();
+      fileId = data.id;
+    } catch {}
+    return { received: totalSize, fileId };
   }
-  return 0;
+  return { received: 0 };
 }
 
 export async function deleteFile(fileId: string, accessToken: string): Promise<void> {
