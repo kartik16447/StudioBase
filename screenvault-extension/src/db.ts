@@ -27,6 +27,13 @@ export function initDB(): Promise<IDBDatabase> {
   });
 }
 
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+export function getDB(): Promise<IDBDatabase> {
+  if (!dbPromise) dbPromise = initDB();
+  return dbPromise;
+}
+
 export async function saveChunk(sessionId: string, index: number, blob: Blob): Promise<void> {
   // Task 1 & 6: Guards and validation
   if (!sessionId) {
@@ -38,7 +45,7 @@ export async function saveChunk(sessionId: string, index: number, blob: Blob): P
     return;
   }
 
-  const db = await initDB();
+  const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
@@ -54,14 +61,12 @@ export async function saveChunk(sessionId: string, index: number, blob: Blob): P
       resolve();
     };
     request.onerror = () => reject(request.error);
-    
-    transaction.oncomplete = () => db.close();
   });
 }
 
 // Task 4: Implement getChunks(sessionId) with ordering guarantee
 export async function getChunks(sessionId: string): Promise<Blob[]> {
-  const db = await initDB();
+  const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);
@@ -86,7 +91,6 @@ export async function getChunks(sessionId: string): Promise<Blob[]> {
     };
 
     request.onerror = () => reject(request.error);
-    transaction.oncomplete = () => db.close();
   });
 }
 
@@ -98,7 +102,7 @@ export async function deleteChunks(sessionId: string): Promise<void> {
 
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  const db = await initDB();
+  const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
@@ -114,7 +118,6 @@ export async function deleteSession(sessionId: string): Promise<void> {
     };
 
     transaction.oncomplete = () => {
-      db.close();
       resolve();
     };
     transaction.onerror = () => reject(transaction.error);
@@ -128,7 +131,7 @@ export interface PendingSession {
 }
 
 export async function getPendingSessions(): Promise<PendingSession[]> {
-  const db = await initDB();
+  const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);
@@ -157,7 +160,7 @@ export async function getPendingSessions(): Promise<PendingSession[]> {
 }
 
 async function getSessionSummary(sessionId: string): Promise<PendingSession> {
-  const db = await initDB();
+  const db = await getDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);

@@ -48,6 +48,12 @@
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
 	 */
 	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ],
+	"kv_namespaces": [
+		{
+			"binding": "TOKEN_CACHE",
+			"id": "5f680a41aa05491fa51fffb09052e019"
+		}
+	],
 	"triggers": {
 		"crons": ["0 0 * * *"]
 	}
