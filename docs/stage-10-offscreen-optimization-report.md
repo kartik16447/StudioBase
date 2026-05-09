@@ -18,7 +18,9 @@ Stage 10 focused on reducing the "Stop to Link Ready" latency to under 800ms. Th
 
 ### Parallel Finalization (STEP 4)
 *   **Immediate Link Generation**: The `UPLOAD_COMPLETE` message is now fired immediately after the final chunk is committed to Drive and the token is resolved.
-*   **Fire-and-Forget Patching**: The backend database update (PATCH to `/videos/:id`) is now executed in the background without gating the UI. The user sees the playable link while the DB status update is still in flight.
+*   **Fire-and-Forget Patching**: The backend database update (PATCH to `/videos/:id`) is executed in the background without gating the UI. The user sees the playable link while the DB status update is still in flight.
+*   **Placeholder Deletion Safety**: Hardened the cleanup logic to only trigger `deleteFile` (placeholder removal) *after* the backend PATCH succeeds, ensuring no data loss if the DB swap is delayed.
+*   **Accurate Latency Telemetry**: Renamed `backendFinalizedAt` to `linkFiredAt` and updated latency auditing to `stopToLinkFired` to correctly reflect that the UI is unblocked before the final DB write completes.
 
 ---
 

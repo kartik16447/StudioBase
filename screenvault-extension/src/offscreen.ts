@@ -796,17 +796,17 @@ function startMediaRecorder(stream: MediaStream) {
               })
             }).then(() => {
                 svLog("BACKEND_FINALIZATION_COMPLETE", { sessionId: activeSessionId, timestamp: Date.now() });
+                // Delete placeholder ONLY after DB swap is confirmed
+                if (activeFileId && freshToken) {
+                  deleteFile(activeFileId, freshToken).catch(() => {});
+                }
             }).catch(e => {
                 svLog("BACKEND_FINALIZATION_FAILED", { sessionId: activeSessionId, error: String(e) });
             });
           }
 
-          // Delete placeholder in background (no content, just metadata)
-          if (activeFileId && freshToken) {
-            deleteFile(activeFileId, freshToken).catch(() => {});
-          }
 
-          const backendFinalizedAt = Date.now();
+          const linkFiredAt = Date.now();
 
           await chrome.runtime.sendMessage({
             type: 'SAVE_SESSION_METADATA',
@@ -815,7 +815,7 @@ function startMediaRecorder(stream: MediaStream) {
               duration,
               actualDurationMs: finalActualDurationMs,
               uploadCompleteAt,
-              backendFinalizedAt,
+              linkFiredAt,
               linkReadyAt,
               status: 'ready'
             }
@@ -1240,7 +1240,7 @@ async function enrichSession(
     const finalMeta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
     const latency = {
       stopToUploadComplete: (finalMeta.uploadCompleteAt || 0) - (finalMeta.stoppedAt || 0),
-      stopToBackendFinalized: (finalMeta.backendFinalizedAt || 0) - (finalMeta.stoppedAt || 0),
+      stopToLinkFired: (finalMeta.linkFiredAt || 0) - (finalMeta.stoppedAt || 0),
       stopToLinkReady: (finalMeta.linkReadyAt || 0) - (finalMeta.stoppedAt || 0),
       stopToEnrichmentFinished: (finalMeta.enrichmentFinishedAt || 0) - (finalMeta.stoppedAt || 0),
       totalDuration: finalMeta.actualDurationMs || 0
