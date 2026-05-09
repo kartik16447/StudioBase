@@ -816,6 +816,16 @@ async function recoverSessionHelper(sessionId: string) {
       }
     }
 
+    let offscreenReadyTriggered = false;
+    const readyListener = (msg: any) => {
+      if (msg.type === "OFFSCREEN_READY") {
+        offscreenReadyTriggered = true;
+        chrome.runtime.onMessage.removeListener(readyListener);
+        sendRecoverMessage();
+      }
+    };
+    chrome.runtime.onMessage.addListener(readyListener);
+
     await startOffscreenDocument();
 
     const sendRecoverMessage = async () => {
@@ -831,15 +841,10 @@ async function recoverSessionHelper(sessionId: string) {
     };
 
     if (await chrome.offscreen.hasDocument()) {
-      sendRecoverMessage();
-    } else {
-      const readyListener = (msg: any) => {
-        if (msg.type === "OFFSCREEN_READY") {
-          chrome.runtime.onMessage.removeListener(readyListener);
-          sendRecoverMessage();
-        }
-      };
-      chrome.runtime.onMessage.addListener(readyListener);
+      if (!offscreenReadyTriggered) {
+        chrome.runtime.onMessage.removeListener(readyListener);
+        sendRecoverMessage();
+      }
     }
 
     return { success: true };
@@ -1184,6 +1189,16 @@ async function startRecording(target: AppState["target"]) {
     });
 
     // 5. Invoke Offscreen Capture (The goal is to reach this ASAP)
+    let offscreenReadyTriggered = false;
+    const readyListener = (msg: any) => {
+      if (msg.type === "OFFSCREEN_READY") {
+        offscreenReadyTriggered = true;
+        chrome.runtime.onMessage.removeListener(readyListener);
+        sendCaptureMessage();
+      }
+    };
+    chrome.runtime.onMessage.addListener(readyListener);
+
     await offscreenProm; // Ensure offscreen is started (usually already done by pre-warm)
 
     const sendCaptureMessage = async () => {
@@ -1199,19 +1214,33 @@ async function startRecording(target: AppState["target"]) {
         title,
         folderId: allocation.folderId,
       } as OffscreenMessage);
-    };
 
-    // 5. Wait for offscreen to be ready or just send if already there
-    if (await chrome.offscreen.hasDocument()) {
-      sendCaptureMessage();
-    } else {
-      const readyListener = (msg: any) => {
-        if (msg.type === "OFFSCREEN_READY") {
-          chrome.runtime.onMessage.removeListener(readyListener);
-          sendCaptureMessage();
+      // Add timeout fallback for CAPTURE_STARTED
+      let captureStarted = false;
+      const captureListener = (msg: any) => {
+        if (msg.type === "CAPTURE_STARTED" && msg.sessionId === sessionId) {
+          captureStarted = true;
+          chrome.runtime.onMessage.removeListener(captureListener);
         }
       };
-      chrome.runtime.onMessage.addListener(readyListener);
+      chrome.runtime.onMessage.addListener(captureListener);
+
+      setTimeout(() => {
+        if (!captureStarted) {
+          chrome.runtime.onMessage.removeListener(captureListener);
+          updateState({
+            status: "error",
+            errorMessage: "Recording failed to start within 8 seconds.",
+          });
+        }
+      }, 8000);
+    };
+
+    if (await chrome.offscreen.hasDocument()) {
+      if (!offscreenReadyTriggered) {
+        chrome.runtime.onMessage.removeListener(readyListener);
+        sendCaptureMessage();
+      }
     }
   } catch (err: any) {
     preAllocationMap.delete(sessionId);

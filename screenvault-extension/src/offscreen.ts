@@ -108,6 +108,7 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
     activeFileId = message.fileId;
     offscreenUser = message.sv_user || null;
     offscreenAccounts = message.sv_accounts || [];
+    processingSessions.add(message.sessionId);
     recoverAndUpload(message.sessionId, message.account).catch(handleError);
   }
 });
@@ -497,6 +498,11 @@ function startMediaRecorder(stream: MediaStream) {
   isRecording = true;
   isStopping = false;
   let hasFinishedChunkProcessing = false;
+
+  chrome.runtime.sendMessage({
+    type: 'CAPTURE_STARTED',
+    sessionId: activeSessionId
+  });
 
   const preferredCodec = 'video/webm;codecs=vp8,opus';
   const fallbackCodec = 'video/webm';
