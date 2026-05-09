@@ -187,7 +187,10 @@ export default {
           }
       } else if (rangeHeader && driveRes.status === 200) {
           // If first fetch was a full GET (200) but browser wants a Range (206), re-fetch
-          driveRes = await fetch(driveUrl, fetchOptions);
+          // using usercontent domain which reliably supports byte-range requests
+          driveRes.body?.cancel();
+          const ucStreamUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download`;
+          driveRes = await fetch(ucStreamUrl, fetchOptions);
       }
 
       console.log(`[SV][DRIVE_RES] Status: ${driveRes.status}, Type: ${contentType}, Length: ${driveRes.headers.get("Content-Length")}`);

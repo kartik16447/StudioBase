@@ -139,6 +139,19 @@
         </button>
       </div>
 
+      <div
+        id="video-wrapper"
+        class="w-full max-w-5xl bg-black rounded-2xl overflow-hidden video-shadow relative aspect-video flex items-center justify-center group hidden"
+      >
+        <div
+          id="loader"
+          class="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 z-10 transition-opacity duration-300"
+          style="display:none"
+        >
+          <div class="spinner mb-4"></div>
+          <p class="text-gray-400 font-medium text-sm animate-pulse">Preparing your video...</p>
+        </div>
+
         <video
           id="player"
           class="w-full h-full object-contain outline-none bg-black"
@@ -190,7 +203,7 @@
              <div class="flex items-center gap-5">
                 <!-- Speed -->
                 <div id="speed-btn" class="text-[10px] font-black bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-full cursor-pointer transition-colors border border-white/5 uppercase tracking-widest">1x</div>
-                
+
                 <!-- Volume -->
                 <div class="flex items-center gap-2 group/volume relative">
                    <button id="volume-btn" class="focus:outline-none hover:scale-110 transition-transform">
@@ -200,6 +213,11 @@
                       <input id="volume-slider" type="range" class="w-20 accent-brand cursor-pointer h-1" min="0" max="1" step="0.05" value="1">
                    </div>
                 </div>
+
+                <!-- Fullscreen -->
+                <button id="fullscreen-btn" class="hover:scale-110 transition-transform focus:outline-none">
+                  <i id="fullscreen-icon" class="ph ph-arrows-out text-xl"></i>
+                </button>
              </div>
           </div>
         </div>
@@ -316,6 +334,8 @@
         const volumeIcon = document.getElementById("volume-icon");
         const volumeSlider = document.getElementById("volume-slider");
         const speedBtn = document.getElementById("speed-btn");
+        const fullscreenBtn = document.getElementById("fullscreen-btn");
+        const fullscreenIcon = document.getElementById("fullscreen-icon");
 
         let hasUserPlayed = false;
         let previewLoopActive = true;
@@ -354,10 +374,10 @@
           }
 
           // Play/Pause Icons
-          if (video.paused) {
+          if (video.paused || previewLoopActive) {
             playIcon.className = "ph-fill ph-play text-2xl";
             centerPlayIcon.className = "ph-fill ph-play text-4xl ml-1";
-            videoWrapper.classList.add("paused"); // Always show controls when paused
+            if (!previewLoopActive) videoWrapper.classList.add("paused");
           } else {
             playIcon.className = "ph-fill ph-pause text-2xl";
             centerPlayIcon.className = "ph-fill ph-pause text-4xl";
@@ -369,9 +389,13 @@
           if (!hasUserPlayed) {
             hasUserPlayed = true;
             previewLoopActive = false;
+            videoWrapper.classList.remove("preview");
             video.muted = false;
             video.currentTime = 0;
             updateVolumeIcon();
+            video.play();
+            updateUI();
+            return;
           }
 
           if (video.paused) {
@@ -415,12 +439,15 @@
             }
             video.src = streamUrl;
             video.load();
-            
-            // Wait for enough data to start muted loop
+
+            // Only show loader if video takes >500ms — avoids flash on fast connections
+            const loaderTimer = setTimeout(() => {
+              loader.style.display = "flex";
+            }, 500);
+            video.addEventListener("canplay", () => clearTimeout(loaderTimer), { once: true });
+
             video.muted = true;
-            video.play().catch(() => {
-                // Autoplay might be blocked even if muted on some browsers
-            });
+            video.play().catch(() => {});
 
           } catch (e) {
             showError("Connection Failed", "We couldn't connect to the stream.");
@@ -471,10 +498,24 @@
           speedBtn.textContent = speeds[speedIdx] + "x";
         });
 
+        fullscreenBtn.addEventListener("click", () => {
+          if (!document.fullscreenElement) {
+            videoWrapper.requestFullscreen?.();
+          } else {
+            document.exitFullscreen?.();
+          }
+        });
+
+        document.addEventListener("fullscreenchange", () => {
+          fullscreenIcon.className = document.fullscreenElement
+            ? "ph ph-arrows-in text-xl"
+            : "ph ph-arrows-out text-xl";
+        });
+
         // Keyboard Shortcuts
         window.addEventListener("keydown", (e) => {
           if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-          
+
           switch(e.key.toLowerCase()) {
             case " ":
             case "k":
@@ -484,6 +525,13 @@
             case "m":
               video.muted = !video.muted;
               updateVolumeIcon();
+              break;
+            case "f":
+              if (!document.fullscreenElement) {
+                videoWrapper.requestFullscreen?.();
+              } else {
+                document.exitFullscreen?.();
+              }
               break;
             case "arrowleft":
               video.currentTime = Math.max(0, video.currentTime - 15);
@@ -510,13 +558,14 @@
         video.addEventListener("pause", updateUI);
         video.addEventListener("volumechange", updateVolumeIcon);
 
-        video.addEventListener("loadedmetadata", () => {
+        video.addEventListener("canplay", () => {
           loader.style.opacity = "0";
           setTimeout(() => (loader.style.display = "none"), 300);
-          videoWrapper.classList.add("loaded");
+          video.classList.add("loaded");
+          videoWrapper.classList.add("preview");
           updateUI();
           showToast(delightMessages[Math.floor(Math.random() * delightMessages.length)], "ph-lightning", "text-yellow-400");
-        });
+        }, { once: true });
 
         let retryCount = 0;
         video.addEventListener("error", () => {
@@ -536,10 +585,27 @@
       });
     </script>
     <style>
-      /* Ensure controls are always visible when paused or loading */
+      /* Ensure controls are always visible when paused */
       #video-wrapper.paused #controls-bar {
         opacity: 1;
         pointer-events: auto;
+      }
+
+      /* Auto-hide loader the instant video gets .loaded — no JS timing needed */
+      #video-wrapper:has(#player.loaded) #loader {
+        display: none;
+      }
+
+      /* Preview loop mode: GIF-like, only play button visible */
+      #video-wrapper.preview #controls-bar {
+        display: none !important;
+      }
+      #video-wrapper.preview #center-play-btn {
+        background: transparent;
+        pointer-events: auto;
+      }
+      #video-wrapper.preview #center-play-btn > div {
+        transform: scale(1);
       }
       
       /* Progress slider styling */
