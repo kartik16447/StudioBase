@@ -551,7 +551,6 @@ function startMediaRecorder(stream: MediaStream) {
 
       if (progressiveEnabled && resumableUploadUrl) {
         const offset = uploadedBytes;
-        uploadedBytes += chunk.size;
         uploadQueue = uploadQueue
           .then(() => {
             if (!progressiveEnabled || !resumableUploadUrl || consecutiveFailures >= 3) {
@@ -560,6 +559,7 @@ function startMediaRecorder(stream: MediaStream) {
             }
             const currentOffset = offset;
             return uploadChunkWithRetry(resumableUploadUrl!, chunk, currentOffset, false).then(async () => {
+              uploadedBytes += chunk.size; // advance only after confirmed success
               if (activeSessionId) {
                 await chrome.runtime.sendMessage({
                   type: 'SAVE_SESSION_METADATA',
@@ -668,9 +668,11 @@ function startMediaRecorder(stream: MediaStream) {
       // If we never successfully uploaded any chunks via progressive, we MUST use fallback
       if (progressiveEnabled && resumableUploadUrl && activeAccount && uploadedBytes > 0) {
         try {
-          // Sync final chunk (CRITICAL)
-          const empty = new Blob([], { type: 'video/webm' });
-          await uploadChunkWithRetry(resumableUploadUrl, empty, uploadedBytes, true);
+          // Finalize: Drive accepts bytes */{total} as the completion signal
+          const serverConfirmedBytes = await getUploadStatus(resumableUploadUrl, uploadedBytes);
+          if (serverConfirmedBytes < uploadedBytes) {
+            throw new Error(`Upload incomplete: server has ${serverConfirmedBytes}/${uploadedBytes} bytes`);
+          }
           const uploadCompleteAt = Date.now();
           
           const chunks = await getChunks(currentSessionId);
