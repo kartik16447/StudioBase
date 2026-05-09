@@ -105,8 +105,12 @@ async function runMaintenance(env: any) {
 			.run();
 		console.log(`[SV][MAINTENANCE] Purged ${logMeta?.changes || 0} old debug logs.`);
 
-		// 2. Sample/Aggregate metrics_events (TODO in next phase)
-		// For now, we just ensure the DB is healthy.
+		// 2. Purge old metrics events (90-day retention)
+		const ninetyDaysAgo = now - 90 * 24 * 60 * 60 * 1000;
+		const { meta: metricsMeta } = await env.DB.prepare('DELETE FROM metrics_events WHERE timestamp < datetime(?, "unixepoch")')
+			.bind(Math.floor(ninetyDaysAgo / 1000))
+			.run();
+		console.log(`[SV][MAINTENANCE] Purged ${metricsMeta?.changes || 0} old metrics events.`);
 	} catch (e: any) {
 		console.error('[SV][MAINTENANCE] Cleanup failed:', e.message);
 	}
@@ -1324,10 +1328,9 @@ async function updateWorkspace(request: Request, env: any) {
 		const workspaceId = url.pathname.split('/').pop();
 		const body = (await request.json()) as any;
 
-		// Security: Only owner can update workspace settings (optional, but good)
 		const workspace = (await env.DB.prepare('SELECT ownerId FROM workspaces WHERE id = ?').bind(workspaceId).first()) as any;
 		if (!workspace || workspace.ownerId !== user.id) {
-			// Fallback: If not owner, still allow if member with some role (for now keeping it simple)
+			return jsonError('Only the workspace owner can update settings', 'FORBIDDEN', 403);
 		}
 
 		if (body.driveFolderId) {
