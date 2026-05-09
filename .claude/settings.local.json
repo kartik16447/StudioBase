@@ -5,7 +5,8 @@
       "Bash(git commit -m ' *)",
       "Bash(npm run *)",
       "Bash(npx tsc *)",
-      "Bash(echo \"EXIT:$?\")"
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(find /Users/kartikupadhyay -name \"stage-3*\" -type f 2>/dev/null)"
     ]
   }
 }

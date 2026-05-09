@@ -1313,10 +1313,26 @@ function stopRecording() {
 
       let url = sessionMeta?.playerUrl;
       if (!url) {
-        const idToUse = sessionMeta?.encryptedFileId || fileId;
+        let encryptedId = sessionMeta?.encryptedFileId;
+        
+        if (!encryptedId) {
+          // Wait up to 3s for syncBackend to write encryptedFileId
+          for (let i = 0; i < 6; i++) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const refreshed = await chrome.storage.local.get("sv_sessions");
+            encryptedId = (refreshed.sv_sessions || {})[sessionId]?.encryptedFileId;
+            if (encryptedId) break;
+          }
+        }
+
         const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
-        url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(title)}`;
-        if (sessionId) url += `&sid=${sessionId}`;
+        url = `${PLAYER_BASE_URL}/?title=${encodeURIComponent(title)}`;
+        if (encryptedId) {
+          url += `&id=${encryptedId}`;
+        }
+        if (sessionId) {
+          url += `&sid=${sessionId}`;
+        }
       }
 
       svLog("EARLY_LINK_FORCED_READY", { sessionId, fileId, url, uploadDone, timedOut, timestamp: Date.now() });

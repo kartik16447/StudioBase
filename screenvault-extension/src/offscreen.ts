@@ -420,7 +420,30 @@ async function uploadChunkWithRetry(url: string, chunk: Blob, offset: number, is
       });
 
       return result;
-    } catch (err) {
+    } catch (err: any) {
+      const is503 = err?.message?.includes('503');
+
+      if (is503) {
+        // Drive returned 503 but may have persisted the bytes server-side.
+        // Query status before retrying to avoid re-sending bytes Drive already has.
+        try {
+          // +1 so Drive treats this as incomplete and returns 308 (not 200/finalize)
+          const probedTotal = offset + chunk.size + 1;
+          const statusRes = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Range': `bytes */${probedTotal}` }
+          });
+          if (statusRes.status === 308) {
+            const range = statusRes.headers.get('Range');
+            const received = range ? parseInt(range.match(/bytes=0-(\d+)/)?.[1] ?? '-1', 10) + 1 : 0;
+            if (received >= offset + chunk.size) {
+              consecutiveFailures = 0;
+              return { done: false }; // Drive has all bytes — no retry needed
+            }
+          }
+        } catch {}
+      }
+
       if (attempt === maxRetries) {
         consecutiveFailures++;
         throw err;
