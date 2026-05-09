@@ -180,17 +180,14 @@ async function uploadWithFallback(
   accounts: StorageAccount[],
   onProgress: (n: number) => void
 ): Promise<{ url: string; accountEmail: string }> {
-  // Task 1: Identify active account (Saving)
-  const sortedAccounts = [...accounts].sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0));
-  const primaryTry = sortedAccounts[0];
-  if (accounts.length === 0) {
-    throw new Error('No connected accounts. Please connect a Google Drive account.');
-  }
+  // Task 1: Hard Account Pinning - ONLY use the provided account
+  const targetAccount = accounts.find(a => a.isActive);
+  if (!targetAccount) throw new Error('No active account pinned to this session.');
 
-  let lastError: Error | null = null;
-  for (const account of sortedAccounts) {
-    try {
-      let fileId = activeFileId;
+  // We no longer loop through all accounts. We stick to the pinned one.
+  const account = targetAccount;
+  try {
+    let fileId = activeFileId;
       
       // If we are on a fallback account OR if activeFileId was never set, create a new file
       if (account.id !== activeAccount?.id || !fileId) {
@@ -274,23 +271,19 @@ async function uploadWithFallback(
         url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
       }
 
-      svLog("UPLOAD_FINAL_COMPLETE", {
-        sessionId: activeSessionId,
-        fileId,
-        url,
-        method: 'standard_fallback',
-        timestamp: Date.now()
-      });
+    svLog("UPLOAD_FINAL_COMPLETE", {
+      sessionId: activeSessionId,
+      fileId,
+      url,
+      method: 'standard_pinned',
+      timestamp: Date.now()
+    });
 
-      return { url, accountEmail: account.email };
-    } catch (err: any) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      // Reset activeAccount to null so next iteration definitely creates a new file if this one failed
-      activeAccount = null; 
-    }
+    return { url, accountEmail: account.email };
+  } catch (err: any) {
+    console.error(`[SV][UPLOAD_FAILED] Account: ${account.email}, Error: ${err.message}`);
+    throw err instanceof Error ? err : new Error(String(err));
   }
-
-  throw lastError || new Error('All connected accounts failed to upload.');
 }
 
 async function uploadWithRetry(
@@ -990,12 +983,8 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
       blobUrl 
     } as OffscreenMessage);
 
-    // Filter and order accounts for fallback: primary first, then others
+    // Task 6: Hard Account Pinning - only use the specified account
     const retryAccounts = [account];
-    if (allAccounts.length > 0) {
-      const others = allAccounts.filter(a => a.id !== account.id);
-      retryAccounts.push(...others);
-    }
 
     // Task 3 & 4: Drive upload and validation
     const result = await uploadWithRetry(blob, retryAccounts, (progress) => {

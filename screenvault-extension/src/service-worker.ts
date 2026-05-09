@@ -214,9 +214,13 @@ async function selectBestAccount(): Promise<StorageAccount | null> {
   const data_accounts = { sv_accounts: accounts };
   await chrome.storage.local.set(data_accounts);
 
-  let candidate = accounts.find((a) => a.isActive);
-  if (!candidate && accounts.length > 0) {
-    candidate = [...accounts].sort((a, b) => {
+  // Filter for valid accounts only, unless we have no choice
+  let validAccounts = accounts.filter(a => !a.invalid);
+  let pool = validAccounts.length > 0 ? validAccounts : accounts;
+
+  let candidate = pool.find((a) => a.isActive);
+  if (!candidate && pool.length > 0) {
+    candidate = [...pool].sort((a, b) => {
       const aSpace = (a.quotaTotal || 1) - (a.quotaUsed || 0);
       const bSpace = (b.quotaTotal || 1) - (b.quotaUsed || 0);
       const aRatio = aSpace / (a.quotaTotal || 1);
@@ -229,13 +233,14 @@ async function selectBestAccount(): Promise<StorageAccount | null> {
   }
 
   if (candidate) {
-    if (candidate.invalid || candidate.expiresAt < now + 60000) {
+    if (candidate.invalid || (candidate.expiresAt < now + 60000)) {
       try {
         candidate = await trySilentRefresh(candidate);
       } catch (e) {
-        svLog("SELECTED_ACCOUNT_PINNED", { accountEmail: candidate.email });
+        svLog("SELECTED_ACCOUNT_REFRESH_FAILED", { accountEmail: candidate.email, error: String(e) });
         candidate.invalid = true;
         candidate.invalidReason = "refresh_failed";
+        throw new Error(`Account ${candidate.email} needs reconnection.`);
       }
     }
   }
@@ -798,10 +803,12 @@ async function recoverSessionHelper(sessionId: string) {
     const meta = await getSessionMetadata(sessionId);
     if (!meta) throw new Error("Session not found");
 
-    const account =
-      accounts.find((a) => a.id === meta.accountId) ||
-      (accounts.length > 0 ? accounts[0] : null);
-    if (!account) throw new Error("No account available for upload");
+    const account = accounts.find((a) => a.id === meta.accountId);
+    if (!account) {
+      svLog("RECOVERY_ACCOUNT_MISSING", { sessionId, accountId: meta.accountId });
+      await saveSessionMetadata(sessionId, { status: "failed" });
+      throw new Error(`Account pinned to this session (${meta.accountId}) is no longer available. Please reconnect the account to recover.`);
+    }
 
     let fileId = meta.fileId;
 
