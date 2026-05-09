@@ -410,11 +410,12 @@ async function getVideos(request: Request, env: any) {
 		let params: any[] = [workspaceId];
 
 		if (cursor) {
-			query += ' AND createdAt < ?';
-			params.push(parseInt(cursor));
+			const [cTime, cId] = cursor.split(':');
+			query += ' AND (createdAt < ? OR (createdAt = ? AND id < ?))';
+			params.push(parseInt(cTime), parseInt(cTime), cId || '');
 		}
 
-		query += ' ORDER BY createdAt DESC LIMIT ?';
+		query += ' ORDER BY createdAt DESC, id DESC LIMIT ?';
 		params.push(limit + 1);
 
 		const { results } = await env.DB.prepare(query).bind(...params).all();
@@ -437,7 +438,7 @@ async function getVideos(request: Request, env: any) {
 
 		const hasMore = processedVideos.length > limit;
 		const videos = hasMore ? processedVideos.slice(0, limit) : processedVideos;
-		const nextCursor = videos.length > 0 ? videos[videos.length - 1].createdAt : null;
+		const nextCursor = videos.length > 0 ? `${videos[videos.length - 1].createdAt}:${videos[videos.length - 1].id}` : null;
 
 		return Response.json({
 			videos,
@@ -736,7 +737,7 @@ async function createInvite(request: Request, env: any) {
 
 		return Response.json({
 			token,
-			joinUrl: `/invite/${token}`, // New format /invite/<token>
+			joinUrl: `${PLAYER_BASE_URL}/#/invite/${token}`,
 			expiresAt,
 			role: inviteRole
 		});

@@ -253,9 +253,6 @@ function renderState(newState: AppState) {
       if (state.status === "enriching") {
         successMeta.textContent = `Uploaded! Polishing thumbnail & preview...`;
         successMeta.style.color = "var(--blue)";
-      } else if (state.status === "failed_enrichment") {
-        successMeta.textContent = `Uploaded (Enrichment failed)`;
-        successMeta.style.color = "var(--orange)";
       } else {
         successMeta.textContent = `Uploaded to ${state.uploadAccount}`;
         successMeta.style.color = "var(--text-secondary)";

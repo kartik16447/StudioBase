@@ -79,7 +79,7 @@ export function LibraryPage() {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
   // Pagination State
-  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [nextCursor, setNextCursor] = useState<any | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -94,7 +94,7 @@ export function LibraryPage() {
   const isFetching = React.useRef(false);
   const observerTarget = React.useRef<HTMLDivElement>(null);
 
-  const fetchData = React.useCallback(async (cursor?: number | null) => {
+  const fetchData = React.useCallback(async (cursor?: any | null) => {
     const isInitial = !cursor;
     console.log(`fetchData called. initial: ${isInitial}, cursor: ${cursor}`);
 
@@ -224,6 +224,7 @@ export function LibraryPage() {
               startedAt: session.startedAt,
               thumbnailLink: session.thumbnailUrl || null,
               accountEmail: session.accountEmail || "Local Session",
+              playerUrl: session.playerUrl,
             });
           }
         });
@@ -330,7 +331,7 @@ export function LibraryPage() {
     if (!confirm("Are you sure you want to remove this member?")) return;
     try {
       await safeFetch(
-        `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/member/${userIdToRemove}?workspaceId=${user.workspaceId}`,
+        `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/member/${userIdToRemove}?workspaceId=${user?.workspaceId}`,
         {
           method: "DELETE",
         },
@@ -373,7 +374,7 @@ export function LibraryPage() {
       );
       const data = await res.json();
 
-      const fullUrl = `${VIEWER_BASE_URL}/#/invite/${data.token}`; // Updated format
+      const fullUrl = data.joinUrl || `${VIEWER_BASE_URL}/#/invite/${data.token}`;
       setInviteUrl(fullUrl);
       await navigator.clipboard.writeText(fullUrl);
       fetchInvites(); // Refresh list
@@ -451,13 +452,29 @@ export function LibraryPage() {
       changes: Record<string, chrome.storage.StorageChange>,
       areaName: string,
     ) => {
-      if (areaName === "local" && (changes.sv_sessions || changes.sv_user)) {
-        // Debounce fetchData to avoid reloading too many times during progress updates
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          console.log("Dashboard: Storage change detected, refreshing...");
+      if (areaName === "local") {
+        if (changes.sv_user) {
           fetchData();
-        }, 1000);
+          return;
+        }
+
+        if (changes.sv_sessions) {
+          const oldSessions = (changes.sv_sessions.oldValue || {}) as Record<string, SessionMetadata>;
+          const newSessions = (changes.sv_sessions.newValue || {}) as Record<string, SessionMetadata>;
+          
+          // Only refresh if a session's status has changed
+          const statusChanged = Object.keys(newSessions).some(sid => {
+            return oldSessions[sid]?.status !== newSessions[sid]?.status;
+          });
+
+          if (statusChanged) {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+              console.log("Dashboard: Session status change detected, refreshing...");
+              fetchData();
+            }, 1000);
+          }
+        }
       }
     };
     chrome.storage.onChanged.addListener(listener);
