@@ -45,6 +45,11 @@ let expectedOffset = 0;     // next chunk's byte offset (advances immediately on
 let uploadQueue: Promise<void> = Promise.resolve();
 let progressiveEnabled = false;
 let consecutiveFailures = 0;
+// Drive requires non-final chunks to be multiples of 256 KB.
+// Buffer MediaRecorder chunks until we hit that threshold before uploading.
+const MIN_UPLOAD_CHUNK = 256 * 1024;
+let uploadChunkBuffer: Blob[] = [];
+let uploadChunkBufferSize = 0;
 
 async function getFreshToken(accountId?: string, interactive: boolean = false): Promise<string> {
   const response = await chrome.runtime.sendMessage({ 
@@ -480,6 +485,8 @@ function startMediaRecorder(stream: MediaStream) {
   uploadQueue = Promise.resolve();
   progressiveEnabled = false;
   consecutiveFailures = 0;
+  uploadChunkBuffer = [];
+  uploadChunkBufferSize = 0;
 
   if (activeFileId && activeAccount) {
     // Smart Improvement: Track last used account via message
@@ -552,32 +559,41 @@ function startMediaRecorder(stream: MediaStream) {
       });
 
       if (progressiveEnabled && resumableUploadUrl) {
-        // Capture offset now so each chunk gets a unique sequential position,
-        // even before the previous chunk's upload has resolved in the queue.
-        const offset = expectedOffset;
-        expectedOffset += chunk.size;
-        uploadQueue = uploadQueue
-          .then(() => {
-            if (!progressiveEnabled || !resumableUploadUrl || consecutiveFailures >= 3) {
-              progressiveEnabled = false;
-              return;
-            }
-            return uploadChunkWithRetry(resumableUploadUrl!, chunk, offset, false).then(async () => {
-              uploadedBytes += chunk.size; // advance confirmed bytes on success only
-              if (activeSessionId) {
-                await chrome.runtime.sendMessage({
-                  type: 'SAVE_SESSION_METADATA',
-                  sessionId: activeSessionId,
-                  metadata: { uploadedBytes: offset + chunk.size }
-                });
+        // Buffer until we have ≥ 256 KB — Drive rejects non-final chunks smaller than that
+        uploadChunkBuffer.push(chunk);
+        uploadChunkBufferSize += chunk.size;
+
+        if (uploadChunkBufferSize >= MIN_UPLOAD_CHUNK) {
+          const blobToUpload = new Blob(uploadChunkBuffer, { type: 'video/webm' });
+          uploadChunkBuffer = [];
+          uploadChunkBufferSize = 0;
+
+          const offset = expectedOffset;
+          expectedOffset += blobToUpload.size;
+
+          uploadQueue = uploadQueue
+            .then(() => {
+              if (!progressiveEnabled || !resumableUploadUrl || consecutiveFailures >= 3) {
+                progressiveEnabled = false;
+                return;
               }
+              return uploadChunkWithRetry(resumableUploadUrl!, blobToUpload, offset, false).then(async () => {
+                uploadedBytes += blobToUpload.size;
+                if (activeSessionId) {
+                  await chrome.runtime.sendMessage({
+                    type: 'SAVE_SESSION_METADATA',
+                    sessionId: activeSessionId,
+                    metadata: { uploadedBytes: offset + blobToUpload.size }
+                  });
+                }
+              });
+            })
+            .catch(err => {
+              console.error('[SV][PROGRESSIVE_CHUNK_FAIL]', err?.message, { offset, size: blobToUpload.size });
+              progressiveEnabled = false;
+              resumableUploadUrl = null;
             });
-          })
-          .catch(err => {
-            console.debug('Progressive upload degraded, switching to fallback:', err);
-            progressiveEnabled = false;
-            resumableUploadUrl = null;
-          });
+        }
       }
     }
 
@@ -666,9 +682,24 @@ function startMediaRecorder(stream: MediaStream) {
       const actualDurationMs = Math.floor(stopTimePerf - recordingStartTime);
 
       // 1. Critical Path: Finalize progressive upload
-      // Wait for all chunks to finish uploading before sending the final empty blob
       await uploadQueue;
-      
+
+      // Flush any remaining buffered data (sub-256KB tail that wasn't enqueued during recording)
+      if (progressiveEnabled && resumableUploadUrl && uploadChunkBuffer.length > 0) {
+        const tail = new Blob(uploadChunkBuffer, { type: 'video/webm' });
+        uploadChunkBuffer = [];
+        uploadChunkBufferSize = 0;
+        const offset = expectedOffset;
+        expectedOffset += tail.size;
+        try {
+          await uploadChunkWithRetry(resumableUploadUrl, tail, offset, false);
+          uploadedBytes += tail.size;
+        } catch (e: any) {
+          console.error('[SV][PROGRESSIVE_TAIL_FAIL]', e?.message);
+          progressiveEnabled = false;
+        }
+      }
+
       // If we never successfully uploaded any chunks via progressive, we MUST use fallback
       if (progressiveEnabled && resumableUploadUrl && activeAccount && uploadedBytes > 0) {
         try {
