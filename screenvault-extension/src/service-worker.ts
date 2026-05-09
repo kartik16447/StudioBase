@@ -1219,39 +1219,44 @@ function stopRecording() {
       timestamp: Date.now()
     });
 
-    setTimeout(async () => {
-      // Re-fetch current state from storage to check if already marked ready by actual completion
-      const stored = await chrome.storage.local.get("sv_state");
+    // Poll until upload completes or 30s elapses, then force ready.
+    // Progressive uploads finish in <4.5s; fallback (full blob) can take longer.
+    const earlyLinkStart = Date.now();
+    const MAX_WAIT_MS = 30_000;
+    const POLL_INTERVAL_MS = 2_000;
+
+    const checkAndForce = async () => {
+      const stored = await chrome.storage.local.get(["sv_state", "sv_sessions"]);
       const currentState = stored.sv_state as AppState;
-      
-      if (currentState && currentState.status !== "ready" && currentState.sessionId === sessionId && sessionId) {
-        const sessionMetaStorage = await chrome.storage.local.get("sv_sessions");
-        const sv_sessions = (sessionMetaStorage.sv_sessions || {}) as Record<string, any>;
-        const sessionMeta = sv_sessions[sessionId] as SessionMetadata;
-        let url = sessionMeta?.playerUrl;
 
-        if (!url) {
-          const idToUse = sessionMeta?.encryptedFileId || fileId;
-          const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
-          const encodedTitle = encodeURIComponent(title);
-          url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodedTitle}`;
-          if (sessionId) url += `&sid=${sessionId}`;
-          console.log(`[SV][BACKEND_AUTHORITY] Forced early link generated: ${url}`);
-        }
-        svLog("EARLY_LINK_FORCED_READY", { 
-          sessionId,
-          fileId,
-          url,
-          timestamp: Date.now()
-        });
+      // Abort if session changed or already marked ready by the real upload handler
+      if (!currentState || currentState.status === "ready" || currentState.sessionId !== sessionId) return;
 
-        updateState({
-          status: "ready",
-          uploadUrl: url,
-          uploadAccount: accountEmail
-        });
+      const sv_sessions = (stored.sv_sessions || {}) as Record<string, any>;
+      const sessionMeta = sv_sessions[sessionId] as SessionMetadata;
+
+      // Wait for upload to complete unless we've exceeded the max wait
+      const uploadDone = !!sessionMeta?.uploadCompleteAt;
+      const timedOut = Date.now() - earlyLinkStart >= MAX_WAIT_MS;
+
+      if (!uploadDone && !timedOut) {
+        setTimeout(checkAndForce, POLL_INTERVAL_MS);
+        return;
       }
-    }, 4500);
+
+      let url = sessionMeta?.playerUrl;
+      if (!url) {
+        const idToUse = sessionMeta?.encryptedFileId || fileId;
+        const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
+        url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(title)}`;
+        if (sessionId) url += `&sid=${sessionId}`;
+      }
+
+      svLog("EARLY_LINK_FORCED_READY", { sessionId, fileId, url, uploadDone, timedOut, timestamp: Date.now() });
+      updateState({ status: "ready", uploadUrl: url, uploadAccount: accountEmail });
+    };
+
+    setTimeout(checkAndForce, 4500);
   }
 }
 

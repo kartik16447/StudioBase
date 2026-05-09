@@ -40,7 +40,8 @@ console.log("Storage available:", !!chrome?.storage);
 
 // Progressive Upload State
 let resumableUploadUrl: string | null = null;
-let uploadedBytes = 0;
+let uploadedBytes = 0;      // confirmed-uploaded bytes (advances on success only)
+let expectedOffset = 0;     // next chunk's byte offset (advances immediately on enqueue)
 let uploadQueue: Promise<void> = Promise.resolve();
 let progressiveEnabled = false;
 let consecutiveFailures = 0;
@@ -475,6 +476,7 @@ function startMediaRecorder(stream: MediaStream) {
   // Reset progressive state
   resumableUploadUrl = null;
   uploadedBytes = 0;
+  expectedOffset = 0;
   uploadQueue = Promise.resolve();
   progressiveEnabled = false;
   consecutiveFailures = 0;
@@ -550,21 +552,23 @@ function startMediaRecorder(stream: MediaStream) {
       });
 
       if (progressiveEnabled && resumableUploadUrl) {
-        const offset = uploadedBytes;
+        // Capture offset now so each chunk gets a unique sequential position,
+        // even before the previous chunk's upload has resolved in the queue.
+        const offset = expectedOffset;
+        expectedOffset += chunk.size;
         uploadQueue = uploadQueue
           .then(() => {
             if (!progressiveEnabled || !resumableUploadUrl || consecutiveFailures >= 3) {
               progressiveEnabled = false;
               return;
             }
-            const currentOffset = offset;
-            return uploadChunkWithRetry(resumableUploadUrl!, chunk, currentOffset, false).then(async () => {
-              uploadedBytes += chunk.size; // advance only after confirmed success
+            return uploadChunkWithRetry(resumableUploadUrl!, chunk, offset, false).then(async () => {
+              uploadedBytes += chunk.size; // advance confirmed bytes on success only
               if (activeSessionId) {
                 await chrome.runtime.sendMessage({
                   type: 'SAVE_SESSION_METADATA',
                   sessionId: activeSessionId,
-                  metadata: { uploadedBytes: currentOffset + chunk.size }
+                  metadata: { uploadedBytes: offset + chunk.size }
                 });
               }
             });
