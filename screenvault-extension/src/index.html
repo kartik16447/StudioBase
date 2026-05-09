@@ -139,36 +139,69 @@
         </button>
       </div>
 
-      <div
-        id="video-wrapper"
-        class="w-full max-w-5xl bg-black rounded-2xl overflow-hidden video-shadow relative aspect-video flex items-center justify-center group hidden"
-      >
-        <div
-          id="loader"
-          class="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 z-10 transition-opacity duration-300"
-        >
-          <div class="spinner mb-4"></div>
-          <p class="text-gray-400 font-medium text-sm animate-pulse">
-            Preparing your video...
-          </p>
-        </div>
-
         <video
           id="player"
           class="w-full h-full object-contain outline-none bg-black"
-          controls
           autoplay
+          muted
           playsinline
           crossorigin="anonymous"
           controlsList="nodownload"
           disablePictureInPicture
         ></video>
-        <div id="speed-control" class="absolute bottom-16 left-4 bg-black/60 backdrop-blur-md text-white text-[11px] font-bold px-2 py-1 rounded cursor-pointer z-20 border border-white/10 hover:bg-black/80 transition-colors select-none flex items-center gap-1">
-          <i class="ph ph-speedometer"></i>
-          <span id="speed-text">1x</span>
-        </div>
-        <div id="time-display" class="absolute bottom-16 right-4 bg-black/60 backdrop-blur-md text-white text-[11px] font-mono px-2 py-1 rounded hidden z-20 pointer-events-none border border-white/10">
-          0:00 / 0:00
+
+        <!-- Big Center Play Button (Hover Only) -->
+        <button id="center-play-btn" class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
+          <div class="w-20 h-20 bg-brand/90 backdrop-blur-md rounded-full flex items-center justify-center text-white shadow-2xl transform scale-90 group-hover:scale-100 transition-transform">
+            <i id="center-play-icon" class="ph-fill ph-play text-4xl ml-1"></i>
+          </div>
+        </button>
+
+        <!-- Custom Control Bar -->
+        <div id="controls-bar" class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-4 pt-12 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col gap-3 z-30 pointer-events-none group-hover:pointer-events-auto">
+          <!-- Progress Bar -->
+          <div class="relative w-full h-1.5 bg-white/20 rounded-full cursor-pointer group/progress mb-1">
+             <div id="progress-fill" class="absolute top-0 left-0 h-full bg-brand rounded-full" style="width: 0%"></div>
+             <div id="seek-hover" class="absolute top-0 h-full bg-white/10 hidden pointer-events-none"></div>
+             <input id="seek-slider" type="range" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" min="0" max="1000" value="0">
+          </div>
+          
+          <div class="flex items-center justify-between text-white">
+             <div class="flex items-center gap-5">
+                <!-- Play/Pause -->
+                <button id="play-pause-btn" class="hover:scale-110 transition-transform focus:outline-none">
+                   <i id="play-icon" class="ph-fill ph-play text-2xl"></i>
+                </button>
+                
+                <!-- Skip Buttons -->
+                <div class="flex items-center gap-4">
+                  <button id="skip-back-btn" class="hover:text-brand transition-colors focus:outline-none flex flex-col items-center">
+                     <i class="ph ph-rewind-15 text-2xl"></i>
+                  </button>
+                  <button id="skip-forward-btn" class="hover:text-brand transition-colors focus:outline-none flex flex-col items-center">
+                     <i class="ph ph-fast-forward-15 text-2xl"></i>
+                  </button>
+                </div>
+                
+                <!-- Time -->
+                <div id="time-text" class="text-xs font-mono font-medium tracking-tight">0:00 / 0:00</div>
+             </div>
+             
+             <div class="flex items-center gap-5">
+                <!-- Speed -->
+                <div id="speed-btn" class="text-[10px] font-black bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-full cursor-pointer transition-colors border border-white/5 uppercase tracking-widest">1x</div>
+                
+                <!-- Volume -->
+                <div class="flex items-center gap-2 group/volume relative">
+                   <button id="volume-btn" class="focus:outline-none hover:scale-110 transition-transform">
+                     <i id="volume-icon" class="ph-fill ph-speaker-high text-xl"></i>
+                   </button>
+                   <div class="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-300 flex items-center">
+                      <input id="volume-slider" type="range" class="w-20 accent-brand cursor-pointer h-1" min="0" max="1" step="0.05" value="1">
+                   </div>
+                </div>
+             </div>
+          </div>
         </div>
       </div>
 
@@ -269,6 +302,25 @@
         const video = document.getElementById("player");
         const loader = document.getElementById("loader");
 
+        // Custom UI Elements
+        const playPauseBtn = document.getElementById("play-pause-btn");
+        const playIcon = document.getElementById("play-icon");
+        const centerPlayBtn = document.getElementById("center-play-btn");
+        const centerPlayIcon = document.getElementById("center-play-icon");
+        const skipBackBtn = document.getElementById("skip-back-btn");
+        const skipForwardBtn = document.getElementById("skip-forward-btn");
+        const seekSlider = document.getElementById("seek-slider");
+        const progressFill = document.getElementById("progress-fill");
+        const timeText = document.getElementById("time-text");
+        const volumeBtn = document.getElementById("volume-btn");
+        const volumeIcon = document.getElementById("volume-icon");
+        const volumeSlider = document.getElementById("volume-slider");
+        const speedBtn = document.getElementById("speed-btn");
+
+        let hasUserPlayed = false;
+        let previewLoopActive = true;
+        let authoritativeDurationMs = 0;
+
         const sessionId = params.get("sid") || crypto.randomUUID?.() || Math.random().toString(36).substring(2);
 
         if (!fileId) {
@@ -277,38 +329,67 @@
         }
 
         const titleEl = document.getElementById("video-title");
-        const timeDisplay = document.getElementById("time-display");
-        let authoritativeDurationMs = 0;
 
         function formatTime(ms) {
-          if (ms === null || ms === undefined || isNaN(ms) || !isFinite(ms)) return "--:--";
+          if (ms === null || ms === undefined || isNaN(ms) || !isFinite(ms)) return "0:00";
           const totalSeconds = Math.max(0, Math.floor(ms / 1000));
           const mins = Math.floor(totalSeconds / 60);
           const secs = totalSeconds % 60;
           return `${mins}:${secs.toString().padStart(2, "0")}`;
         }
-    
-        function updateDurationUI() {
+
+        function updateUI() {
+          // Progress Fill
           let totalMs = authoritativeDurationMs;
-          
-          // Only fallback to native duration if it's valid and finite
           if (!totalMs && video.duration && isFinite(video.duration)) {
             totalMs = Math.floor(video.duration * 1000);
           }
-    
-          if (!totalMs || isNaN(totalMs) || !isFinite(totalMs)) {
-            // Keep hidden if we don't have a valid duration yet
-            return;
+
+          if (totalMs > 0) {
+            const currentMs = video.currentTime * 1000;
+            const progress = (currentMs / totalMs) * 100;
+            progressFill.style.width = `${Math.min(100, progress)}%`;
+            seekSlider.value = Math.min(1000, (currentMs / totalMs) * 1000);
+            timeText.textContent = `${formatTime(currentMs)} / ${formatTime(totalMs)}`;
           }
-    
-          const current = Math.floor(video.currentTime * 1000);
-          const currentTimeStr = formatTime(current);
-          const totalTimeStr = formatTime(totalMs);
-          
-          if (currentTimeStr === "--:--" || totalTimeStr === "--:--") return;
-          
-          timeDisplay.textContent = `${currentTimeStr} / ${totalTimeStr}`;
-          timeDisplay.classList.remove("hidden");
+
+          // Play/Pause Icons
+          if (video.paused) {
+            playIcon.className = "ph-fill ph-play text-2xl";
+            centerPlayIcon.className = "ph-fill ph-play text-4xl ml-1";
+            videoWrapper.classList.add("paused"); // Always show controls when paused
+          } else {
+            playIcon.className = "ph-fill ph-pause text-2xl";
+            centerPlayIcon.className = "ph-fill ph-pause text-4xl";
+            videoWrapper.classList.remove("paused");
+          }
+        }
+
+        function togglePlay() {
+          if (!hasUserPlayed) {
+            hasUserPlayed = true;
+            previewLoopActive = false;
+            video.muted = false;
+            video.currentTime = 0;
+            updateVolumeIcon();
+          }
+
+          if (video.paused) {
+            video.play();
+          } else {
+            video.pause();
+          }
+          updateUI();
+        }
+
+        function updateVolumeIcon() {
+          if (video.muted || video.volume === 0) {
+            volumeIcon.className = "ph-fill ph-speaker-simple-x text-xl";
+          } else if (video.volume <= 0.5) {
+            volumeIcon.className = "ph-fill ph-speaker-simple-low text-xl";
+          } else {
+            volumeIcon.className = "ph-fill ph-speaker-simple-high text-xl";
+          }
         }
 
         async function initPlayer() {
@@ -325,7 +406,7 @@
               if (data.actualDurationMs) authoritativeDurationMs = data.actualDurationMs;
             }
 
-            // 2. Start Video
+            // 2. Start Video (Muted Preview)
             let streamUrl;
             if (window.SV && typeof window.SV.getPlayableUrl === "function") {
               streamUrl = await window.SV.getPlayableUrl(fileId, sessionId);
@@ -334,25 +415,106 @@
             }
             video.src = streamUrl;
             video.load();
+            
+            // Wait for enough data to start muted loop
+            video.muted = true;
+            video.play().catch(() => {
+                // Autoplay might be blocked even if muted on some browsers
+            });
+
           } catch (e) {
             showError("Connection Failed", "We couldn't connect to the stream.");
           }
         }
 
-        video.addEventListener("timeupdate", updateDurationUI);
+        // Control Listeners
+        playPauseBtn.addEventListener("click", togglePlay);
+        centerPlayBtn.addEventListener("click", togglePlay);
+        
+        skipBackBtn.addEventListener("click", () => {
+          video.currentTime = Math.max(0, video.currentTime - 15);
+          updateUI();
+        });
+
+        skipForwardBtn.addEventListener("click", () => {
+          let totalSec = authoritativeDurationMs / 1000;
+          if (!totalSec && video.duration && isFinite(video.duration)) totalSec = video.duration;
+          video.currentTime = Math.min(totalSec || video.currentTime + 15, video.currentTime + 15);
+          updateUI();
+        });
+
+        seekSlider.addEventListener("input", () => {
+          let totalMs = authoritativeDurationMs;
+          if (!totalMs && video.duration && isFinite(video.duration)) totalMs = video.duration * 1000;
+          if (totalMs > 0) {
+            video.currentTime = (seekSlider.value / 1000) * (totalMs / 1000);
+            updateUI();
+          }
+        });
+
+        volumeBtn.addEventListener("click", () => {
+          video.muted = !video.muted;
+          updateVolumeIcon();
+        });
+
+        volumeSlider.addEventListener("input", () => {
+          video.volume = volumeSlider.value;
+          video.muted = video.volume === 0;
+          updateVolumeIcon();
+        });
 
         const speeds = [1, 1.25, 1.5, 2];
         let speedIdx = 0;
-        document.getElementById("speed-control").addEventListener("click", () => {
+        speedBtn.addEventListener("click", () => {
           speedIdx = (speedIdx + 1) % speeds.length;
           video.playbackRate = speeds[speedIdx];
-          document.getElementById("speed-text").textContent = speeds[speedIdx] + "x";
+          speedBtn.textContent = speeds[speedIdx] + "x";
         });
+
+        // Keyboard Shortcuts
+        window.addEventListener("keydown", (e) => {
+          if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+          
+          switch(e.key.toLowerCase()) {
+            case " ":
+            case "k":
+              e.preventDefault();
+              togglePlay();
+              break;
+            case "m":
+              video.muted = !video.muted;
+              updateVolumeIcon();
+              break;
+            case "arrowleft":
+              video.currentTime = Math.max(0, video.currentTime - 15);
+              updateUI();
+              break;
+            case "arrowright":
+              let totalSec = authoritativeDurationMs / 1000;
+              if (!totalSec && video.duration && isFinite(video.duration)) totalSec = video.duration;
+              video.currentTime = Math.min(totalSec || video.currentTime + 15, video.currentTime + 15);
+              updateUI();
+              break;
+          }
+        });
+
+        // Loop Logic & UI Sync
+        video.addEventListener("timeupdate", () => {
+          if (previewLoopActive && video.currentTime >= 4) {
+            video.currentTime = 0;
+          }
+          updateUI();
+        });
+
+        video.addEventListener("play", updateUI);
+        video.addEventListener("pause", updateUI);
+        video.addEventListener("volumechange", updateVolumeIcon);
 
         video.addEventListener("loadedmetadata", () => {
           loader.style.opacity = "0";
           setTimeout(() => (loader.style.display = "none"), 300);
-          video.classList.add("loaded");
+          videoWrapper.classList.add("loaded");
+          updateUI();
           showToast(delightMessages[Math.floor(Math.random() * delightMessages.length)], "ph-lightning", "text-yellow-400");
         });
 
@@ -373,6 +535,36 @@
         initPlayer();
       });
     </script>
+    <style>
+      /* Ensure controls are always visible when paused or loading */
+      #video-wrapper.paused #controls-bar {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      
+      /* Progress slider styling */
+      #seek-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        background: white;
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      }
+      
+      #volume-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 10px;
+        height: 10px;
+        background: white;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+
+      .ph-fill {
+        font-family: "Phosphor-Fill" !important;
+      }
+    </style>
   </body>
 </html>
-```
