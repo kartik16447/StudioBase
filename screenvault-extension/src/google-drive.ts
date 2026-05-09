@@ -161,7 +161,7 @@ export async function makeFilePublic(fileId: string, accessToken: string, title:
   console.log(`[SV][MAKE_PUBLIC_SUCCESS] fileId: ${fileId}`);
 
   // Return the custom Cloudflare player URL
-  const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
+  const PLAYER_BASE_URL = 'https://screenvault.karthik-upadhyay98.workers.dev';
   const encodedTitle = encodeURIComponent(title);
   return `${PLAYER_BASE_URL}/?id=${fileId}&title=${encodedTitle}`;
 }

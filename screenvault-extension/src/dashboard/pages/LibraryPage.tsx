@@ -12,7 +12,7 @@ import { deleteFile, getFileMetadata, renameFile } from "../../google-drive";
 import { safeFetch } from "../../utils/api";
 import { svLog } from "../../logger";
 
-const VIEWER_BASE_URL = "https://screenvault-player.pages.dev";
+const VIEWER_BASE_URL = "https://screenvault.karthik-upadhyay98.workers.dev";
 
 interface WorkspaceMember {
   userId: string;
@@ -842,27 +842,25 @@ export function LibraryPage() {
 
   if (loading)
     return (
-      <div style={{ padding: "2rem" }}>
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "60vh",
+        color: "#A1A1AA",
+        gap: "1.5rem",
+      }}>
         <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-          gap: "1.5rem",
-        }}>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} style={{
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: "16px",
-              overflow: "hidden",
-            }}>
-              <div className="skeleton" style={{ height: "160px", borderRadius: 0 }} />
-              <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                <div className="skeleton" style={{ height: "14px", width: "70%" }} />
-                <div className="skeleton" style={{ height: "12px", width: "45%" }} />
-              </div>
-            </div>
-          ))}
-        </div>
+          width: "40px",
+          height: "40px",
+          border: "3px solid rgba(255,255,255,0.1)",
+          borderTopColor: "#3b82f6",
+          borderRadius: "50%",
+          animation: "spin 1s linear infinite",
+        }} />
+        <p style={{ fontWeight: 500 }}>Loading workspace library...</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
 
@@ -2227,42 +2225,36 @@ export function LibraryPage() {
             </div>
           )}
 
+          {loadingMore && (
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+              gap: "1.5rem",
+              width: "100%",
+              marginTop: "1.5rem",
+            }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: "16px",
+                  overflow: "hidden",
+                }}>
+                  <div className="skeleton" style={{ height: "160px", borderRadius: 0 }} />
+                  <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                    <div className="skeleton" style={{ height: "14px", width: "70%" }} />
+                    <div className="skeleton" style={{ height: "12px", width: "45%" }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {hasMore && (
             <div
               ref={observerTarget}
-              style={{
-                height: "40px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                marginTop: "2rem",
-              }}
-            >
-              {loadingMore && (
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-                  gap: "1.5rem",
-                  width: "100%",
-                  marginTop: "0",
-                }}>
-                  {Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} style={{
-                      background: "rgba(255,255,255,0.03)",
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      borderRadius: "16px",
-                      overflow: "hidden",
-                    }}>
-                      <div className="skeleton" style={{ height: "160px", borderRadius: 0 }} />
-                      <div style={{ padding: "1rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                        <div className="skeleton" style={{ height: "14px", width: "70%" }} />
-                        <div className="skeleton" style={{ height: "12px", width: "45%" }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+              style={{ height: "40px", marginTop: "1rem" }}
+            />
           )}
           <div
             style={{

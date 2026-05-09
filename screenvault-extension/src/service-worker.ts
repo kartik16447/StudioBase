@@ -1335,7 +1335,7 @@ function stopRecording() {
           }
         }
 
-        const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
+        const PLAYER_BASE_URL = 'https://screenvault.karthik-upadhyay98.workers.dev';
         url = `${PLAYER_BASE_URL}/?title=${encodeURIComponent(title)}`;
         if (encryptedId) {
           url += `&id=${encryptedId}`;

@@ -264,7 +264,7 @@ async function uploadWithFallback(
       if (!url) {
         const idToUse = meta?.encryptedFileId || fileId;
         const titleToUse = meta?.title || sessionTitle || 'Recording';
-        const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
+        const PLAYER_BASE_URL = 'https://screenvault.karthik-upadhyay98.workers.dev';
         url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
       }
 
@@ -779,7 +779,7 @@ function startMediaRecorder(stream: MediaStream) {
           if (!link) {
             const idToUse = meta?.encryptedFileId || activeFileId;
             const titleToUse = meta?.title || sessionTitle || 'Recording';
-            link = `https://screenvault-player.pages.dev/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
+            link = `https://screenvault.karthik-upadhyay98.workers.dev/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
           }
 
           // CRITICAL PATH COMPLETE: Show Link

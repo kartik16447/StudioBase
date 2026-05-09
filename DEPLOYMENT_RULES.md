@@ -1,76 +1,71 @@
-# ScreenVault Deployment Ground Rules
+# ScreenVault Deployment Rules
 
-To prevent "Wrong Place" deployments and player failures (such as mismatched project names or session ID logic), the following rules must be followed:
+## Canonical URLs
 
-## 1. Directory & Context Awareness
+| Service | URL |
+|---|---|
+| **Player** | `https://screenvault.karthik-upadhyay98.workers.dev` |
+| **Backend API** | `https://screenvault-backend.karthik-upadhyay98.workers.dev` |
+| **Proxy Worker** | `https://screenvault-proxy.karthik-upadhyay98.workers.dev` |
 
-- **Extension**: Run all commands from the `screenvault-extension/` directory.
-- **Backend**: Run all commands from the `screenvault-backend/` directory.
-- **Player**: If modifying the player, ensure you are targeting the correct Cloudflare Pages project (`screenvault-player`).
+`screenvault-player.pages.dev` is a legacy URL — old links still work but
+all new links use the Worker URL above.
 
-## 2. Project Name Integrity
+---
 
-- **Verification**: Before running `wrangler deploy`, ALWAYS check the `"name"` property in `wrangler.jsonc`.
-- **Mistake Prevention**: A wrong project name will overwrite the wrong worker/site, breaking existing functionality.
+## Full Deploy Checklist (run in this order)
 
-## 3. Mandatory Build Step
+### 1. Backend changed?
+```
+cd screenvault-backend
+npm run deploy
+```
 
-- **Fresh Assets**: NEVER deploy without a fresh build.
-- **Extension**: Run `npm run build` to populate the `dist/` folder before deployment.
-- **Backend**: Ensure TypeScript compiles correctly before deploying.
+### 2. Proxy worker changed?
+```
+cd screenvault-extension/worker
+wrangler deploy
+```
 
-## 4. Session & Parameter Accuracy
+### 3. Extension OR Player changed?
+```
+cd screenvault-extension
+npm run build
+wrangler deploy
+```
+`npm run build` populates `dist/`. `wrangler deploy` pushes it to the Worker.
+NEVER run `wrangler deploy` from inside `dist/` — it has no wrangler.jsonc.
 
-- **Session IDs**: Ensure `sessionId` and `fileId` mapping logic is consistent across the Extension and Backend.
-- **Player URLs**: The `PLAYER_BASE_URL` (currently `https://screenvault-player.pages.dev`) must be verified in `service-worker.ts` before building the extension.
+### 4. Reload extension in Chrome
+`chrome://extensions` → reload unpacked → point to `screenvault-extension/dist`
 
-## 5. Deployment Commands
+### 5. Keep old `screenvault-player.pages.dev` links working
+```
+cd screenvault-extension
+npx wrangler pages deploy dist --project-name screenvault-player
+```
+Run this whenever the player UI changes so old shared links still work.
 
-- **Extension Build/Deploy**: `npm run deploy` (runs build + wrangler deploy).
-- **Backend Deploy**: `wrangler deploy` (from backend dir).
-- **Types**: Run `npx wrangler types` if any bindings (KV, D1, etc.) are changed.
+---
 
-## 6. Observability
+## Rules
 
-- Ensure `observability: { enabled: true }` is set in `wrangler.jsonc` to allow real-time debugging of production errors.
+1. **Always build before deploy** — `npm run build` first, always
+2. **Never deploy from `dist/`** — always from `screenvault-extension/`
+3. **Player lives in `src/index.html`** — built into `dist/index.html`
+4. **PLAYER_BASE_URL = Worker URL** — do not change back to pages.dev
+5. **Backend deploy = `npm run deploy`** — not `wrangler deploy` (uses script)
+6. **After KV/D1 binding changes** — run `npx wrangler types` in backend
 
-No — because you have multiple separate deploy targets.
+---
 
-Your project currently has:
+## What each deploy affects
 
-1. backend worker
-2. proxy worker
-3. Cloudflare Pages player
-4. local Chrome extension build
-
-`wrangler deploy` only deploys the worker in the CURRENT folder.
-
-So if you run it from only one place:
-
-- only that worker updates
-- other parts stay stale
-- you get version mismatches
-- weird bugs happen
-
-Right now your architecture is split.
-
-So you need:
-
-| Component    | Command                                                            | From                           |
-| ------------ | ------------------------------------------------------------------ | ------------------------------ |
-| Backend API  | `npx wrangler deploy`                                              | `screenvault-backend`          |
-| Proxy Worker | `npx wrangler deploy`                                              | `screenvault-extension/worker` |
-| Player UI    | `npx wrangler pages deploy dist --project-name screenvault-player` | `screenvault-extension`        |
-| Extension    | reload manually in Chrome                                          | local                          |
-
-The player deploy is especially important because:
-
-- duration UI
-- speed controls
-- metadata rendering
-- playback UX
-
-all live inside Pages/static frontend, NOT worker runtime.
-
-If you skip Pages deploy:
-you’ll see old UI with new backend behavior again.
+| Changed file | Deploy needed |
+|---|---|
+| `screenvault-backend/src/index.ts` | Backend |
+| `screenvault-extension/worker/index.ts` | Proxy worker |
+| `screenvault-extension/src/index.html` | Extension build + wrangler deploy |
+| `screenvault-extension/src/*.ts` | Extension build + Chrome reload |
+| `screenvault-extension/src/dashboard/**` | Extension build + Chrome reload |
+| `screenvault-backend/wrangler.jsonc` | Backend + `npx wrangler types` |

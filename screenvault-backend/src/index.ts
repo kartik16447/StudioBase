@@ -1527,7 +1527,7 @@ async function migrateFileIds(request: Request, env: Env) {
 	}
 }
 
-const PLAYER_BASE_URL = 'https://screenvault-player.pages.dev';
+const PLAYER_BASE_URL = 'https://screenvault.karthik-upadhyay98.workers.dev';
 
 /**
  * ENCRYPTION UTILITIES (AES-256-GCM)
