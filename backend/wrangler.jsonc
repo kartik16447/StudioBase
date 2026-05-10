@@ -1,0 +1,49 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "studiobase-backend",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-05-03",
+	"observability": {
+		"enabled": true,
+	},
+	"upload_source_maps": true,
+	"compatibility_flags": ["nodejs_compat"],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "studiobase-db",
+			"database_id": "REPLACE_WITH_NEW_D1_ID",
+		},
+	],
+	"kv_namespaces": [
+		{
+			"binding": "TOKEN_CACHE",
+			"id": "REPLACE_WITH_NEW_KV_ID"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "R2",
+			"bucket_name": "studiobase-assets",
+			"preview_bucket_name": "studiobase-assets-preview"
+		}
+	],
+	"queues": {
+		"producers": [
+			{
+				"binding": "PIPELINE_QUEUE",
+				"queue": "studiobase-pipeline"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "studiobase-pipeline",
+				"max_batch_size": 5,
+				"max_batch_timeout": 30
+			}
+		]
+	},
+	"triggers": {
+		"crons": ["0 0 * * *"]
+	}
+}

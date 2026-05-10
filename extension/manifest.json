@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "StudioBase",
+  "version": "0.1.0",
+  "description": "Capture workflows. Generate SOPs, demos, and videos automatically.",
+  "permissions": [
+    "tabs",
+    "storage",
+    "identity",
+    "activeTab",
+    "scripting",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://www.googleapis.com/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "oauth2": {
+    "client_id": "64877467372-b3aksjdsc4g7g0d5u3m5bb0ac41ed408.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile"
+    ]
+  }
+}

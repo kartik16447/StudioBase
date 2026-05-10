@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.wrangler/
+*.local
+.env
+.env.*
+*.pem
+.DS_Store
+
+backend/test.db
+extension/dist.crx
+

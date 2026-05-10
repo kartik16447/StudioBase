@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ScreenVault</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div class="popup">
+      <div class="header">
+        <div class="logo">
+          <div class="logo-dot"></div>
+          <span class="logo-name">ScreenVault</span>
+        </div>
+        <div class="header-actions">
+          <button
+            class="icon-btn"
+            id="btn-connect"
+            title="Connect Google Drive"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      <!-- Screen: Idle -->
+      <div class="screen" id="screen-idle">
+        <div class="action-row">
+          <button
+            class="icon-btn mic-toggle-btn"
+            id="btn-toggle-mic"
+            title="Enable Microphone"
+          >
+            <svg
+              class="mic-icon"
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              stroke="currentColor"
+              stroke-width="2"
+              fill="none"
+            >
+              <path
+                d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
+              ></path>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+            </svg>
+            <svg
+              class="mic-off-icon"
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              stroke="currentColor"
+              stroke-width="2"
+              fill="none"
+            >
+              <path d="M12 1a3 3 0 0 0-3 3v5"></path>
+              <path d="M15 9V4a3 3 0 0 0-5.2-2.1"></path>
+              <path d="M19 10v2a7 7 0 0 1-12.2 4.6"></path>
+              <line x1="12" y1="19" x2="12" y2="23"></line>
+              <line x1="8" y1="23" x2="16" y2="23"></line>
+              <line x1="3" y1="3" x2="21" y2="21"></line>
+            </svg>
+          </button>
+          <button class="record-btn" id="btn-new-recording">
+            <div class="rec-dot"></div>
+            <span class="rec-label">Start Recording</span>
+            <span class="rec-arrow">›</span>
+          </button>
+        </div>
+        <div style="margin-top: 12px; margin-bottom: 12px; width: 100%;">
+          <input 
+            type="text" 
+            id="rec-title-input" 
+            placeholder="Recording Title (optional)"
+            style="
+              width: 100%;
+              background: #141414;
+              border: 1px solid #222;
+              border-radius: 6px;
+              color: white;
+              padding: 10px 12px;
+              font-size: 13px;
+              outline: none;
+              transition: border-color 0.2s;
+            "
+            onfocus="this.style.borderColor='#3b82f6'"
+            onblur="this.style.borderColor='#222'"
+          />
+        </div>
+        <div style="font-size: 11px; color: var(--text-3); text-align: center; margin-bottom: 8px;">
+          You’ll choose what to record (Tab, Window, or Screen) next.
+        </div>
+
+        <button
+          id="dashboardBtn"
+          style="
+            width: 100%;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            background: #1f2937;
+            color: white;
+            padding: 8px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+          "
+        >
+          My Library
+        </button>
+
+        <div class="accounts-section" id="accounts-list">
+          <div class="section-label">Storage Accounts</div>
+          <!-- Account rows injected by popup.ts -->
+        </div>
+        <div class="no-accounts" id="no-accounts" style="display: none">
+          <p>No accounts connected.</p>
+          <p>Click <strong>+</strong> to add Google Drive.</p>
+        </div>
+      </div>
+
+      <!-- Screen: Recording -->
+      <div class="screen" id="screen-recording" style="display: none">
+        <div class="recording-body">
+          <div class="rec-status-row">
+            <div class="rec-live">
+              <div class="rec-live-dot"></div>
+              <span class="rec-live-label">REC</span>
+            </div>
+            <span class="rec-timer" id="rec-timer">00:00:00</span>
+          </div>
+          <div class="rec-target-label" id="rec-target-label">Screen</div>
+          <button class="stop-btn" id="btn-stop">
+            <div class="stop-sq"></div>
+            Stop & Upload
+          </button>
+        </div>
+      </div>
+
+      <!-- Screen: Uploading -->
+      <div class="screen" id="screen-uploading" style="display: none">
+        <div class="upload-body">
+          <div class="upload-label">Preparing your link...</div>
+          <div class="upload-sub" id="upload-account-label">—</div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <div class="progress-pct" id="progress-pct">0%</div>
+        </div>
+      </div>
+
+      <!-- Screen: Success -->
+      <div class="screen" id="screen-success" style="display: none">
+        <div class="success-body">
+          <div class="success-check">✓</div>
+          <div class="success-title">Link copied to clipboard</div>
+          <div class="success-meta" id="success-meta">—</div>
+          <div class="success-actions">
+            <button class="btn-primary" id="btn-copy-link">Copy link</button>
+            <button class="btn-secondary" id="btn-open-link">Open ↗</button>
+          </div>
+          <button class="btn-ghost" id="btn-record-again">Record again</button>
+        </div>
+      </div>
+
+      <!-- Screen: Error -->
+      <div class="screen" id="screen-error" style="display: none">
+        <div class="error-body">
+          <div class="error-icon">⚠</div>
+          <div class="error-title">Something went wrong</div>
+          <div class="error-message" id="error-message">—</div>
+          <button class="btn-secondary" id="btn-save-disk">Save to disk</button>
+          <button class="btn-ghost" id="btn-try-again">Try again</button>
+        </div>
+      </div>
+
+      <div
+        class="countdown-overlay"
+        id="countdown-overlay"
+        style="display: none"
+      >
+        <div class="countdown-number" id="countdown-number">3</div>
+        <button class="btn-ghost skip-btn" id="btn-skip-countdown">Skip</button>
+      </div>
+
+      <div id="toast" class="toast">
+        Recording Started! Link copied to clipboard.
+      </div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
