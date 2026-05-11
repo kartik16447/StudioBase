@@ -120,7 +120,11 @@ async function startRecording(target: CaptureTarget) {
     });
 
     if (target.tabId) {
-      chrome.tabs.sendMessage(target.tabId, { type: 'START_CAPTURE' }).catch(() => {});
+      chrome.tabs.sendMessage(target.tabId, { type: 'START_CAPTURE' })
+        .then(() => sbLog('START_CAPTURE_SENT', { tabId: target.tabId }))
+        .catch((err) => sbLog('START_CAPTURE_FAILED', { tabId: target.tabId, err: err?.message }));
+    } else {
+      sbLog('START_CAPTURE_SKIPPED', { reason: 'no tabId in target' });
     }
 
     sbLog("RECORDING_STARTED", { sessionId, target });

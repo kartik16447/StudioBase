@@ -294,9 +294,17 @@ function stopLocalTimer() {
 btnSignin.addEventListener("click", handleSignIn);
 
 btnNewRecording.addEventListener("click", () => {
-  chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
-    const tab = tabs[0];
-    startCountdown({ tabId: tab?.id, tabTitle: tab?.title || tab?.url || '' });
+  // Use windowTypes:'normal' to avoid getting the popup window itself
+  chrome.windows.getLastFocused({ windowTypes: ['normal'] }, (win) => {
+    if (chrome.runtime.lastError || !win?.id) {
+      startCountdown({});
+      return;
+    }
+    chrome.tabs.query({ active: true, windowId: win.id }, (tabs) => {
+      const tab = tabs[0];
+      sbLog('RECORD_TAB', { tabId: tab?.id, tabTitle: tab?.title, tabUrl: tab?.url });
+      startCountdown({ tabId: tab?.id, tabTitle: tab?.title || tab?.url || '' });
+    });
   });
 });
 
