@@ -9,12 +9,14 @@ import {
   stopSession,
   getSession,
   appendEvent,
+  saveScreenshot,
 } from "./background/session-manager";
 import { uploadSession } from "./background/r2-uploader";
 
 // ─── State ───────────────────────────────────────────────────
 
 let state: AppState = { status: "idle" };
+let currentStepIndex = 0;
 
 // ─── Initialization ──────────────────────────────────────────
 
@@ -56,14 +58,26 @@ chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse)
     case "CAPTURE_STEP":
       if (state.status === "recording" && state.sessionId) {
         const p = msg.payload;
-        appendEvent(state.sessionId, {
+        const stepIdx = currentStepIndex++;
+        const sessionId = state.sessionId;
+
+        appendEvent(sessionId, {
           type: p.action,
           timestamp: p.timestamp,
           selector: p.selector || "",
-          data: p,
-        }).catch((err) =>
-          console.warn("[StudioBase] appendEvent failed:", err)
-        );
+          data: { ...p, screenshotKey: `screenshots/${sessionId}/${stepIdx}.jpg` },
+        }).catch((err) => console.warn("[StudioBase] appendEvent failed:", err));
+
+        // Capture screenshot after DOM settles
+        setTimeout(() => {
+          chrome.tabs.captureVisibleTab({ format: "jpeg", quality: 85 }, (dataUrl) => {
+            if (chrome.runtime.lastError || !dataUrl) return;
+            fetch(dataUrl)
+              .then(r => r.blob())
+              .then(blob => saveScreenshot(sessionId, stepIdx, blob))
+              .catch(() => {});
+          });
+        }, 350);
       }
       break;
     case "LOG": {
@@ -96,6 +110,7 @@ async function startRecording(target: CaptureTarget) {
     // Bug 1 fix: startSession() generates the UUID AND saves to session storage
     const tabUrl = target.tabTitle || "";
     const sessionId = await startSession(tabUrl);
+    currentStepIndex = 0;
 
     await updateState({
       status: "recording",

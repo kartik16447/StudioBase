@@ -118,6 +118,10 @@ export const useStudioStore = create<StudioState>((set) => ({
       // Normalize: extension captures store `events[]`, studio expects `steps[]`
       if (!sessionData.steps && Array.isArray(sessionData.events)) {
         const rawTitle = data.title || sessionData.tabUrl || 'Untitled Session';
+        // Build a lookup from stepIndex → r2Key for uploaded screenshots
+        const screenshotByIndex = new Map<number, string>(
+          (sessionData.screenshots || []).map((s: any) => [s.stepIndex, s.r2Key])
+        );
         sessionData = {
           sessionId: data.id || sessionData.sessionId,
           id: data.id || sessionData.sessionId,
@@ -137,7 +141,7 @@ export const useStudioStore = create<StudioState>((set) => ({
             url: evt.data?.url || null,
             pageTitle: evt.data?.pageTitle || '',
             elementText: evt.data?.elementText || null,
-            screenshotKey: evt.data?.screenshotKey || null,
+            screenshotKey: screenshotByIndex.get(idx) || evt.data?.screenshotKey || null,
             generatedText: null,
             textOverride: null,
             voiceoverKey: null,
@@ -178,6 +182,17 @@ export const useStudioStore = create<StudioState>((set) => ({
       }
       if (!sessionData.metadata.chapterBreaks) {
         sessionData.metadata.chapterBreaks = [];
+      }
+
+      // Build assets map: screenshotKey → public URL via backend proxy
+      if (!sessionData.assets) {
+        const assets: Record<string, string> = {};
+        for (const step of sessionData.steps || []) {
+          if (step.screenshotKey) {
+            assets[step.screenshotKey] = `${BACKEND_URL}/assets/${step.screenshotKey}`;
+          }
+        }
+        sessionData.assets = assets;
       }
 
       set({ session: sessionData });
