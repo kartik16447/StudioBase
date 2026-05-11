@@ -9,14 +9,14 @@ import {
   stopSession,
   getSession,
   appendEvent,
-  saveScreenshot,
 } from "./background/session-manager";
 import { uploadSession } from "./background/r2-uploader";
 
 // ─── State ───────────────────────────────────────────────────
 
 let state: AppState = { status: "idle" };
-let currentStepIndex = 0;
+let initDone = false;
+let messageQueue: WorkerMessage[] = [];
 
 // ─── Initialization ──────────────────────────────────────────
 
@@ -24,27 +24,21 @@ async function init() {
   try {
     const stored = await chrome.storage.local.get(["sb_state"]);
     if (stored.sb_state) state = stored.sb_state as AppState;
-
     sbLog("STATE_REHYDRATED", { status: state.status });
   } catch (err) {
     console.warn("Extension initialization warning:", err);
   }
+  initDone = true;
+  // Drain any messages that arrived before init completed
+  for (const msg of messageQueue) handleMessage(msg);
+  messageQueue = [];
 }
 
 void init();
 
 // ─── Message Handling ────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse) => {
-  // GET_STATE is the only synchronous response — handle it and return false
-  if (msg.type === "GET_STATE") {
-    sendResponse(state);
-    return false;
-  }
-
-  // All other messages are fire-and-forget — dispatch async work but
-  // close the channel immediately (return false) to avoid the
-  // "message channel closed before response received" error.
+function handleMessage(msg: WorkerMessage) {
   switch (msg.type) {
     case "SET_STATUS":
       updateState({ status: msg.status });
@@ -58,36 +52,34 @@ chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse)
     case "CAPTURE_STEP":
       if (state.status === "recording" && state.sessionId) {
         const p = msg.payload;
-        const stepIdx = currentStepIndex++;
-        const sessionId = state.sessionId;
-
-        appendEvent(sessionId, {
+        appendEvent(state.sessionId, {
           type: p.action,
           timestamp: p.timestamp,
           selector: p.selector || "",
-          data: { ...p, screenshotKey: `screenshots/${sessionId}/${stepIdx}.jpg` },
+          data: p,
         }).catch((err) => console.warn("[StudioBase] appendEvent failed:", err));
-
-        // Capture screenshot after DOM settles
-        setTimeout(() => {
-          chrome.tabs.captureVisibleTab(undefined as any, { format: "jpeg", quality: 85 }, (dataUrl) => {
-            if (chrome.runtime.lastError || !dataUrl) return;
-            fetch(dataUrl)
-              .then(r => r.blob())
-              .then(blob => saveScreenshot(sessionId, stepIdx, blob))
-              .catch(() => {});
-          });
-        }, 350);
       }
       break;
     case "LOG": {
-
       const { tag, data } = msg.logMessage;
       sbLog(tag, data);
       break;
     }
   }
-  return false; // channel closed — no async response needed
+}
+
+chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse) => {
+  if (msg.type === "GET_STATE") {
+    sendResponse(state);
+    return false;
+  }
+  // Queue messages that arrive before init completes (SW restart race)
+  if (!initDone) {
+    messageQueue.push(msg);
+    return false;
+  }
+  handleMessage(msg);
+  return false;
 });
 
 // ─── State Updates ───────────────────────────────────────────
@@ -103,14 +95,10 @@ async function updateState(patch: Partial<AppState>) {
 async function startRecording(target: CaptureTarget) {
   try {
     const streamId = target.streamId;
-    if (!streamId) {
-      throw new Error("No streamId provided for recording");
-    }
+    if (!streamId) throw new Error("No streamId provided for recording");
 
-    // Bug 1 fix: startSession() generates the UUID AND saves to session storage
     const tabUrl = target.tabTitle || "";
     const sessionId = await startSession(tabUrl);
-    currentStepIndex = 0;
 
     await updateState({
       status: "recording",
@@ -129,17 +117,13 @@ async function stopRecording() {
   if (state.status !== "recording") return;
 
   const sessionId = state.sessionId!;
-
   await updateState({ status: "uploading", uploadProgress: 0 });
 
   try {
-    // Bug 3 fix: mark endedAt BEFORE reading session for upload
     await stopSession(sessionId);
 
     const session = await getSession(sessionId);
-    if (!session) {
-      throw new Error(`[StudioBase] Local session data not found for ${sessionId}`);
-    }
+    if (!session) throw new Error(`[StudioBase] Local session data not found for ${sessionId}`);
 
     const backendSessionId = await uploadSession(session, (pct) => {
       updateState({ uploadProgress: pct });
