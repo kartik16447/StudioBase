@@ -104,6 +104,10 @@ async function startRecording(target: CaptureTarget) {
       target: { ...target, streamId },
     });
 
+    if (target.tabId) {
+      chrome.tabs.sendMessage(target.tabId, { type: 'START_CAPTURE' }).catch(() => {});
+    }
+
     sbLog("RECORDING_STARTED", { sessionId, target });
   } catch (err: any) {
     updateState({ status: "error", errorMessage: err.message });
@@ -114,6 +118,11 @@ async function stopRecording() {
   if (state.status !== "recording") return;
 
   const sessionId = state.sessionId!;
+
+  if (state.target?.tabId) {
+    chrome.tabs.sendMessage(state.target.tabId, { type: 'STOP_CAPTURE' }).catch(() => {});
+  }
+
   await updateState({ status: "uploading", uploadProgress: 0 });
 
   try {

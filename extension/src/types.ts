@@ -12,6 +12,7 @@ export type AppStatus =
 export interface CaptureTarget {
   includeMic?: boolean;
   streamId?: string;
+  tabId?: number;
   tabTitle?: string;
   userTitle?: string;
 }

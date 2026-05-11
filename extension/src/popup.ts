@@ -294,7 +294,10 @@ function stopLocalTimer() {
 btnSignin.addEventListener("click", handleSignIn);
 
 btnNewRecording.addEventListener("click", () => {
-  startCountdown({});
+  chrome.tabs.query({ active: true, lastFocusedWindow: true }, (tabs) => {
+    const tab = tabs[0];
+    startCountdown({ tabId: tab?.id, tabTitle: tab?.title || tab?.url || '' });
+  });
 });
 
 btnToggleMic.addEventListener("click", async () => {
