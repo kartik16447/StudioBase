@@ -469,12 +469,13 @@ const VideoCanvas: React.FC = () => {
           }}
           className="absolute inset-0 origin-center"
         >
-          <ScreenshotPlaceholder 
-            step={currentStep} 
+          <ScreenshotPlaceholder
+            step={currentStep}
+            session={session}
             showChrome={false}
-            aspect="16/9" 
-            rounded="" 
-            className="w-full h-full !shadow-none" 
+            aspect="16/9"
+            rounded=""
+            className="w-full h-full !shadow-none"
           />
         </motion.div>
 
