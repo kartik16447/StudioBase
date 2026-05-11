@@ -167,15 +167,23 @@ async function getSessions(request: Request, env: Env) {
     const limit = parseInt(url.searchParams.get('limit') || '20');
     const cursor = url.searchParams.get('cursor');
 
-    if (!workspaceId) return jsonError('workspaceId is required', 'VALIDATION_ERROR');
-
-    const membership = await env.DB.prepare(
-      'SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?'
-    ).bind(workspaceId, user.id).first();
-    if (!membership) return jsonError('Unauthorized', 'FORBIDDEN', 403);
+    let resolvedWorkspaceId = workspaceId;
+    if (!resolvedWorkspaceId) {
+      // No workspaceId provided — default to the user's own workspace
+      const ownedWorkspace = await env.DB.prepare(
+        'SELECT id FROM workspaces WHERE ownerId = ? LIMIT 1'
+      ).bind(user.id).first() as any;
+      if (!ownedWorkspace) return jsonError('No workspace found for this user', 'NOT_FOUND', 404);
+      resolvedWorkspaceId = ownedWorkspace.id;
+    } else {
+      const membership = await env.DB.prepare(
+        'SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?'
+      ).bind(resolvedWorkspaceId, user.id).first();
+      if (!membership) return jsonError('Unauthorized', 'FORBIDDEN', 403);
+    }
 
     let query = 'SELECT * FROM sessions WHERE workspaceId = ? AND deletedAt IS NULL';
-    const params: any[] = [workspaceId];
+    const params: any[] = [resolvedWorkspaceId];
 
     if (cursor) {
       const [cTime, cId] = cursor.split(':');

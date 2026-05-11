@@ -15,9 +15,10 @@ function App() {
     setActiveTool, commandOpen, setCommandOpen,
   } = useStudioStore();
 
-  // Navigate straight to studio on mount; StudioPage handles session/sample loading.
+  // If a session is in the URL go straight to studio, otherwise show the library.
   useEffect(() => {
-    navigate('studio');
+    const hasSession = new URLSearchParams(window.location.search).has('session');
+    navigate(hasSession ? 'studio' : 'home');
   }, []);
 
   // Keyboard shortcuts

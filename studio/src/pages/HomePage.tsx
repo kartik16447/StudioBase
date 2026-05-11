@@ -29,7 +29,7 @@ interface SBUser {
 }
 
 export const HomePage: React.FC = () => {
-  const { navigate, setSession } = useStudioStore();
+  const { navigate, fetchSession } = useStudioStore();
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [filter, setFilter] = useState<'all' | 'sop' | 'video'>('all');
   const [search, setSearch] = useState('');
@@ -39,21 +39,22 @@ export const HomePage: React.FC = () => {
   const [user, setUser] = useState<SBUser | null>(null);
 
   useEffect(() => {
-    const sbUser = localStorage.getItem('sb_user');
-    if (!sbUser) {
+    const urlParams = new URLSearchParams(window.location.search);
+    let token = urlParams.get('token');
+    if (token) sessionStorage.setItem('sb_token', token);
+    else token = sessionStorage.getItem('sb_token');
+
+    if (!token) {
       setLoading(false);
       return;
     }
-    const parsedUser = JSON.parse(sbUser);
-    setUser(parsedUser);
+    setUser({ accessToken: token, workspaceId: '', email: '' });
 
     const fetchSessions = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`${BACKEND_URL}/sessions?workspaceId=${parsedUser.workspaceId}`, {
-          headers: {
-            'Authorization': `Bearer ${parsedUser.accessToken}`
-          }
+        const res = await fetch(`${BACKEND_URL}/sessions`, {
+          headers: { 'Authorization': `Bearer ${token}` }
         });
         
         if (!res.ok) {
@@ -106,8 +107,8 @@ export const HomePage: React.FC = () => {
   }, [filter, search, sessions]);
 
   const openSession = (s: SessionEnvelope) => {
-    setSession(s);
     navigate('studio');
+    fetchSession(s.sessionId);
   };
 
   if (!user && !loading) {
