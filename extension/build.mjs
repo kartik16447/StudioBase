@@ -6,7 +6,7 @@ const shared = {
   outdir: 'dist',
   target: 'chrome120',
   format: 'iife',
-  globalName: 'SV',
+  globalName: 'SB',
   jsx: 'automatic',
   minify: true,
   treeShaking: true,

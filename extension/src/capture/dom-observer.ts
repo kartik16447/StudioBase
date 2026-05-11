@@ -7,7 +7,6 @@
 // ============================================================
 
 import { generateSelector } from './selector-engine';
-import { DOM_SETTLE_DELAY_MS } from '../../../shared/constants';
 
 export type CaptureMessage =
   | { type: 'CAPTURE_STEP'; payload: RawStepPayload }

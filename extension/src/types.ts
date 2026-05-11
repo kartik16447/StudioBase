@@ -9,30 +9,6 @@ export type AppStatus =
   | 'failed_enrichment'
   | 'error';
 
-export interface RawStepPayload {
-  action: 'click' | 'input' | 'scroll' | 'navigate';
-  timestamp: number;
-  url: string;
-  pageTitle: string;
-  selector: string | null;
-  selectorConfidence: 'high' | 'medium' | 'low' | null;
-  elementText: string | null;
-  elementRole: string | null;
-  elementType: string | null;
-  inputValue: string | null;
-  coordinates: {
-    x: number;
-    y: number;
-    viewportWidth: number;
-    viewportHeight: number;
-    scrollX: number;
-    scrollY: number;
-    elementRect: { top: number; left: number; width: number; height: number } | null;
-  };
-  isIframeBlocked: boolean;
-  frameUrl: string;
-}
-
 export interface CaptureTarget {
   includeMic?: boolean;
   streamId?: string;
@@ -109,10 +85,10 @@ export interface SessionMetadata {
 }
 
 export interface StorageSchema {
-  sv_user?: BackendUser;
-  sv_accounts?: StorageAccount[];
-  sv_sessions?: Record<string, SessionMetadata>;
-  sv_state?: AppState;
+  sb_user?: BackendUser;
+  sv_accounts?: StorageAccount[]; // kept: still read in dashboard/index.tsx
+  sb_sessions?: Record<string, SessionMetadata>;
+  sb_state?: AppState;
 }
 
 export type WorkerMessage =
@@ -121,5 +97,6 @@ export type WorkerMessage =
   | { type: 'START_RECORDING'; target: CaptureTarget }
   | { type: 'STOP_RECORDING' }
   | { type: 'STATE_UPDATE'; state: AppState }
-  | { type: 'CAPTURE_STEP'; payload: RawStepPayload }
-  | { type: 'LOG'; logMessage: { tag: string; data: any } };
+  | { type: 'LOG'; logMessage: { tag: string; data: any } }
+  | { type: 'CAPTURE_STEP'; payload: any };
+

@@ -1,7 +1,9 @@
 import { BackendUser } from "../types";
 import { BACKEND_URL } from "../../../shared/constants";
 
-const API_BASE = BACKEND_URL || "https://studiobase-backend.karthik-upadhyay98.workers.dev";
+// TODO: this module is not imported anywhere in the active recording flow.
+// The active upload path uses background/r2-uploader.ts. Kept for future use.
+const API_BASE = BACKEND_URL;
 
 /**
  * Uploads a completed session JSON blob to R2 via the backend presign endpoint.
@@ -9,8 +11,8 @@ const API_BASE = BACKEND_URL || "https://studiobase-backend.karthik-upadhyay98.w
 export async function uploadSession(sessionId: string, payload: object): Promise<void> {
   try {
     // 1. Fetch the authenticated token from storage
-    const { sv_user } = (await chrome.storage.local.get("sv_user")) as { sv_user?: BackendUser };
-    const token = sv_user?.accessToken;
+    const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
+    const token = sb_user?.accessToken;
 
     if (!token) {
       throw new Error("No authenticated user found. Please sign in to upload.");
@@ -97,8 +99,6 @@ export async function uploadSession(sessionId: string, payload: object): Promise
     if (!triggerRes.ok) {
       console.warn("Pipeline trigger failed, session is still uploaded.");
     }
-
-    console.log(`[StudioBase] Session ${sessionId} uploaded and pipeline triggered.`);
   } catch (err: any) {
     console.error(`[StudioBase] Upload error for session ${sessionId}:`, err);
     throw new Error(`Upload failed: ${err.message}`);

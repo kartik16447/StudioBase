@@ -55,8 +55,8 @@ let hasMicPermission = false;
 let isMicEnabled = false;
 
 // 1. Initial State Load
-chrome.storage.local.get(["sv_user", "sb_state", "email", "picture"], (stored: any) => {
-  if (stored.sv_user?.accessToken) {
+chrome.storage.local.get(["sb_user", "sb_state", "email", "picture"], (stored: any) => {
+  if (stored.sb_user?.accessToken) {
     updateUserInfo(stored.email, stored.picture);
     if (stored.sb_state) {
       renderState(stored.sb_state as AppState);
@@ -169,7 +169,7 @@ async function handleSignIn() {
     };
 
     await chrome.storage.local.set({
-      sv_user: sb_user,
+      sb_user,
       workspaceId,
       email,
       picture
@@ -320,8 +320,8 @@ btnStop.addEventListener("click", () => {
 });
 
 btnCopyLink.addEventListener("click", async () => {
-  const { sv_user } = (await chrome.storage.local.get("sv_user")) as { sv_user?: BackendUser };
-  const token = sv_user?.accessToken;
+  const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
+  const token = sb_user?.accessToken;
   const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}`;
   navigator.clipboard.writeText(url).then(() => {
     toast.classList.add("visible");
@@ -330,8 +330,8 @@ btnCopyLink.addEventListener("click", async () => {
 });
 
 btnOpenStudio.addEventListener("click", async () => {
-  const { sv_user } = (await chrome.storage.local.get("sv_user")) as { sv_user?: BackendUser };
-  const token = sv_user?.accessToken;
+  const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
+  const token = sb_user?.accessToken;
   const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}`;
   chrome.tabs.create({ url });
 });

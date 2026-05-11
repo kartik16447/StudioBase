@@ -7,19 +7,16 @@ import { StudioPage } from './pages/StudioPage';
 import { BrandKitPage } from './pages/BrandKitPage';
 import { SharePage } from './pages/SharePage';
 import { CommandPalette, KeyboardHintPill } from './components/CommandPalette';
-import { SAMPLE_SESSION } from './data/sample';
 
 function App() {
   const {
     route, navigate,
     togglePanel, toggleToolbar, setActiveTab,
     setActiveTool, commandOpen, setCommandOpen,
-    setSession
   } = useStudioStore();
 
-  // DEV: seed sample session and go straight to studio
+  // Navigate straight to studio on mount; StudioPage handles session/sample loading.
   useEffect(() => {
-    setSession(SAMPLE_SESSION);
     navigate('studio');
   }, []);
 

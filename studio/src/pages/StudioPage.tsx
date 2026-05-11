@@ -43,14 +43,11 @@ export const StudioPage: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get('session');
-    
     if (sessionId) {
       fetchSession(sessionId);
     } else if (!session) {
-      // Fallback to sample data for development if no session in store
-      import('../data/sample').then(m => {
-        setSession(m.SAMPLE_SESSION);
-      });
+      // Fallback to sample data for development when no real session provided
+      import('../data/sample').then(m => setSession(m.SAMPLE_SESSION));
     }
   }, []);
 
@@ -190,23 +187,68 @@ export const StudioPage: React.FC = () => {
 };
 
 const SOPCanvas: React.FC = () => {
-  const { session, focusedStepId, setFocusStep, setStepIndex, scrollTrigger } = useStudioStore();
+  const { session, focusedStepId, setFocusStep, setStepIndex, scrollTrigger, triggerScroll } = useStudioStore();
   const [isProcessing, setIsProcessing] = useState(false);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  // Scroll the focused card into view when focus changes
   useEffect(() => {
     if (!focusedStepId || !session) return;
-    
-    // If it's the very first step on mount, don't center scroll (let user see header)
     const isFirstStep = focusedStepId === session.steps[0]?.id;
     if (isFirstStep && scrollTrigger === 0) return;
-
     const el = stepRefs.current.get(focusedStepId);
-    el?.scrollIntoView({ 
-      behavior: 'smooth', 
-      block: 'nearest' 
-    });
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [focusedStepId, scrollTrigger, session]);
+
+  // ArrowUp / ArrowDown keyboard navigation
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!session || !focusedStepId) return;
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      // Don't steal arrow keys from text inputs / textareas
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+      e.preventDefault();
+      const currentIndex = session.steps.findIndex(s => s.id === focusedStepId);
+      if (currentIndex === -1) return;
+      const nextIndex = e.key === 'ArrowDown'
+        ? Math.min(session.steps.length - 1, currentIndex + 1)
+        : Math.max(0, currentIndex - 1);
+      if (nextIndex !== currentIndex) {
+        setFocusStep(session.steps[nextIndex].id);
+        setStepIndex(nextIndex);
+        triggerScroll();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [session, focusedStepId, setFocusStep, setStepIndex, triggerScroll]);
+
+  // Scroll wheel navigation (debounced — advances focused step without blocking natural scroll)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !session) return;
+    let debounceTimer: ReturnType<typeof setTimeout>;
+    const handler = (e: WheelEvent) => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const currentIndex = session.steps.findIndex(s => s.id === focusedStepId);
+        if (currentIndex === -1) return;
+        const nextIndex = e.deltaY > 0
+          ? Math.min(session.steps.length - 1, currentIndex + 1)
+          : Math.max(0, currentIndex - 1);
+        if (nextIndex !== currentIndex) {
+          setFocusStep(session.steps[nextIndex].id);
+          setStepIndex(nextIndex);
+        }
+      }, 200);
+    };
+    container.addEventListener('wheel', handler, { passive: true });
+    return () => {
+      container.removeEventListener('wheel', handler);
+      clearTimeout(debounceTimer);
+    };
+  }, [session, focusedStepId, setFocusStep, setStepIndex]);
 
   if (!session) return null;
 
@@ -223,7 +265,7 @@ const SOPCanvas: React.FC = () => {
   });
 
   return (
-    <div className="flex-1 min-h-0 scroll-y bg-bg relative">
+    <div ref={containerRef} className="flex-1 min-h-0 scroll-y bg-bg relative">
       <DotGrid className="!fixed" glowRadius={500} />
       <div className="max-w-[860px] mx-auto px-6 pt-16 pb-32 relative z-10">
         <motion.header

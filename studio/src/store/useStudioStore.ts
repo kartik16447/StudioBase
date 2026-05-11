@@ -79,11 +79,10 @@ export const useStudioStore = create<StudioState>((set) => ({
   fetchSession: async (sessionId) => {
     try {
       set({ sessionError: null });
-      
+
       // Get token from URL or session storage
       const urlParams = new URLSearchParams(window.location.search);
       let token = urlParams.get('token');
-      
       if (token) {
         sessionStorage.setItem('sb_token', token);
       } else {
@@ -91,35 +90,64 @@ export const useStudioStore = create<StudioState>((set) => ({
       }
 
       const res = await fetch(`${BACKEND_URL}/sessions/${sessionId}`, {
-        headers: token ? {
-          'Authorization': `Bearer ${token}`
-        } : {}
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
 
       if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
         if (res.status === 401) throw new Error('Unauthorized: Please sign in through the extension');
-        throw new Error('Failed to fetch session');
+        if (res.status === 404) throw new Error('Session not found — it may still be uploading. Try again in a moment.');
+        throw new Error(`Failed to fetch session (${res.status}): ${errBody}`);
       }
-      
+
       const data = await res.json();
-      
       let sessionData = data;
+
       if (data.sessionJsonUrl) {
         const jsonRes = await fetch(data.sessionJsonUrl);
         if (jsonRes.ok) {
           sessionData = await jsonRes.json();
+        } else {
+          const r2Err = await jsonRes.text().catch(() => '');
+          console.error('[fetchSession] R2 JSON fetch failed:', jsonRes.status, r2Err);
         }
+      } else {
+        console.warn('[fetchSession] no sessionJsonUrl — status:', data.status, '| r2JsonKey:', data.r2JsonKey);
       }
-      
+
+      // Normalize: extension captures store `events[]`, studio expects `steps[]`
+      if (!sessionData.steps && Array.isArray(sessionData.events)) {
+        sessionData = {
+          id: data.id || sessionData.sessionId,
+          title: data.title || sessionData.tabUrl || 'Untitled Session',
+          sessionType: 'steps' as const,
+          createdAt: data.createdAt || Date.now(),
+          steps: sessionData.events.map((evt: any, idx: number) => ({
+            id: `step-${idx}`,
+            index: idx,
+            title: evt.data?.pageTitle || evt.type || `Step ${idx + 1}`,
+            description: `${evt.type} on ${evt.selector || 'element'}`,
+            timestamp: evt.timestamp,
+            selector: evt.selector || null,
+            url: evt.data?.url || null,
+            screenshotKey: null,
+            data: evt.data || {},
+          })),
+        };
+      } else if (!sessionData.steps) {
+        console.warn('[fetchSession] sessionData has neither steps nor events. Keys:', Object.keys(sessionData));
+      }
+
       set({ session: sessionData });
       if (sessionData.steps?.length > 0) {
         set({ focusedStepId: sessionData.steps[0].id, focusedStepIndex: 0 });
       }
     } catch (err: any) {
-      console.error('fetchSession error:', err);
+      console.error('[fetchSession] error:', err.message);
       set({ sessionError: err.message || 'Failed to load session' });
     }
   },
+
   setActiveTab: (id) => set({ activeTab: id }),
   togglePanel: () => set((state) => ({ isPanelOpen: !state.isPanelOpen })),
   setActiveView: (view) => set({ activeView: view }),

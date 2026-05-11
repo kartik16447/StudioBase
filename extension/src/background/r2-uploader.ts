@@ -1,6 +1,7 @@
 import { BACKEND_URL } from "../../../shared/constants";
 import { BackendUser } from "../types";
 import { getScreenshots, Session } from "./session-manager";
+import { sbLog } from "../logger";
 
 /**
  * Uploads a completed session and its associated screenshots to R2.
@@ -11,16 +12,16 @@ export async function uploadSession(
   onProgress?: (pct: number) => void
 ): Promise<string> {
   // 1. Fetch the authenticated user and workspace
-  const { sv_user, workspaceId } = (await chrome.storage.local.get(["sv_user", "workspaceId"])) as {
-    sv_user: BackendUser;
+  const { sb_user, workspaceId } = (await chrome.storage.local.get(["sb_user", "workspaceId"])) as {
+    sb_user: BackendUser;
     workspaceId: string;
   };
 
-  if (!sv_user || !sv_user.accessToken) {
+  if (!sb_user || !sb_user.accessToken) {
     throw new Error("Authentication required: Please sign in via the extension popup.");
   }
 
-  const token = sv_user.accessToken;
+  const token = sb_user.accessToken;
 
   // 2. Initialize the session on the backend
   const initRes = await fetch(`${BACKEND_URL}/sessions`, {
@@ -31,7 +32,7 @@ export async function uploadSession(
     },
     body: JSON.stringify({
       sessionId: session.sessionId,
-      workspaceId: workspaceId || sv_user.workspaceId,
+      workspaceId: workspaceId || sb_user.workspaceId,
       tabUrl: session.tabUrl,
       startedAt: session.startedAt,
       endedAt: session.endedAt,
@@ -80,11 +81,12 @@ export async function uploadSession(
       throw new Error(`[StudioBase] Presign response missing uploadUrl for screenshot ${stepIndex}`);
     }
 
-    // Upload the blob directly to R2
+    // Upload the blob directly to R2 via worker proxy
     const putRes = await fetch(uploadUrl, {
       method: "PUT",
       headers: {
         "Content-Type": "image/jpeg",
+        "Authorization": `Bearer ${token}`,
       },
       body: blob,
     });
@@ -134,6 +136,7 @@ export async function uploadSession(
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
     },
     body: JSON.stringify(finalEnvelope),
   });
@@ -177,7 +180,7 @@ export async function uploadSession(
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ 
+    body: JSON.stringify({
       sessionId: activeSessionId,
       requestedOutputs: { sop: true, demo: true }
     }),
@@ -190,6 +193,6 @@ export async function uploadSession(
 
   if (onProgress) onProgress(100);
 
-  console.log(`[StudioBase] Session ${activeSessionId} successfully fully uploaded and pipeline triggered.`);
+  sbLog('UPLOAD_COMPLETE', { sessionId: activeSessionId });
   return activeSessionId;
 }

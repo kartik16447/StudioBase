@@ -6,6 +6,6 @@ document.getElementById('btn-allow')?.addEventListener('click', async () => {
     alert('Success! Permission granted. You can close this tab and start recording.');
     window.close();
   } catch (err) {
-    alert('Permission denied. ScreenVault cannot record audio without it.');
+    alert('Permission denied. StudioBase cannot record audio without it.');
   }
 });

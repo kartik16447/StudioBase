@@ -121,16 +121,16 @@ export function LibraryPage() {
     setError(null);
 
     const storage = (await chrome.storage.local.get([
-      "sv_sessions",
-      "sv_user",
+      "sb_sessions",
+      "sb_user",
       "sv_accounts",
     ])) as StorageSchema;
 
-    const localSessions = storage.sv_sessions || {};
-    const sv_user = storage.sv_user;
-    setUser(sv_user || null);
+    const localSessions = storage.sb_sessions || {};
+    const sb_user = storage.sb_user;
+    setUser(sb_user || null);
 
-    if (!sv_user || !sv_user.workspaceId || !sv_user.accessToken) {
+    if (!sb_user || !sb_user.workspaceId || !sb_user.accessToken) {
       setFiles([]);
       if (isInitial) setLoading(false);
       else setLoadingMore(false);
@@ -138,7 +138,7 @@ export function LibraryPage() {
       return;
     }
 
-    const { workspaceId, accessToken } = sv_user;
+    const { workspaceId, accessToken } = sb_user;
 
     try {
       let url = `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos?workspaceId=${workspaceId}&limit=12`;
@@ -153,10 +153,10 @@ export function LibraryPage() {
       } = await res.json();
 
       // Guard: Ensure workspace hasn't changed during the async fetch
-      const currentStorage = (await chrome.storage.local.get("sv_user")) as {
-        sv_user?: BackendUser;
+      const currentStorage = (await chrome.storage.local.get("sb_user")) as {
+        sb_user?: BackendUser;
       };
-      if (currentStorage.sv_user?.workspaceId !== workspaceId) {
+      if (currentStorage.sb_user?.workspaceId !== workspaceId) {
         isFetching.current = false;
         return;
       }
@@ -356,11 +356,11 @@ export function LibraryPage() {
     setInviting(true);
     try {
       const storage = (await chrome.storage.local.get([
-        "sv_user",
+        "sb_user",
       ])) as StorageSchema;
-      const sv_user = storage.sv_user;
+      const sb_user = storage.sb_user;
 
-      if (!sv_user?.workspaceId || !sv_user?.accessToken) return;
+      if (!sb_user?.workspaceId || !sb_user?.accessToken) return;
 
       const res = await safeFetch(
         `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/invite`,
@@ -369,7 +369,7 @@ export function LibraryPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ workspaceId: sv_user.workspaceId }),
+          body: JSON.stringify({ workspaceId: sb_user.workspaceId }),
         },
       );
       const data = await res.json();
@@ -393,11 +393,11 @@ export function LibraryPage() {
     setLeaving(true);
     try {
       const storage = (await chrome.storage.local.get([
-        "sv_user",
+        "sb_user",
       ])) as StorageSchema;
-      const sv_user = storage.sv_user;
+      const sb_user = storage.sb_user;
 
-      if (!sv_user?.workspaceId || !sv_user?.accessToken) return;
+      if (!sb_user?.workspaceId || !sb_user?.accessToken) return;
 
       const res = await safeFetch(
         `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/leave`,
@@ -406,7 +406,7 @@ export function LibraryPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ workspaceId: sv_user.workspaceId }),
+          body: JSON.stringify({ workspaceId: sb_user.workspaceId }),
         },
       );
 
@@ -453,14 +453,14 @@ export function LibraryPage() {
       areaName: string,
     ) => {
       if (areaName === "local") {
-        if (changes.sv_user) {
+        if (changes.sb_user) {
           fetchData();
           return;
         }
 
-        if (changes.sv_sessions) {
-          const oldSessions = (changes.sv_sessions.oldValue || {}) as Record<string, SessionMetadata>;
-          const newSessions = (changes.sv_sessions.newValue || {}) as Record<string, SessionMetadata>;
+        if (changes.sb_sessions) {
+          const oldSessions = (changes.sb_sessions.oldValue || {}) as Record<string, SessionMetadata>;
+          const newSessions = (changes.sb_sessions.newValue || {}) as Record<string, SessionMetadata>;
           
           // Only refresh if a session's status has changed
           const statusChanged = Object.keys(newSessions).some(sid => {
@@ -542,13 +542,13 @@ export function LibraryPage() {
     if (!fileId) return;
 
     const storage = (await chrome.storage.local.get([
-      "sv_sessions",
+      "sb_sessions",
       "sv_accounts",
-      "sv_user",
+      "sb_user",
     ])) as StorageSchema;
-    const sv_sessions = storage.sv_sessions || {};
+    const sb_sessions = storage.sb_sessions || {};
     const accounts = storage.sv_accounts || [];
-    const sv_user = storage.sv_user;
+    const sb_user = storage.sb_user;
 
     // Only perform local Drive metadata checks if the account is actually linked locally
     // Collaborative videos should rely on backendSynced playerUrls instead
@@ -569,7 +569,7 @@ export function LibraryPage() {
             "This video was not found in Google Drive and will be removed from your library.",
           );
           setFiles((prev) => prev.filter((f) => f.id !== video.id));
-          if (video.backendId && sv_user?.accessToken) {
+          if (video.backendId && sb_user?.accessToken) {
             safeFetch(
               `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${video.backendId}`,
               { method: "DELETE" },
@@ -588,7 +588,7 @@ export function LibraryPage() {
       );
     }
 
-    const session = Object.values(sv_sessions).find(
+    const session = Object.values(sb_sessions).find(
       (s: SessionMetadata) => s.fileId === fileId,
     );
     const title =
@@ -698,26 +698,26 @@ export function LibraryPage() {
 
     const storage = (await chrome.storage.local.get([
       "sv_accounts",
-      "sv_user",
+      "sb_user",
     ])) as StorageSchema;
     const rawAccounts = storage.sv_accounts;
     const accounts: StorageAccount[] = Array.isArray(rawAccounts)
       ? rawAccounts
       : [];
-    const sv_user = storage.sv_user;
+    const sb_user = storage.sb_user;
 
     const account = accounts.find((a) => a.email === file.accountEmail);
 
     setIsRenaming(true);
     try {
       // 1. Sync with Backend API
-      if (file.backendId && sv_user?.accessToken) {
+      if (file.backendId && sb_user?.accessToken) {
         await fetch(
           `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${file.backendId}`,
           {
             method: "PATCH",
             headers: {
-              Authorization: `Bearer ${sv_user.accessToken}`,
+              Authorization: `Bearer ${sb_user.accessToken}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ title: newTitle }),
@@ -733,14 +733,14 @@ export function LibraryPage() {
         );
       }
 
-      // 3. Update metadata in sv_sessions using fileId as primary key
+      // 3. Update metadata in sb_sessions using fileId as primary key
       // We send a message to the service worker to handle this via the queue
       const metaStorage = (await chrome.storage.local.get(
-        "sv_sessions",
+        "sb_sessions",
       )) as StorageSchema;
-      const sv_sessions = metaStorage.sv_sessions || {};
+      const sb_sessions = metaStorage.sb_sessions || {};
 
-      const sessionEntry = Object.entries(sv_sessions).find(
+      const sessionEntry = Object.entries(sb_sessions).find(
         ([_, s]) => s.fileId === file.fileId,
       );
 
@@ -780,17 +780,17 @@ export function LibraryPage() {
         if (typeof chrome === "undefined" || !chrome.storage?.local) return;
         const storage = (await chrome.storage.local.get([
           "sv_accounts",
-          "sv_user",
+          "sb_user",
         ])) as StorageSchema;
         const accounts = storage.sv_accounts || [];
-        const sv_user = storage.sv_user;
+        const sb_user = storage.sb_user;
 
         const account = accounts.find((a) => a.email === file.accountEmail);
 
         // Backend sync (async) - Use backendId OR file.id if it looks like a UUID
         const deleteTargetId =
           file.backendId || (file.id?.length > 20 ? file.id : null);
-        if (deleteTargetId && sv_user?.accessToken) {
+        if (deleteTargetId && sb_user?.accessToken) {
           safeFetch(
             `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${deleteTargetId}`,
             {
@@ -812,10 +812,10 @@ export function LibraryPage() {
         // Cleanup local metadata via Service Worker queue and directly
         if (file.fileId || file.sessionId || file.id) {
           const metaStorage = (await chrome.storage.local.get(
-            "sv_sessions",
+            "sb_sessions",
           )) as StorageSchema;
-          const sv_sessions = metaStorage.sv_sessions || {};
-          const sessionEntry = Object.entries(sv_sessions).find(
+          const sb_sessions = metaStorage.sb_sessions || {};
+          const sessionEntry = Object.entries(sb_sessions).find(
             ([k, s]: [string, any]) =>
               s.fileId === file.fileId || k === file.sessionId || k === file.id,
           );
@@ -826,8 +826,8 @@ export function LibraryPage() {
               sessionId,
             });
             // Proactive local cleanup
-            delete sv_sessions[sessionId];
-            await chrome.storage.local.set({ sv_sessions });
+            delete sb_sessions[sessionId];
+            await chrome.storage.local.set({ sb_sessions });
           }
         }
       } catch (err: any) {

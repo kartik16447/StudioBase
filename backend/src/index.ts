@@ -6,7 +6,7 @@
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS, DELETE, PATCH',
+  'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, OPTIONS, DELETE, PATCH',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
 };
@@ -47,6 +47,8 @@ export default {
       response = await deleteSession(request, env);
     } else if (pathname === '/upload/presign' && method === 'POST') {
       response = await presignUpload(request, env);
+    } else if (pathname === '/upload/file' && method === 'PUT') {
+      response = await handleFileUpload(request, env);
     } else if (pathname === '/assets/refresh' && method === 'POST') {
       response = await refreshAssetUrls(request, env);
     } else if (pathname === '/storage/quota' && method === 'GET') {
@@ -81,6 +83,8 @@ export default {
       response = await getMetricsSummary(request, env);
     } else if (pathname === '/admin' && method === 'GET') {
       response = await handleAdmin(request, env);
+    } else if (pathname.startsWith('/assets/') && method === 'GET') {
+      response = await serveAsset(request, env);
     } else {
       response = jsonError('Not Found', 'NOT_FOUND', 404);
     }
@@ -227,8 +231,9 @@ async function getSession(request: Request, env: Env) {
     }
 
     let sessionJsonUrl: string | null = null;
-    if (session.r2JsonKey && session.status === 'ready') {
-      sessionJsonUrl = `https://assets.studiobase.app/${session.r2JsonKey}`;
+    if (session.r2JsonKey && (session.status === 'ready' || session.status === 'uploaded')) {
+      const origin = new URL(request.url).origin;
+      sessionJsonUrl = `${origin}/assets/${session.r2JsonKey}`;
     }
 
     recordEvent(env, { type: 'session_viewed', userId: 'anonymous', sessionId: session.id }).catch(() => {});
@@ -339,17 +344,41 @@ async function presignUpload(request: Request, env: Env) {
       return jsonError('Storage quota exceeded', 'QUOTA_EXCEEDED', 403);
     }
 
-    // Return real R2 presigned PUT URLs
-    const uploadTargets = await Promise.all(
-      files.map(async (f: any) => {
-        // @ts-ignore - Futuristic API available in 2026 wrangler/R2
-        const uploadUrl = await env.R2.createPresignedUrl('PUT', f.key, {
-          expiresIn: 3600,
-        });
-        return { key: f.key, contentType: f.contentType, uploadUrl };
-      })
-    );
-    return Response.json({ sessionId, files: uploadTargets });
+    // Return worker proxy upload URLs — no S3 credentials needed
+    const backendBase = new URL(request.url).origin;
+    const files_out = files.map((f: any) => ({
+      key: f.key,
+      contentType: f.contentType,
+      uploadUrl: `${backendBase}/upload/file?key=${encodeURIComponent(f.key)}`
+    }));
+
+    return Response.json({ sessionId, files: files_out });
+  } catch (e: any) { return jsonError(e.message); }
+}
+
+async function handleFileUpload(request: Request, env: Env) {
+  let user: any;
+  try { user = await getUserFromToken(request, env); }
+  catch (e: any) { return jsonError(e.message, 'UNAUTHORIZED', 401); }
+
+  try {
+    const url = new URL(request.url);
+    const key = url.searchParams.get('key');
+    if (!key) return jsonError('key query param required', 'VALIDATION_ERROR');
+
+    // Security: only allow uploads under sessions/ or screenshots/ prefixes
+    if (!key.startsWith('sessions/') && !key.startsWith('screenshots/')) {
+      return jsonError('Invalid upload path', 'FORBIDDEN', 403);
+    }
+
+    const contentType = request.headers.get('Content-Type') || 'application/octet-stream';
+    const body = await request.arrayBuffer();
+
+    await env.R2.put(key, body, {
+      httpMetadata: { contentType }
+    });
+
+    return Response.json({ success: true, key });
   } catch (e: any) { return jsonError(e.message); }
 }
 
@@ -365,6 +394,26 @@ async function refreshAssetUrls(request: Request, env: Env) {
     }
 
     return Response.json({ assets });
+  } catch (e: any) { return jsonError(e.message); }
+}
+
+async function serveAsset(request: Request, env: Env) {
+  try {
+    // Strip the leading /assets/ prefix to get the R2 key
+    const url = new URL(request.url);
+    const key = url.pathname.replace(/^\/assets\//, '');
+    if (!key) return jsonError('Asset key required', 'VALIDATION_ERROR');
+
+    const object = await env.R2.get(key);
+    if (!object) return jsonError('Asset not found', 'NOT_FOUND', 404);
+
+    const contentType = object.httpMetadata?.contentType || 'application/octet-stream';
+    return new Response(object.body as any, {
+      headers: {
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=3600',
+      },
+    });
   } catch (e: any) { return jsonError(e.message); }
 }
 
@@ -525,10 +574,15 @@ async function handleGoogleAuth(request: Request, env: Env) {
     if (!workspace) {
       const workspaceId = crypto.randomUUID();
       const slug = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + userId.slice(0, 6);
-      await env.DB.prepare(
-        'INSERT INTO workspaces (id, slug, ownerId, name, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(workspaceId, slug, userId, name || email, now, now).run();
-      workspace = { id: workspaceId, slug };
+      try {
+        await env.DB.prepare(
+          'INSERT INTO workspaces (id, slug, ownerId, name, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind(workspaceId, slug, userId, name || email, now, now).run();
+      } catch {
+        // Race condition: another concurrent request already created the workspace — re-read below
+      }
+      workspace = await env.DB.prepare('SELECT * FROM workspaces WHERE ownerId = ?').bind(userId).first() as any
+        || { id: workspaceId, slug };
     }
 
     await env.DB.prepare(
