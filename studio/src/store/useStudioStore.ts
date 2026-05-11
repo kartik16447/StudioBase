@@ -158,9 +158,14 @@ export const useStudioStore = create<StudioState>((set) => ({
           brand: null,
         };
       } else if (!sessionData.steps) {
-        console.warn('[fetchSession] sessionData has neither steps nor events. Keys:', Object.keys(sessionData));
-        // Session exists in D1 but JSON not yet uploaded — pipeline may still be running
-        set({ sessionError: `Session is still uploading or processing (status: ${data.status}). Try again in a moment.` });
+        const terminalFailures: Record<string, string> = {
+          credit_exhausted: 'Not enough credits to process this session. Add credits and re-run the pipeline.',
+          failed: 'Session processing failed. Please try recapturing.',
+          deleted: 'This session has been deleted.',
+        };
+        const msg = terminalFailures[data.status]
+          ?? `Session is still uploading or processing (status: ${data.status}). Try again in a moment.`;
+        set({ sessionError: msg });
         return;
       }
 

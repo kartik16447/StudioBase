@@ -231,7 +231,7 @@ async function getSession(request: Request, env: Env) {
     }
 
     let sessionJsonUrl: string | null = null;
-    if (session.r2JsonKey && (session.status === 'ready' || session.status === 'uploaded')) {
+    if (session.r2JsonKey && session.status !== 'deleted') {
       const origin = new URL(request.url).origin;
       sessionJsonUrl = `${origin}/assets/${session.r2JsonKey}`;
     }
