@@ -25,6 +25,7 @@ interface StudioState {
   playbackRate: number;
   currentStepIndex: number;
   currentTime: number;
+  scrollTrigger: number;
 
   // Actions
   navigate: (name: RouteName, params?: Record<string, any>) => void;
@@ -43,6 +44,7 @@ interface StudioState {
   setPlaybackRate: (rate: number) => void;
   setCurrentTime: (time: number) => void;
   updateStep: (stepId: string, updates: Partial<Step>) => void;
+  triggerScroll: () => void;
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
@@ -61,6 +63,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   playbackRate: 1,
   currentStepIndex: 0,
   currentTime: 0,
+  scrollTrigger: 0,
 
   navigate: (name, params = {}) => set({ route: { name, params } }),
   setSession: (session) => {
@@ -94,4 +97,5 @@ export const useStudioStore = create<StudioState>((set) => ({
     );
     return { session: { ...state.session, steps: newSteps } };
   }),
+  triggerScroll: () => set(state => ({ scrollTrigger: state.scrollTrigger + 1 })),
 }));

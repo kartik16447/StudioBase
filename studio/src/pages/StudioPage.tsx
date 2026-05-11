@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../store/useStudioStore';
 import { I } from '../components/icons';
@@ -46,7 +46,7 @@ export const StudioPage: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col">
+    <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
       <StudioTopBar />
       <div className="flex-1 flex min-h-0">
         
@@ -57,7 +57,7 @@ export const StudioPage: React.FC = () => {
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 480, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 320, damping: 32 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 36 }}
               className="shrink-0 border-r border-border bg-surface flex flex-col overflow-hidden"
             >
               <div className="px-3 pt-2 border-b border-border overflow-x-auto">
@@ -91,15 +91,15 @@ export const StudioPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex-1 min-h-0 overflow-hidden">
-                <AnimatePresence mode="wait">
+              <div className="flex-1 min-h-0 overflow-hidden relative">
+                <AnimatePresence mode="sync">
                   <motion.div
                     key={activeTabItem.id}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.18 }}
-                    className="h-full"
+                    className="absolute inset-0 overflow-y-auto"
                   >
                     <activeTabItem.component />
                   </motion.div>
@@ -110,7 +110,11 @@ export const StudioPage: React.FC = () => {
         </AnimatePresence>
 
         {/* Canvas */}
-        <section className="flex-1 min-w-0 flex flex-col relative">
+        <motion.section 
+          layout
+          transition={{ type: 'spring', stiffness: 280, damping: 36 }}
+          className="flex-1 min-w-0 flex flex-col relative"
+        >
           <button
             onClick={togglePanel}
             className="absolute top-3 left-3 z-20 glass rounded-pill h-8 px-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-text-2 hover:text-text"
@@ -120,8 +124,19 @@ export const StudioPage: React.FC = () => {
             <Kbd>⌘\</Kbd>
           </button>
 
-          {activeView === 'sop' ? <SOPCanvas /> : <VideoCanvas />}
-        </section>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeView}
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.02 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="flex-1 flex flex-col min-h-0"
+            >
+              {activeView === 'sop' ? <SOPCanvas /> : <VideoCanvas />}
+            </motion.div>
+          </AnimatePresence>
+        </motion.section>
       </div>
       <FloatingToolbar />
     </div>
@@ -129,8 +144,23 @@ export const StudioPage: React.FC = () => {
 };
 
 const SOPCanvas: React.FC = () => {
-  const { session, focusedStepId, setFocusStep, setStepIndex } = useStudioStore();
+  const { session, focusedStepId, setFocusStep, setStepIndex, scrollTrigger } = useStudioStore();
   const [isProcessing, setIsProcessing] = useState(false);
+  const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  useEffect(() => {
+    if (!focusedStepId || !session) return;
+    
+    // If it's the very first step on mount, don't center scroll (let user see header)
+    const isFirstStep = focusedStepId === session.steps[0]?.id;
+    if (isFirstStep && scrollTrigger === 0) return;
+
+    const el = stepRefs.current.get(focusedStepId);
+    el?.scrollIntoView({ 
+      behavior: 'smooth', 
+      block: 'nearest' 
+    });
+  }, [focusedStepId, scrollTrigger, session]);
 
   if (!session) return null;
 
@@ -190,17 +220,18 @@ const SOPCanvas: React.FC = () => {
           <div className="space-y-6">
             {items.map((it, i) => (
               it.kind === 'step' ? (
-                <StepCard
-                  key={it.step.id}
-                  step={it.step}
-                  index={it.idx}
-                  hue={244 + (it.idx * 11) % 80}
-                  focused={focusedStepId === it.step.id}
-                  onFocus={() => {
-                    setFocusStep(it.step.id);
-                    setStepIndex(it.idx);
-                  }}
-                />
+                <div key={it.step.id} ref={el => { if (el) stepRefs.current.set(it.step.id, el); else stepRefs.current.delete(it.step.id); }}>
+                  <StepCard
+                    step={it.step}
+                    index={it.idx}
+                    hue={244 + (it.idx * 11) % 80}
+                    focused={focusedStepId === it.step.id}
+                    onFocus={() => {
+                      setFocusStep(it.step.id);
+                      setStepIndex(it.idx);
+                    }}
+                  />
+                </div>
               ) : (
                 <ChapterBreak 
                   key={'ch-' + i} 
@@ -246,31 +277,49 @@ const VideoCanvas: React.FC = () => {
 
   // Handle voiceover playback
   React.useEffect(() => {
-    if (!currentStep?.voiceoverKey || !isPlaying) {
+    if (!isPlaying) {
       audio.pause();
       return;
     }
 
-    const url = `https://assets.studiobase.app/${currentStep.voiceoverKey}`;
-    if (audio.src !== url) {
-      audio.src = url;
-    }
-    
-    audio.playbackRate = playbackRate;
-    audio.play().catch(console.error);
+    let timer: ReturnType<typeof setTimeout>;
 
-    const handleEnded = () => {
-      if (currentStepIndex < steps.length - 1) {
-        setStepIndex(currentStepIndex + 1);
-      } else {
-        setPlaying(false);
-        setIsEnded(true);
+    if (!currentStep?.voiceoverKey) {
+      // Fallback timer for steps without voiceover
+      timer = setTimeout(() => {
+        if (currentStepIndex < steps.length - 1) {
+          setStepIndex(currentStepIndex + 1);
+        } else {
+          setPlaying(false);
+          setIsEnded(true);
+        }
+      }, 3000);
+    } else {
+      const url = `https://assets.studiobase.app/${currentStep.voiceoverKey}`;
+      if (audio.src !== url) {
+        audio.src = url;
       }
-    };
+      
+      audio.playbackRate = playbackRate;
+      audio.play().catch(console.error);
 
-    audio.addEventListener('ended', handleEnded);
+      const handleEnded = () => {
+        if (currentStepIndex < steps.length - 1) {
+          setStepIndex(currentStepIndex + 1);
+        } else {
+          setPlaying(false);
+          setIsEnded(true);
+        }
+      };
+
+      audio.addEventListener('ended', handleEnded);
+      return () => {
+        audio.removeEventListener('ended', handleEnded);
+      };
+    }
+
     return () => {
-      audio.removeEventListener('ended', handleEnded);
+      if (timer) clearTimeout(timer);
     };
   }, [currentStepIndex, isPlaying, playbackRate, steps.length, currentStep?.voiceoverKey]);
 
@@ -292,8 +341,11 @@ const VideoCanvas: React.FC = () => {
   const translateY = (50 - target.centerY) * scale;
 
   return (
-    <div className="flex-1 studio-gradient flex flex-col items-center justify-center p-12 overflow-hidden">
-      <div className="relative w-full max-w-5xl aspect-video rounded-img shadow-card-lifted bg-white overflow-hidden">
+    <div className="flex-1 h-full studio-gradient flex flex-col items-center justify-start py-16 px-8 min-h-0 scroll-y">
+      <div 
+        className="relative w-full max-w-5xl rounded-img shadow-card-lifted bg-white overflow-hidden"
+        style={{ maxHeight: 'calc(100vh - 280px)', aspectRatio: '16/9' }}
+      >
         {/* Animated Screenshot */}
         <motion.div
           animate={{
@@ -307,7 +359,7 @@ const VideoCanvas: React.FC = () => {
             damping: 26,
             duration: target.transitionDurationMs / 1000
           }}
-          className="w-full h-full origin-center"
+          className="absolute inset-0 origin-center"
         >
           <ScreenshotPlaceholder 
             step={currentStep} 
@@ -408,9 +460,9 @@ const VideoCanvas: React.FC = () => {
         )}
       </div>
 
-      <div className="mt-8 text-center max-w-2xl">
-        <h3 className="text-[20px] font-semibold text-text">{session.aiOutputs.title}</h3>
-        <p className="text-[14px] text-text-2 mt-1.5 leading-relaxed">
+      <div className="mt-4 text-center max-w-2xl h-[72px] overflow-hidden flex flex-col justify-start">
+        <h3 className="text-[20px] font-semibold text-text leading-snug line-clamp-1">{session.aiOutputs.title}</h3>
+        <p className="text-[14px] text-text-2 mt-1 leading-relaxed line-clamp-2">
           {currentStep?.textOverride || currentStep?.generatedText || 'Watch this smart walkthrough generated by StudioBase AI.'}
         </p>
       </div>

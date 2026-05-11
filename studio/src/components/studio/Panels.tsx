@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useStudioStore } from '../../store/useStudioStore';
 import { I } from '../icons';
 import { 
@@ -6,14 +6,22 @@ import {
 } from '../ui';
 import type { Step } from '../../../../shared/types/session';
 
+
 // ─── Script panel ──────────────────────────────────────────────────────
 // Per-step text editor — list with selectable rows, edit inline.
 export const ScriptPanel: React.FC = () => {
-  const { session, focusedStepId, setFocusStep, currentStepIndex, setStepIndex, updateStep } = useStudioStore();
+  const { session, focusedStepId, setFocusStep, currentStepIndex, setStepIndex, updateStep, triggerScroll, scrollTrigger } = useStudioStore();
   
   const [tone, setTone] = useState('Friendly & concise');
   const [search, setSearch] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  useEffect(() => {
+    if (!focusedStepId) return;
+    const el = stepRefs.current.get(focusedStepId);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [focusedStepId, scrollTrigger]);
 
   if (!session) return null;
 
@@ -74,8 +82,10 @@ export const ScriptPanel: React.FC = () => {
               onClick={() => {
                 setFocusStep(step.id);
                 setStepIndex(idx);
+                triggerScroll();
               }}
               onUpdate={(text) => updateStep(step.id, { textOverride: text })}
+              innerRef={el => { if (el) stepRefs.current.set(step.id, el); else stepRefs.current.delete(step.id); }}
             />
           ))}
           {steps.length === 0 && (
@@ -98,13 +108,15 @@ const ScriptStepRow: React.FC<{
   active: boolean, 
   isPlaying: boolean,
   onClick: () => void,
-  onUpdate: (text: string) => void
-}> = ({ step, active, isPlaying, onClick, onUpdate }) => {
+  onUpdate: (text: string) => void,
+  innerRef?: (el: HTMLDivElement | null) => void
+}> = ({ step, active, isPlaying, onClick, onUpdate, innerRef }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(step.textOverride || step.generatedText || '');
 
   return (
     <div
+      ref={innerRef}
       onClick={onClick}
       className={cn(
         'rounded-sm p-3 cursor-pointer transition-all border group relative',
