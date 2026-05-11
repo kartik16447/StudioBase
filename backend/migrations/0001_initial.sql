@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS workspaces (
   slug TEXT NOT NULL UNIQUE,
   ownerId TEXT NOT NULL REFERENCES users(id),
   name TEXT NOT NULL,
+  -- Brand config (Trupeer-equivalent, JSON blob)
+  brandConfig TEXT,  -- JSON: { logoUrl, primaryColor, fontFamily, watermarkText, introSlide, outroSlide }
   createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL
 );

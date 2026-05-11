@@ -2,12 +2,22 @@
 
 ## What We Are Building
 
-One extension. One capture session. Four possible outputs:
+One extension. One capture session. Multiple outputs — all from the same JSON.
 
+**Core outputs (Path 1 — primary target):**
 - **Raw Video** — free/low-paid tier. No AI. Just the recording stored in R2, shareable via link.
 - **SOP Guide** — AI-generated numbered guide with annotated screenshots. 1 credit.
 - **Interactive Demo** — clickable sandbox with pulsing hotspot overlays. 1 credit.
 - **Simulated Video** — pan/zoom over screenshots, synced AI voiceover, transitions. 2 credits.
+
+**Trupeer-equivalent features (built into Path 1, no separate path needed):**
+- **Step Annotations** — arrows, boxes, circles, text callouts on any screenshot. Added in Studio editor.
+- **Chapters** — group steps into named sections for long recordings. Shown in SOP + video.
+- **Brand Customization** — logo, colors, font, intro/outro slides per workspace. Applied at render time.
+- **Translation (65+ languages)** — translate step text + regenerate voiceover in any language. Extra pipeline call, charged as additional credits.
+
+**Future paths (architecture supports all, build after Phase 5):**
+Path 2 (Sales Demos), Path 3 (Bug Catcher), Path 4 (Automation), Path 5 (Web Memory / Knowledge Base), Path 6 (eLearning / SCORM), Path 7 (Template Marketplace), Path 8 (Chameleon-style Guided Tours)
 
 ---
 
@@ -43,7 +53,8 @@ Zustand store. activeView toggle. AnimatePresence.
 
 - **Free**: unlimited raw video, 1GB R2 storage, 7-day link expiry, 10 signup credits
 - **Starter**: more storage, permanent links, monthly credit bundle
-- **Credits**: SOP = 1 credit, Demo = 1 credit, Video = 2 credits. Top up anytime, no plan upgrade required.
+- **Credits**: SOP = 1 credit, Demo = 1 credit, Video = 2 credits, Translation = 1 credit per language per session. Top up anytime, no plan upgrade required.
+- **Brand customization**: Starter+ feature, configured per workspace in settings.
 
 ---
 
@@ -106,9 +117,9 @@ Zustand store. activeView toggle. AnimatePresence.
 
 ---
 
-## Phase 2 — SOP View Only (1 week)
+## Phase 2 — SOP View + Brand + Chapters (1 week)
 
-**Goal**: Smart Studio shell with SOP list rendering from JSON. Share links work.
+**Goal**: Smart Studio shell with SOP list rendering from JSON. Share links work. Brand and chapters visible.
 
 - New Vite React app: `studio/`
 - Zustand store with session data, loadingState, activeView
@@ -117,14 +128,17 @@ Zustand store. activeView toggle. AnimatePresence.
 - If `generatedText` is null (pipeline not run), show `elementText` as fallback
 - R2 session loader: URL param `?session=shareToken` → fetch JSON → hydrate store
 - Share links: anyone with link can view SOP, no auth required
+- **Brand**: read `session.brand` — apply logo, primary color, font to Studio UI. Intro/outro slides rendered as first/last step cards.
+- **Chapters**: read `session.metadata.chapterBreaks` — render chapter heading cards between steps in SOP view.
+- **Workspace brand settings**: new settings page in Studio where owner sets logo/color/font. Saved to D1, injected into session JSON at pipeline time.
 
-**Deliverable**: Capture session → open Smart Studio link → working SOP guide with screenshots, shareable with anyone.
+**Deliverable**: Capture session → open Smart Studio link → branded SOP guide with chapter headings, shareable with anyone.
 
 ---
 
-## Phase 3 — AI Pipeline (1 week)
+## Phase 3 — AI Pipeline + Translation (1 week)
 
-**Goal**: GPT-4o-mini generates step text. OpenAI TTS generates voiceover. Credits deducted.
+**Goal**: GPT-4o-mini generates step text. OpenAI TTS generates voiceover. Translation support added. Credits deducted.
 
 - Separate Cloudflare Worker: `pipeline-worker/`
 - Triggered via Cloudflare Queue (not same worker as API)
@@ -135,13 +149,22 @@ Zustand store. activeView toggle. AnimatePresence.
 - Credit deduction happens at `POST /pipeline/trigger` before queue dispatch
 - Edge AI (Gemini Nano): not in this phase. Cloud pipeline first.
 
-**Deliverable**: Capture → wait 30s → SOP guide has real AI step descriptions. Animation params stored for Phase 5.
+**Translation (Trupeer-equivalent):**
+- User picks a target language in Studio after session is ready
+- Frontend calls `POST /pipeline/translate` with `{ sessionId, languageCode }`
+- Pipeline worker calls GPT-4o-mini with translation prompt for all step texts
+- Calls OpenAI TTS on translated texts → new audio files → R2
+- Stores results in `step.translations[languageCode]` in session JSON
+- Costs 1 credit per language per session
+- Studio language switcher updates `session.activeLanguage` → all three views re-render with translated content
+
+**Deliverable**: Capture → SOP with AI text → switch to Spanish → SOP re-renders in Spanish with Spanish voiceover.
 
 ---
 
-## Phase 4 — Interactive Demo (1 week)
+## Phase 4 — Interactive Demo + Annotations (1 week)
 
-**Goal**: Clickable demo view with hotspot overlays. Embed anywhere.
+**Goal**: Clickable demo view with hotspot overlays, annotations editor, embed anywhere.
 
 - Add Demo view to Smart Studio
 - `useDemoSteps` selector: screenshot URL + hotspot position as x%/y% of viewport
@@ -152,7 +175,19 @@ Zustand store. activeView toggle. AnimatePresence.
 - Embed generator: iframe embed code for Notion/Confluence/any page
 - No extension required for viewers
 
-**Deliverable**: Capture → Smart Studio Demo view → clickable demo → shareable embed link.
+**Annotations editor (Trupeer-equivalent):**
+- Toolbar in Studio with: Arrow, Box, Circle, Text tools
+- User clicks/drags on any screenshot to place an annotation
+- Saved to `step.annotations[]` in session JSON (x/y as %, color, text)
+- Annotations rendered as SVG overlays on top of screenshot in all three views (SOP, Demo, Video)
+- Auto-annotation: pipeline suggests annotations at click coordinates automatically (arrow pointing to clicked element)
+- Blur tool: redact sensitive data (passwords, PII) on screenshots before sharing
+
+**Chapters in Demo view:**
+- Chapter break cards rendered between steps matching `session.metadata.chapterBreaks`
+- Acts as a navigation sidebar in Demo view — user can jump to any chapter
+
+**Deliverable**: Capture → annotated clickable demo with chapter navigation → shareable + embeddable.
 
 ---
 
@@ -183,11 +218,27 @@ Zustand store. activeView toggle. AnimatePresence.
 - Animation loop driven by audio `currentTime`
 - Captions: `generatedText` as subtitle bar, timed to voiceover (Pro feature)
 
+**Annotations in video:**
+- `step.annotations[]` rendered as SVG overlays on each screenshot during video playback
+- Annotations fade in 300ms after screenshot appears, fade out 300ms before transition
+- Auto-annotation arrows point to click target during zoom-in
+
+**Chapters in video:**
+- Chapter title cards rendered as 2-second transition slides between chapter groups
+- Branded with `session.brand` colors and font
+- Shown in video timeline scrubber as markers
+
+**Brand in video:**
+- Intro slide: logo + session title card, 3 seconds, branded colors
+- Outro slide: logo + CTA text, 3 seconds
+- Watermark: logo or text in corner throughout video (optional, Starter+)
+
 **Export:**
 - MediaRecorder on parent div captures Framer Motion playback as MP4
 - Fully client-side, no backend needed, costs no additional credits
+- Export includes all annotations, chapters, brand elements baked in
 
-**Deliverable**: Full simulated video with zoom, transitions, AI voiceover, captions. Export MP4.
+**Deliverable**: Full simulated video with zoom, transitions, AI voiceover, captions, annotations, chapters, branding. Export MP4.
 
 ---
 
@@ -216,6 +267,23 @@ Publish button makes session public with canonical URL. Fork creates copy under 
 
 ---
 
+## Trupeer Feature Coverage (all except AI Avatar)
+
+| Trupeer Feature | Where Built | Schema Field |
+|---|---|---|
+| Smart zoom on clicks | Phase 5 | `step.animationTarget` |
+| AI voiceover | Phase 3 | `step.voiceoverKey` |
+| Auto SOP / docs | Phase 2 | `step.generatedText` |
+| Step annotations / callouts | Phase 4 | `step.annotations[]` |
+| Chapters / sections | Phase 2 + 4 + 5 | `session.metadata.chapterBreaks[]` |
+| Brand customization | Phase 2 + 5 | `session.brand` |
+| 65+ language translation | Phase 3 | `step.translations{}` |
+| Knowledge base search | Path 5 | `step.memory` |
+| Template replication | Path 7 | `step.template` |
+| AI Avatar | Not planned | `session.avatar` (schema ready) |
+
+---
+
 ## Key Architectural Decisions (frozen)
 
 - **Screenshots not rrweb** — screenshots required for Demo and Video outputs. rrweb only if Path 3 added later.
@@ -225,3 +293,6 @@ Publish button makes session public with canonical URL. Fork creates copy under 
 - **`shared/types/session.ts` is immutable** — never change field names without bumping `SCHEMA_VERSION`.
 - **Separate pipeline worker** — not same as API worker. Longer CPU time, queue-driven.
 - **Credits not plans** — users buy credits, never forced to upgrade a plan.
+- **Annotations are SVG overlays** — not baked into screenshots. Rendered at display time so they stay editable.
+- **Translation is on-demand** — not generated automatically. User requests + pays credits per language.
+- **Brand is workspace-level** — one brand config per workspace, applied to all sessions from that workspace.
