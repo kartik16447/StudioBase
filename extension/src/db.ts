@@ -1,4 +1,4 @@
-import { svLog } from './logger';
+import { sbLog } from './logger';
 
 const DB_NAME = 'screenvault';
 const DB_VERSION = 1;
@@ -34,7 +34,7 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 export function getDB(): Promise<IDBDatabase> {
   if (!dbPromise) {
     dbPromise = initDB().catch(err => {
-      svLog("IDB_OPEN_FAILED", { error: err.message }).catch(() => {});
+      sbLog("IDB_OPEN_FAILED", { error: err.message }).catch(() => {});
       throw err;
     });
   }

@@ -92,7 +92,7 @@ export async function startSession(tabUrl: string): Promise<string> {
  * Sets session status to 'paused'.
  */
 export async function pauseSession(sessionId: string): Promise<void> {
-  const { sb_sessions } = await chrome.storage.session.get('sb_sessions');
+  const { sb_sessions } = await chrome.storage.session.get('sb_sessions') as { sb_sessions?: Session };
   if (sb_sessions && sb_sessions.sessionId === sessionId) {
     sb_sessions.status = 'paused';
     await chrome.storage.session.set({ sb_sessions });
@@ -103,7 +103,7 @@ export async function pauseSession(sessionId: string): Promise<void> {
  * Sets session status to 'recording'.
  */
 export async function resumeSession(sessionId: string): Promise<void> {
-  const { sb_sessions } = await chrome.storage.session.get('sb_sessions');
+  const { sb_sessions } = await chrome.storage.session.get('sb_sessions') as { sb_sessions?: Session };
   if (sb_sessions && sb_sessions.sessionId === sessionId) {
     sb_sessions.status = 'recording';
     await chrome.storage.session.set({ sb_sessions });
@@ -114,7 +114,7 @@ export async function resumeSession(sessionId: string): Promise<void> {
  * Marks the session as stopped and records completion time.
  */
 export async function stopSession(sessionId: string): Promise<void> {
-  const { sb_sessions } = await chrome.storage.session.get('sb_sessions');
+  const { sb_sessions } = await chrome.storage.session.get('sb_sessions') as { sb_sessions?: Session };
   if (sb_sessions && sb_sessions.sessionId === sessionId) {
     sb_sessions.status = 'stopped';
     sb_sessions.endedAt = new Date().toISOString();
@@ -126,7 +126,7 @@ export async function stopSession(sessionId: string): Promise<void> {
  * Retrieves the current session.
  */
 export async function getSession(sessionId: string): Promise<Session | null> {
-  const { sb_sessions } = await chrome.storage.session.get('sb_sessions');
+  const { sb_sessions } = await chrome.storage.session.get('sb_sessions') as { sb_sessions?: Session };
   if (sb_sessions && sb_sessions.sessionId === sessionId) {
     return sb_sessions as Session;
   }
@@ -137,7 +137,7 @@ export async function getSession(sessionId: string): Promise<Session | null> {
  * Appends a capture event to the current session.
  */
 export async function appendEvent(sessionId: string, event: CaptureEvent): Promise<void> {
-  const { sb_sessions } = await chrome.storage.session.get('sb_sessions');
+  const { sb_sessions } = await chrome.storage.session.get('sb_sessions') as { sb_sessions?: Session };
   if (sb_sessions && sb_sessions.sessionId === sessionId) {
     sb_sessions.events.push(event);
     await chrome.storage.session.set({ sb_sessions });
@@ -148,7 +148,7 @@ export async function appendEvent(sessionId: string, event: CaptureEvent): Promi
  * SW restart recovery: retrieves any active session from session storage.
  */
 export async function recoverSession(): Promise<Session | null> {
-  const { sb_sessions } = await chrome.storage.session.get('sb_sessions');
+  const { sb_sessions } = await chrome.storage.session.get('sb_sessions') as { sb_sessions?: Session };
   if (sb_sessions && (sb_sessions.status === 'recording' || sb_sessions.status === 'paused')) {
     return sb_sessions as Session;
   }

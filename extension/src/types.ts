@@ -1,5 +1,4 @@
-// Every type the system uses. No imports needed.
-
+// Every type the system uses.
 export type AppStatus =
   | 'idle'
   | 'recording'
@@ -8,64 +7,47 @@ export type AppStatus =
   | 'ready'
   | 'enriching'
   | 'failed_enrichment'
-  | 'failed'
   | 'error';
-  
-export interface PreAllocationResult {
-  id: string;
+
+export interface RawStepPayload {
+  action: 'click' | 'input' | 'scroll' | 'navigate';
+  timestamp: number;
   url: string;
-  fileName: string;
-  account: StorageAccount;
-  folderId?: string;
+  pageTitle: string;
+  selector: string | null;
+  selectorConfidence: 'high' | 'medium' | 'low' | null;
+  elementText: string | null;
+  elementRole: string | null;
+  elementType: string | null;
+  inputValue: string | null;
+  coordinates: {
+    x: number;
+    y: number;
+    viewportWidth: number;
+    viewportHeight: number;
+    scrollX: number;
+    scrollY: number;
+    elementRect: { top: number; left: number; width: number; height: number } | null;
+  };
+  isIframeBlocked: boolean;
+  frameUrl: string;
 }
 
-export interface SessionMetadata {
-  sessionId: string;
-  fileId: string;
-  title?: string;
-  accountId: string;
-  
-  // Telemetry
-  startedAt: number;
-  stoppedAt?: number;
-  uploadStartedAt?: number;
-  uploadCompleteAt?: number;
-  backendFinalizedAt?: number;
-  linkReadyAt?: number;
-  enrichmentFinishedAt?: number;
-
-  status: 'recording' | 'uploading' | 'finalizing' | 'ready' | 'enriching' | 'failed_enrichment' | 'error';
-  
-  processingStartedAt?: number;
-  duration?: number;
-  actualDurationMs?: number;
-  backendVideoId?: string;
-  previewUrl?: string;
-  playerUrl?: string;
-  encryptedFileId?: string;
-  accountEmail?: string;
-  thumbnailUrl?: string;
-  backendSynced?: boolean;
-  usageSynced?: boolean;
-}
-
-export interface RecordingTarget {
+export interface CaptureTarget {
   includeMic?: boolean;
-  tabId?: number;
+  streamId?: string;
   tabTitle?: string;
+  userTitle?: string;
 }
 
 export interface AppState {
   status: AppStatus;
-  sessionId: string | null;
-  startedAt: number | null;
-  target: RecordingTarget | null;
-  uploadProgress: number;        // 0–100
-  uploadUrl: string | null;
-  preAllocatedFileId: string | null;
-  uploadAccount: string | null;  // email
-  errorMessage: string | null;
-  backendVideoId: string | null;
+  sessionId?: string | null;
+  startedAt?: number | null;
+  target?: CaptureTarget | null;
+  uploadProgress?: number;
+  uploadUrl?: string | null;
+  errorMessage?: string | null;
 }
 
 export interface StorageAccount {
@@ -92,26 +74,38 @@ export interface BackendUser {
   userId: string;
   email: string;
   workspaceId: string;
-  workspaceSlug: string;
-  workspaceRole: string;
+  workspaceSlug?: string;
+  workspaceRole?: string;
+  picture?: string;
 }
 
 export interface BackendVideo {
   id: string;
   fileId: string;
-  sessionId?: string;
+  sessionId: string;
   workspaceId: string;
+  ownerId: string;
+  playerUrl: string;
   title: string;
-  playerUrl?: string;
+  status: string;
+  createdAt: number;
+  accountEmail?: string;
+  account_email?: string;
   thumbnailUrl?: string;
   previewUrl?: string;
   webViewLink?: string;
-  accountEmail?: string;
-  account_email?: string; // Legacy snake_case from worker
-  status: 'uploading' | 'finalizing' | 'ready' | 'enriching' | 'failed' | 'deleted';
-  actualDurationMs?: number;
-  ownerId: string;
-  createdAt: number;
+}
+
+export interface SessionMetadata {
+  sessionId: string;
+  fileId: string;
+  status: 'ready' | 'uploading' | 'failed';
+  startedAt: number;
+  title: string;
+  accountEmail: string;
+  thumbnailUrl?: string;
+  playerUrl?: string;
+  backendVideoId?: string;
 }
 
 export interface StorageSchema {
@@ -121,59 +115,11 @@ export interface StorageSchema {
   sv_state?: AppState;
 }
 
-// Messages from popup → service worker
-export type PopupMessage =
-  | { type: 'GET_STATE' }
-  | { type: 'GET_ACCOUNTS' }
-  | { type: 'START_RECORDING'; target: RecordingTarget }
-  | { type: 'STOP_RECORDING' }
-  | { type: 'CONNECT_ACCOUNT' }
-  | { type: 'SAVE_TO_DISK' }
-  | { type: 'SET_STATUS'; status: AppStatus }
-  | { type: 'PRE_ALLOCATE_AND_COPY' }
-  | { type: 'GET_PENDING_SESSIONS' }
-  | { type: 'RECOVER_SESSION'; sessionId: string }
-  | { type: 'DELETE_SESSION'; sessionId: string };
-
-// Messages from service worker → popup
 export type WorkerMessage =
+  | { type: 'GET_STATE' }
+  | { type: 'SET_STATUS'; status: AppStatus }
+  | { type: 'START_RECORDING'; target: CaptureTarget }
+  | { type: 'STOP_RECORDING' }
   | { type: 'STATE_UPDATE'; state: AppState }
-  | { type: 'ACCOUNTS_UPDATE'; accounts: StorageAccount[] }
-  | { type: 'INSTANT_LINK'; url: string; fileId: string };
-
-// Messages between service worker ↔ offscreen
-export type OffscreenMessage =
-  | {
-      type: 'START_SCREEN';
-      fileId: string;
-      sessionId: string;
-      includeMic?: boolean;
-      account: StorageAccount;
-      sv_user?: BackendUser;
-      sv_accounts?: StorageAccount[];
-      title?: string;
-      folderId?: string;
-    }
-  | { type: 'STOP'; account: StorageAccount | null }
-  | { type: 'CAPTURE_STARTED' }
-  | { type: 'RECORDING_ERROR'; message: string }
-  | { type: 'UPLOAD_PROGRESS'; progress: number }
-  | { type: 'UPLOAD_COMPLETE'; url: string; account: string }
-  | { type: 'RECORDING_FINISHED'; blobUrl: string }
-  | { type: 'MIC_PERMISSION_REQUIRED' }
-  | { 
-      type: 'RECOVER_AND_UPLOAD'; 
-      sessionId: string; 
-      fileId: string; 
-      account: StorageAccount;
-      sv_user?: BackendUser;
-      sv_accounts?: StorageAccount[];
-    }
-  | { type: 'SET_SESSION_STATUS'; sessionId: string; status: SessionMetadata['status'] }
-  | { type: 'SAVE_SESSION_METADATA'; sessionId: string; metadata: Partial<SessionMetadata> }
-  | { type: 'REMOVE_SESSION_METADATA'; sessionId: string }
-  | { type: 'GET_SESSION_METADATA'; sessionId: string }
-  | { type: 'GET_ACCOUNTS' }
-  | { type: 'GET_TOKEN'; interactive?: boolean; accountId?: string }
-  | { type: 'GET_USER' }
-  | { type: 'OFFSCREEN_READY' };
+  | { type: 'CAPTURE_STEP'; payload: RawStepPayload }
+  | { type: 'LOG'; logMessage: { tag: string; data: any } };

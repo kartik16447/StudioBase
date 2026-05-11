@@ -6,7 +6,16 @@
       "Bash(unzip -o StudioBase-handoff.zip -d StudioBase-handoff)",
       "Bash(npm run *)",
       "Bash(git add *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(git -C /Users/kartikupadhyay/Downloads/studiobase log --oneline -8)",
+      "Bash(npx --prefix /Users/kartikupadhyay/Downloads/studiobase/extension tsc --noEmit)",
+      "Bash(npx wrangler *)",
+      "Bash(node build.mjs)",
+      "Bash(openssl genrsa *)",
+      "Bash(openssl pkcs8 *)",
+      "Bash(openssl rsa *)",
+      "Bash(openssl base64 *)",
+      "Bash(curl -s https://studiobase-backend.karthik-upadhyay98.workers.dev/auth/google -X POST -H 'Content-Type: application/json' -d '{\"accessToken\":\"test\"}')"
     ]
   }
 }

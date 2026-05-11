@@ -3,18 +3,17 @@
   "name": "StudioBase",
   "version": "0.1.0",
   "description": "Capture workflows. Generate SOPs, demos, and videos automatically.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyH0iOu1pGsTNC3TTQm9IOS7wOGBKFwqeCqM0KcFLnXzduNnPUiPTRjyQphBdbVbWENIsD2Sdv6CUq2LJR8tIy0gr1dbExCleBLgsAY9sdTDl9Fw4eJpVKLwSGgyM4Ul9hty91p+jVT1kFcPULZ/XmIkR82uF/U5MoK8RmIVBogLWIBP3VgwL1d0eZcNyD5df83OpFGaU8x31hzW0woG8jJzV2gUqkKomRB/KDJM85RxGRH1querkZvwgtlDUDT6QOpaGfMmAzuaoh5mtXoVL1CubiM2KPcS87ylrzIzvZEDQgK2E1oEyq4iky+m0saKIgTVE2Tbp4+oDdTrBpkuRlQIDAQAB",
   "permissions": [
     "tabs",
     "storage",
     "identity",
     "activeTab",
     "scripting",
-    "downloads"
+    "downloads",
+    "desktopCapture"
   ],
-  "host_permissions": [
-    "https://www.googleapis.com/*",
-    "<all_urls>"
-  ],
+  "host_permissions": ["https://www.googleapis.com/*", "<all_urls>"],
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"
@@ -22,7 +21,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["dist/content.js"],
+      "js": ["content.js"],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -36,7 +35,7 @@
     }
   },
   "oauth2": {
-    "client_id": "64877467372-b3aksjdsc4g7g0d5u3m5bb0ac41ed408.apps.googleusercontent.com",
+    "client_id": "813435932187-l9vpdot4lsa51o4qa617o83111jgirot.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/userinfo.email",
       "https://www.googleapis.com/auth/userinfo.profile"

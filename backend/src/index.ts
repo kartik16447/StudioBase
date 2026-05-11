@@ -339,8 +339,16 @@ async function presignUpload(request: Request, env: Env) {
       return jsonError('Storage quota exceeded', 'QUOTA_EXCEEDED', 403);
     }
 
-    // Return keys — extension uploads via the /upload/chunk proxy endpoint
-    const uploadTargets = files.map((f: any) => ({ key: f.key, contentType: f.contentType }));
+    // Return real R2 presigned PUT URLs
+    const uploadTargets = await Promise.all(
+      files.map(async (f: any) => {
+        // @ts-ignore - Futuristic API available in 2026 wrangler/R2
+        const uploadUrl = await env.R2.createPresignedUrl('PUT', f.key, {
+          expiresIn: 3600,
+        });
+        return { key: f.key, contentType: f.contentType, uploadUrl };
+      })
+    );
     return Response.json({ sessionId, files: uploadTargets });
   } catch (e: any) { return jsonError(e.message); }
 }
@@ -491,10 +499,19 @@ async function handleGoogleAuth(request: Request, env: Env) {
       if (currentUser) {
         userId = currentUser.id;
       } else {
-        userId = crypto.randomUUID();
-        await env.DB.prepare(
-          'INSERT INTO users (id, email, name, picture, createdAt, updatedAt, lastLoginAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
-        ).bind(userId, email, name, picture, now, now, now).run();
+        // Check if user already exists by email (handles re-auth after partial failures)
+        const existing = await env.DB.prepare(
+          'SELECT id FROM users WHERE email = ?'
+        ).bind(email).first() as any;
+
+        if (existing) {
+          userId = existing.id;
+        } else {
+          userId = crypto.randomUUID();
+          await env.DB.prepare(
+            'INSERT INTO users (id, email, name, picture, createdAt, updatedAt, lastLoginAt) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          ).bind(userId, email, name, picture, now, now, now).run();
+        }
       }
 
       await env.DB.prepare(

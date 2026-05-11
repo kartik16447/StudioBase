@@ -17,6 +17,7 @@ const shared = {
 }
 
 await esbuild.build({ ...shared, entryPoints: ['src/service-worker.ts'] })
+await esbuild.build({ ...shared, entryPoints: ['src/content.ts'] })
 await esbuild.build({ ...shared, entryPoints: ['src/offscreen.ts'] })
 await esbuild.build({ ...shared, entryPoints: ['src/setup.ts'] })
 await esbuild.build({ ...shared, entryPoints: ['src/popup.ts'] })

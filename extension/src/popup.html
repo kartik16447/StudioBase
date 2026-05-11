@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ScreenVault</title>
+    <title>StudioBase</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
@@ -11,52 +11,49 @@
       <div class="header">
         <div class="logo">
           <div class="logo-dot"></div>
-          <span class="logo-name">ScreenVault</span>
+          <span class="logo-name">StudioBase</span>
         </div>
-        <div class="header-actions">
-          <button
-            class="icon-btn"
-            id="btn-connect"
-            title="Connect Google Drive"
-          >
-            +
+        <div class="header-actions" id="header-user-info" style="display: none;">
+          <div class="user-profile">
+            <span id="user-email" class="user-email"></span>
+            <div id="user-avatar" class="user-avatar">?</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Screen: Auth Gate -->
+      <div class="screen" id="screen-auth" style="display: none">
+        <div class="auth-body">
+          <div class="auth-icon">🔐</div>
+          <h2 class="auth-title">Sign in to StudioBase</h2>
+          <p class="auth-sub">Capture and generate interactive walkthroughs automatically.</p>
+          <button class="btn-primary google-btn" id="btn-signin">
+            <svg viewBox="0 0 24 24" width="18" height="18" style="margin-right: 8px;">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            Sign in with Google
           </button>
         </div>
       </div>
 
       <!-- Screen: Idle -->
-      <div class="screen" id="screen-idle">
+      <div class="screen" id="screen-idle" style="display: none">
         <div class="action-row">
           <button
             class="icon-btn mic-toggle-btn"
             id="btn-toggle-mic"
             title="Enable Microphone"
           >
-            <svg
-              class="mic-icon"
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              stroke="currentColor"
-              stroke-width="2"
-              fill="none"
-            >
-              <path
-                d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
-              ></path>
+            <svg class="mic-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
               <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
               <line x1="12" y1="19" x2="12" y2="23"></line>
               <line x1="8" y1="23" x2="16" y2="23"></line>
             </svg>
-            <svg
-              class="mic-off-icon"
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              stroke="currentColor"
-              stroke-width="2"
-              fill="none"
-            >
+            <svg class="mic-off-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
               <path d="M12 1a3 3 0 0 0-3 3v5"></path>
               <path d="M15 9V4a3 3 0 0 0-5.2-2.1"></path>
               <path d="M19 10v2a7 7 0 0 1-12.2 4.6"></path>
@@ -76,49 +73,11 @@
             type="text" 
             id="rec-title-input" 
             placeholder="Recording Title (optional)"
-            style="
-              width: 100%;
-              background: #141414;
-              border: 1px solid #222;
-              border-radius: 6px;
-              color: white;
-              padding: 10px 12px;
-              font-size: 13px;
-              outline: none;
-              transition: border-color 0.2s;
-            "
-            onfocus="this.style.borderColor='#3b82f6'"
-            onblur="this.style.borderColor='#222'"
+            style="width: 100%; background: #141414; border: 1px solid #222; border-radius: 6px; color: white; padding: 10px 12px; font-size: 13px; outline: none; transition: border-color 0.2s;"
           />
         </div>
         <div style="font-size: 11px; color: var(--text-3); text-align: center; margin-bottom: 8px;">
-          You’ll choose what to record (Tab, Window, or Screen) next.
-        </div>
-
-        <button
-          id="dashboardBtn"
-          style="
-            width: 100%;
-            margin-top: 8px;
-            margin-bottom: 8px;
-            background: #1f2937;
-            color: white;
-            padding: 8px;
-            border-radius: 6px;
-            border: none;
-            cursor: pointer;
-          "
-        >
-          My Library
-        </button>
-
-        <div class="accounts-section" id="accounts-list">
-          <div class="section-label">Storage Accounts</div>
-          <!-- Account rows injected by popup.ts -->
-        </div>
-        <div class="no-accounts" id="no-accounts" style="display: none">
-          <p>No accounts connected.</p>
-          <p>Click <strong>+</strong> to add Google Drive.</p>
+          Choose what to record next.
         </div>
       </div>
 
@@ -135,7 +94,7 @@
           <div class="rec-target-label" id="rec-target-label">Screen</div>
           <button class="stop-btn" id="btn-stop">
             <div class="stop-sq"></div>
-            Stop & Upload
+            Stop & Finish
           </button>
         </div>
       </div>
@@ -143,8 +102,7 @@
       <!-- Screen: Uploading -->
       <div class="screen" id="screen-uploading" style="display: none">
         <div class="upload-body">
-          <div class="upload-label">Preparing your link...</div>
-          <div class="upload-sub" id="upload-account-label">—</div>
+          <div class="upload-label" id="upload-status-label">Uploading capture...</div>
           <div class="progress-track">
             <div class="progress-fill" id="progress-fill"></div>
           </div>
@@ -156,13 +114,13 @@
       <div class="screen" id="screen-success" style="display: none">
         <div class="success-body">
           <div class="success-check">✓</div>
-          <div class="success-title">Link copied to clipboard</div>
-          <div class="success-meta" id="success-meta">—</div>
+          <div class="success-title">Capture Ready!</div>
+          <div class="success-meta">Your interactive session is being processed.</div>
           <div class="success-actions">
-            <button class="btn-primary" id="btn-copy-link">Copy link</button>
-            <button class="btn-secondary" id="btn-open-link">Open ↗</button>
+            <button class="btn-primary" id="btn-open-studio">Open in Studio</button>
+            <button class="btn-secondary" id="btn-copy-link">Copy URL</button>
           </div>
-          <button class="btn-ghost" id="btn-record-again">Record again</button>
+          <button class="btn-ghost" id="btn-record-again">New Recording</button>
         </div>
       </div>
 
@@ -170,24 +128,19 @@
       <div class="screen" id="screen-error" style="display: none">
         <div class="error-body">
           <div class="error-icon">⚠</div>
-          <div class="error-title">Something went wrong</div>
+          <div class="error-title">Upload Failed</div>
           <div class="error-message" id="error-message">—</div>
-          <button class="btn-secondary" id="btn-save-disk">Save to disk</button>
-          <button class="btn-ghost" id="btn-try-again">Try again</button>
+          <button class="btn-secondary" id="btn-try-again">Try again</button>
         </div>
       </div>
 
-      <div
-        class="countdown-overlay"
-        id="countdown-overlay"
-        style="display: none"
-      >
+      <div class="countdown-overlay" id="countdown-overlay" style="display: none">
         <div class="countdown-number" id="countdown-number">3</div>
         <button class="btn-ghost skip-btn" id="btn-skip-countdown">Skip</button>
       </div>
 
       <div id="toast" class="toast">
-        Recording Started! Link copied to clipboard.
+        Copied to clipboard!
       </div>
     </div>
 

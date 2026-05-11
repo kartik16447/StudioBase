@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { safeFetch } from '../../utils/api';
+import { BackendUser } from '../../types';
 
 interface Workspace {
   id: string;
@@ -17,7 +18,7 @@ export function Layout({ session }: { session: any }) {
 
   useEffect(() => {
     async function init() {
-      const storage = await chrome.storage.local.get(['sv_user']);
+      const storage = (await chrome.storage.local.get(['sv_user'])) as { sv_user?: BackendUser };
       if (storage.sv_user) {
         setActiveWorkspaceId(storage.sv_user.workspaceId);
       }
@@ -32,20 +33,20 @@ export function Layout({ session }: { session: any }) {
     }
     init();
     
-    const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
-      if (areaName === 'local' && changes.sv_user) {
-        const newUser = changes.sv_user.newValue;
-        if (newUser?.workspaceId) {
-          setActiveWorkspaceId(newUser.workspaceId);
+      const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
+        if (areaName === 'local' && changes.sv_user) {
+          const newUser = changes.sv_user.newValue as BackendUser | undefined;
+          if (newUser?.workspaceId) {
+            setActiveWorkspaceId(newUser.workspaceId);
+          }
         }
-      }
-    };
+      };
     chrome.storage.onChanged.addListener(listener);
     return () => chrome.storage.onChanged.removeListener(listener);
   }, []);
 
   const switchWorkspace = async (workspaceId: string) => {
-    const storage = await chrome.storage.local.get(['sv_user']);
+    const storage = (await chrome.storage.local.get(['sv_user'])) as { sv_user?: BackendUser };
     if (storage.sv_user) {
       const newWorkspace = workspaces.find(w => w.id === workspaceId);
       await chrome.storage.local.set({

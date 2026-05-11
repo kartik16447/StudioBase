@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { safeFetch } from '../../utils/api';
+import { BackendUser } from '../../types';
 
 export function JoinPage() {
   const [searchParams] = useSearchParams();
@@ -19,7 +20,7 @@ export function JoinPage() {
 
     async function processJoin() {
       try {
-        const storage = await chrome.storage.local.get(['sv_user']);
+        const storage = (await chrome.storage.local.get(['sv_user'])) as { sv_user?: BackendUser };
         const sv_user = storage.sv_user;
 
         const res = await safeFetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/join`, {
@@ -35,7 +36,7 @@ export function JoinPage() {
         
         // Update sv_user with the joined workspaceId
         await chrome.storage.local.set({ 
-            sv_user: { ...sv_user, workspaceId: data.workspaceId } 
+            sv_user: { ...(sv_user || {}), workspaceId: data.workspaceId } 
         });
 
         setStatus('Successfully joined! Taking you to the library...');

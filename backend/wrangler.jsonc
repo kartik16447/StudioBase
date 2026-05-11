@@ -10,7 +10,7 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"d1_databases": [
 		{
-			"binding": "studiobase_db",
+			"binding": "DB",
 			"database_name": "studiobase-db",
 			"database_id": "a22b148a-c590-4050-991a-7dfd162a5d08",
 		},

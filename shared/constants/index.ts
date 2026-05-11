@@ -25,5 +25,7 @@ export const DEFAULT_DWELL_MS = 2500;         // fallback dwell if no voiceover
 // R2 signed URL TTL
 export const ASSET_URL_TTL_SECONDS = 3600;    // 1 hour
 
-export const PLAYER_BASE_URL = "https://screenvault.karthik-upadhyay98.workers.dev";
+export const PLAYER_BASE_URL = "https://player.studiobase.app";
 export const BACKEND_URL = "https://studiobase-backend.karthik-upadhyay98.workers.dev";
+export const DEV_MODE = true; // Toggle for local studio testing
+export const STUDIO_URL = DEV_MODE ? "http://localhost:5173" : "https://studiobase.app";

@@ -58,7 +58,8 @@ function buildStructuralPath(element: Element): string {
   let current: Element | null = element;
 
   while (current && current !== document.documentElement) {
-    const host = (current.getRootNode() as ShadowRoot).host;
+    const root = current.getRootNode();
+    const host: Element | null = root instanceof ShadowRoot ? root.host : null;
 
     if (host) {
       // We're inside a shadow root — add shadow boundary marker and continue from host

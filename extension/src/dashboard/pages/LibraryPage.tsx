@@ -10,7 +10,7 @@ import {
 } from "../../types";
 import { deleteFile, getFileMetadata, renameFile } from "../../google-drive";
 import { safeFetch } from "../../utils/api";
-import { svLog } from "../../logger";
+import { sbLog } from "../../logger";
 
 const VIEWER_BASE_URL = "https://screenvault.karthik-upadhyay98.workers.dev";
 
@@ -185,7 +185,7 @@ export function LibraryPage() {
         }),
       );
 
-      svLog("DASHBOARD_FETCH_VIDEOS", {
+      sbLog("DASHBOARD_FETCH_VIDEOS", {
         count: backendFiles.length,
         timestamp: Date.now(),
       });

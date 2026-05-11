@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { SessionEnvelope, Step } from '../../../shared/types/session';
+import { BACKEND_URL } from '../../../shared/constants';
 
 export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team';
 
@@ -26,6 +27,7 @@ interface StudioState {
   currentStepIndex: number;
   currentTime: number;
   scrollTrigger: number;
+  sessionError: string | null;
 
   // Actions
   navigate: (name: RouteName, params?: Record<string, any>) => void;
@@ -45,6 +47,7 @@ interface StudioState {
   setCurrentTime: (time: number) => void;
   updateStep: (stepId: string, updates: Partial<Step>) => void;
   triggerScroll: () => void;
+  fetchSession: (sessionId: string) => Promise<void>;
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
@@ -64,12 +67,57 @@ export const useStudioStore = create<StudioState>((set) => ({
   currentStepIndex: 0,
   currentTime: 0,
   scrollTrigger: 0,
+  sessionError: null,
 
   navigate: (name, params = {}) => set({ route: { name, params } }),
   setSession: (session) => {
     set({ session });
     if (session && session.steps.length > 0) {
       set({ focusedStepId: session.steps[0].id, focusedStepIndex: 0 });
+    }
+  },
+  fetchSession: async (sessionId) => {
+    try {
+      set({ sessionError: null });
+      
+      // Get token from URL or session storage
+      const urlParams = new URLSearchParams(window.location.search);
+      let token = urlParams.get('token');
+      
+      if (token) {
+        sessionStorage.setItem('sb_token', token);
+      } else {
+        token = sessionStorage.getItem('sb_token');
+      }
+
+      const res = await fetch(`${BACKEND_URL}/sessions/${sessionId}`, {
+        headers: token ? {
+          'Authorization': `Bearer ${token}`
+        } : {}
+      });
+
+      if (!res.ok) {
+        if (res.status === 401) throw new Error('Unauthorized: Please sign in through the extension');
+        throw new Error('Failed to fetch session');
+      }
+      
+      const data = await res.json();
+      
+      let sessionData = data;
+      if (data.sessionJsonUrl) {
+        const jsonRes = await fetch(data.sessionJsonUrl);
+        if (jsonRes.ok) {
+          sessionData = await jsonRes.json();
+        }
+      }
+      
+      set({ session: sessionData });
+      if (sessionData.steps?.length > 0) {
+        set({ focusedStepId: sessionData.steps[0].id, focusedStepIndex: 0 });
+      }
+    } catch (err: any) {
+      console.error('fetchSession error:', err);
+      set({ sessionError: err.message || 'Failed to load session' });
     }
   },
   setActiveTab: (id) => set({ activeTab: id }),

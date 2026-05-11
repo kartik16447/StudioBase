@@ -27,7 +27,7 @@ export async function startSession(tabUrl: string): Promise<string> {
     events: []
   };
 
-  const { sb_sessions = {} } = await chrome.storage.local.get("sb_sessions");
+  const { sb_sessions = {} } = (await chrome.storage.local.get("sb_sessions")) as { sb_sessions: Record<string, Session> };
   sb_sessions[sessionId] = session;
   await chrome.storage.local.set({ sb_sessions });
 
@@ -38,7 +38,7 @@ export async function startSession(tabUrl: string): Promise<string> {
  * Marks the session as ended.
  */
 export async function stopSession(sessionId: string): Promise<void> {
-  const { sb_sessions = {} } = await chrome.storage.local.get("sb_sessions");
+  const { sb_sessions = {} } = (await chrome.storage.local.get("sb_sessions")) as { sb_sessions: Record<string, Session> };
   if (sb_sessions[sessionId]) {
     sb_sessions[sessionId].endedAt = new Date().toISOString();
     await chrome.storage.local.set({ sb_sessions });
@@ -49,7 +49,7 @@ export async function stopSession(sessionId: string): Promise<void> {
  * Retrieves a session from storage.
  */
 export async function getSession(sessionId: string): Promise<Session | null> {
-  const { sb_sessions = {} } = await chrome.storage.local.get("sb_sessions");
+  const { sb_sessions = {} } = (await chrome.storage.local.get("sb_sessions")) as { sb_sessions: Record<string, Session> };
   return sb_sessions[sessionId] || null;
 }
 
@@ -57,7 +57,7 @@ export async function getSession(sessionId: string): Promise<Session | null> {
  * Appends a capture event to a specific session.
  */
 export async function appendEvent(sessionId: string, event: CaptureEvent): Promise<void> {
-  const { sb_sessions = {} } = await chrome.storage.local.get("sb_sessions");
+  const { sb_sessions = {} } = (await chrome.storage.local.get("sb_sessions")) as { sb_sessions: Record<string, Session> };
   if (sb_sessions[sessionId]) {
     sb_sessions[sessionId].events.push(event);
     await chrome.storage.local.set({ sb_sessions });

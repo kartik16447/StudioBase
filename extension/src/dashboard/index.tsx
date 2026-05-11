@@ -15,7 +15,7 @@ function App() {
 
   React.useEffect(() => {
     chrome.storage.local.get(['sv_accounts']).then(res => {
-      const accounts = res.sv_accounts || [];
+      const accounts = (res.sv_accounts || []) as any[];
       if (accounts.length > 0) {
         setSession({
           user: { email: accounts[0].email, id: accounts[0].id }
