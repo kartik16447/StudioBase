@@ -88,6 +88,26 @@ export const StudioPage: React.FC = () => {
     );
   }
 
+  if (session.steps.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
+        <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-6">
+          <I.FileText size={32} className="text-amber-600" />
+        </div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-2">No steps captured</h2>
+        <p className="text-gray-600 max-w-md">
+          This session was recorded but no interactions were captured. Make sure you click, type, or navigate during the recording, then record a new session.
+        </p>
+        <button
+          onClick={() => window.close()}
+          className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          Close
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
       <StudioTopBar />
