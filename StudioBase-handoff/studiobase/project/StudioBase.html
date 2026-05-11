@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>StudioBase — Smart Studio</title>
+
+<!-- Tailwind via Play CDN -->
+<script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          bg: '#F5F5F7',
+          surface: '#FFFFFF',
+          'surface-2': '#F0F0F5',
+          primary: '#5E5CE6',
+          'primary-600': '#4F4DD1',
+          'primary-light': 'rgba(94, 92, 230, 0.10)',
+          'primary-tint': 'rgba(94, 92, 230, 0.18)',
+          text: '#1D1D1F',
+          'text-2': '#6E6E73',
+          'text-3': '#AEAEB2',
+          border: 'rgba(0,0,0,0.08)',
+          'border-strong': 'rgba(0,0,0,0.14)',
+          sidebar: '#111111',
+          'sidebar-2': '#181818',
+          'sidebar-hover': 'rgba(255,255,255,0.06)',
+          'sidebar-active': 'rgba(94,92,230,0.15)',
+          success: '#34C759',
+          warning: '#FF9F0A',
+          danger: '#FF453A',
+        },
+        borderRadius: {
+          card: '16px',
+          img: '12px',
+          pill: '999px',
+          sm: '8px',
+        },
+        boxShadow: {
+          card: '0 2px 20px rgba(0,0,0,0.06)',
+          'card-hover': '0 8px 40px rgba(0,0,0,0.12)',
+          'card-lifted': '0 16px 60px rgba(0,0,0,0.16)',
+          glass: '0 4px 24px rgba(0,0,0,0.08)',
+          'inner-border': 'inset 0 0 0 1px rgba(0,0,0,0.06)',
+        },
+        fontFamily: {
+          sans: ['-apple-system','BlinkMacSystemFont','SF Pro Display','SF Pro Text','Inter','system-ui','sans-serif'],
+          mono: ['SF Mono','ui-monospace','Menlo','monospace'],
+        },
+        keyframes: {
+          'border-rotate': {
+            '0%': { '--angle': '0deg' },
+            '100%': { '--angle': '360deg' },
+          },
+        },
+      },
+    },
+  };
+</script>
+
+<style>
+  html, body { background: #F5F5F7; color: #1D1D1F; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "ss01", "cv11";
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+
+  /* Animated dashed gradient border (used on "New session" card and logo drop zone) */
+  @property --angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+  }
+  .grad-border {
+    position: relative;
+    background: #FFFFFF;
+    border-radius: 16px;
+  }
+  .grad-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 16px;
+    padding: 1.5px;
+    background: conic-gradient(from var(--angle), #5E5CE6, #8B5CF6, #06B6D4, #5E5CE6);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    animation: spin 6s linear infinite;
+  }
+  @keyframes spin { to { --angle: 360deg; } }
+
+  /* Custom scrollbars (subtle, Apple-ish) */
+  .scroll-y { overflow-y: auto; }
+  .scroll-y::-webkit-scrollbar { width: 10px; height: 10px; }
+  .scroll-y::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+  .scroll-y::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.22); background-clip: content-box; border: 2px solid transparent; }
+  .scroll-y-dark::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); background-clip: content-box; border: 2px solid transparent; border-radius: 10px; }
+
+  /* Subtle striped placeholder used for screenshot stand-ins */
+  .stripe-placeholder {
+    background-image:
+      repeating-linear-gradient(135deg, rgba(0,0,0,0.04) 0 1px, transparent 1px 14px),
+      linear-gradient(180deg, #FAFAFC, #F0F0F5);
+  }
+
+  /* Subtle dotted grid for canvas background */
+  .canvas-grid {
+    background-color: #FFFFFF;
+    background-image:
+      radial-gradient(rgba(94,92,230,0.06) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  /* Soft studio gradient for canvas */
+  .studio-gradient {
+    background:
+      radial-gradient(60% 50% at 30% 20%, rgba(94,92,230,0.10), transparent 70%),
+      radial-gradient(50% 50% at 80% 80%, rgba(6,182,212,0.08), transparent 70%),
+      radial-gradient(40% 40% at 70% 30%, rgba(139,92,246,0.10), transparent 70%),
+      linear-gradient(180deg, #F5F4FE, #EFF5FE 60%, #F5F4FE);
+  }
+
+  /* Focus ring (a11y) */
+  :focus-visible { outline: 2px solid #5E5CE6; outline-offset: 2px; border-radius: 8px; }
+  button:focus-visible, a:focus-visible { outline-offset: 3px; }
+
+  /* Text selection */
+  ::selection { background: rgba(94,92,230,0.22); color: #1D1D1F; }
+
+  /* Loading shimmer used inside placeholder thumbnails */
+  .shimmer {
+    background: linear-gradient(90deg, rgba(255,255,255,0) 0, rgba(255,255,255,0.55) 50%, rgba(255,255,255,0) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 2.4s linear infinite;
+  }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+  /* Glass panel surface */
+  .glass {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: saturate(180%) blur(24px);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    border: 1px solid rgba(255,255,255,0.6);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  }
+  .glass-dark {
+    background: rgba(17,17,17,0.78);
+    backdrop-filter: saturate(180%) blur(24px);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* Keyboard key chip */
+  .kbd {
+    font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.7);
+    line-height: 1;
+  }
+  .kbd-light {
+    background: #FFFFFF;
+    border: 1px solid rgba(0,0,0,0.10);
+    color: #6E6E73;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+  }
+</style>
+
+<!-- React + Babel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<!-- Framer Motion UMD -->
+<script src="https://unpkg.com/framer-motion@11.11.17/dist/framer-motion.js"></script>
+
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" src="src/icons.jsx"></script>
+<script type="text/babel" src="src/store.jsx"></script>
+<script type="text/babel" src="src/data.jsx"></script>
+<script type="text/babel" src="src/ui.jsx"></script>
+<script type="text/babel" src="src/effects.jsx"></script>
+<script type="text/babel" src="src/studio.jsx"></script>
+<script type="text/babel" src="src/panels.jsx"></script>
+<script type="text/babel" src="src/layout.jsx"></script>
+<script type="text/babel" src="src/pages.jsx"></script>
+<script type="text/babel" src="src/app.jsx"></script>
+
+</body>
+</html>

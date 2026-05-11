@@ -1,0 +1,29 @@
+{
+  "sessionId": "test-session-001",
+  "schemaVersion": "1.0",
+  "sessionType": "steps",
+  "capturedAt": "2026-05-11T10:00:00Z",
+  "capturedUrl": "https://example.com",
+  "capturedTitle": "Test Session",
+  "userAgent": "Chrome",
+  "pipelinePath": "cloud",
+  "steps": [
+    {
+      "id": "step-3",
+      "url": "",
+      "elementText": "",
+      "selector": "",
+      "action": "click",
+      "coordinates": { "x": 50, "y": 50 },
+      "screenshotKey": null,
+      "generatedText": null,
+      "voiceoverKey": null,
+      "annotations": [],
+      "animationTarget": null,
+      "translations": {}
+    }
+  ],
+  "assets": {},
+  "aiOutputs": { "title": "", "summary": "", "tags": [] },
+  "metadata": { "durationMs": 5000, "stepCount": 1 }
+}

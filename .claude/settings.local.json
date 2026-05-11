@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.trupeer.ai)",
+      "Read(//Users/kartikupadhyay/Downloads/**)",
+      "Bash(unzip -o StudioBase-handoff.zip -d StudioBase-handoff)",
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
