@@ -1,0 +1,176 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body { 
+    background: #F5F5F7; 
+    color: #1D1D1F; 
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Inter, system-ui, sans-serif;
+  }
+
+  /* Animated dashed gradient border (used on "New session" card and logo drop zone) */
+  @property --angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+  }
+
+  @keyframes spin { 
+    to { --angle: 360deg; } 
+  }
+
+  @keyframes shimmer { 
+    0% { background-position: 200% 0; } 
+    100% { background-position: -200% 0; } 
+  }
+
+  @keyframes sb-shimmer { 
+    0% { transform: translateX(-100%); } 
+    100% { transform: translateX(100%); } 
+  }
+
+  :focus-visible { 
+    outline: 2px solid #5E5CE6; 
+    outline-offset: 2px; 
+    border-radius: 8px; 
+  }
+
+  button:focus-visible, a:focus-visible { 
+    outline-offset: 3px; 
+  }
+
+  ::selection { 
+    background: rgba(94,92,230,0.22); 
+    color: #1D1D1F; 
+  }
+}
+
+@layer components {
+  .grad-border {
+    position: relative;
+    background: #FFFFFF;
+    border-radius: 16px;
+  }
+  .grad-border::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 16px;
+    padding: 1.5px;
+    background: conic-gradient(from var(--angle), #5E5CE6, #8B5CF6, #06B6D4, #5E5CE6);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: spin 6s linear infinite;
+  }
+
+  .scroll-y { overflow-y: auto; }
+  .scroll-y::-webkit-scrollbar { width: 10px; height: 10px; }
+  .scroll-y::-webkit-scrollbar-thumb { 
+    background: rgba(0,0,0,0.12); 
+    border-radius: 10px; 
+    border: 2px solid transparent; 
+    background-clip: content-box; 
+  }
+  .scroll-y::-webkit-scrollbar-thumb:hover { 
+    background: rgba(0,0,0,0.22); 
+    background-clip: content-box; 
+    border: 2px solid transparent; 
+  }
+  .scroll-y-dark::-webkit-scrollbar-thumb { 
+    background: rgba(255,255,255,0.14); 
+    background-clip: content-box; 
+    border: 2px solid transparent; 
+    border-radius: 10px; 
+  }
+
+  .stripe-placeholder {
+    background-image:
+      repeating-linear-gradient(135deg, rgba(0,0,0,0.04) 0 1px, transparent 1px 14px),
+      linear-gradient(180deg, #FAFAFC, #F0F0F5);
+  }
+
+  .canvas-grid {
+    background-color: #FFFFFF;
+    background-image:
+      radial-gradient(rgba(94,92,230,0.06) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  .studio-gradient {
+    background:
+      radial-gradient(60% 50% at 30% 20%, rgba(94,92,230,0.10), transparent 70%),
+      radial-gradient(50% 50% at 80% 80%, rgba(6,182,212,0.08), transparent 70%),
+      radial-gradient(40% 40% at 70% 30%, rgba(139,92,246,0.10), transparent 70%),
+      linear-gradient(180deg, #F5F4FE, #EFF5FE 60%, #F5F4FE);
+  }
+
+  .shimmer {
+    background: linear-gradient(90deg, rgba(255,255,255,0) 0, rgba(255,255,255,0.55) 50%, rgba(255,255,255,0) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 2.4s linear infinite;
+  }
+
+  .glass {
+    background: rgba(255,255,255,0.72);
+    backdrop-filter: saturate(180%) blur(24px);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    border: 1px solid rgba(255,255,255,0.6);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  }
+
+  .glass-dark {
+    background: rgba(17,17,17,0.78);
+    backdrop-filter: saturate(180%) blur(24px);
+    -webkit-backdrop-filter: saturate(180%) blur(24px);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .kbd {
+    font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.7);
+    line-height: 1;
+  }
+
+  .kbd-light {
+    background: #FFFFFF;
+    border: 1px solid rgba(0,0,0,0.10);
+    color: #6E6E73;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+  }
+
+  .sb-skel { 
+    position: relative; 
+    overflow: hidden; 
+    background: #F0F0F5; 
+  }
+  
+  .sb-skel::after {
+    content: ''; 
+    position: absolute; 
+    inset: 0; 
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255,255,255,0.7) 45%,
+      rgba(94,92,230,0.06) 50%,
+      rgba(255,255,255,0.7) 55%,
+      transparent 100%
+    );
+    animation: sb-shimmer 1.6s ease-in-out infinite;
+    will-change: transform;
+  }
+}

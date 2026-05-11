@@ -10,40 +10,40 @@
 	"compatibility_flags": ["nodejs_compat"],
 	"d1_databases": [
 		{
-			"binding": "DB",
+			"binding": "studiobase_db",
 			"database_name": "studiobase-db",
-			"database_id": "REPLACE_WITH_NEW_D1_ID",
+			"database_id": "a22b148a-c590-4050-991a-7dfd162a5d08",
 		},
 	],
 	"kv_namespaces": [
 		{
 			"binding": "TOKEN_CACHE",
-			"id": "REPLACE_WITH_NEW_KV_ID"
-		}
+			"id": "abf29fe48e1949199e1720cf17234d2b",
+		},
 	],
 	"r2_buckets": [
 		{
 			"binding": "R2",
 			"bucket_name": "studiobase-assets",
-			"preview_bucket_name": "studiobase-assets-preview"
-		}
+			"preview_bucket_name": "studiobase-assets-preview",
+		},
 	],
 	"queues": {
 		"producers": [
 			{
 				"binding": "PIPELINE_QUEUE",
-				"queue": "studiobase-pipeline"
-			}
+				"queue": "studiobase-pipeline",
+			},
 		],
 		"consumers": [
 			{
 				"queue": "studiobase-pipeline",
 				"max_batch_size": 5,
-				"max_batch_timeout": 30
-			}
-		]
+				"max_batch_timeout": 30,
+			},
+		],
 	},
 	"triggers": {
-		"crons": ["0 0 * * *"]
-	}
+		"crons": ["0 0 * * *"],
+	},
 }

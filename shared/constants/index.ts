@@ -26,4 +26,4 @@ export const DEFAULT_DWELL_MS = 2500;         // fallback dwell if no voiceover
 export const ASSET_URL_TTL_SECONDS = 3600;    // 1 hour
 
 export const PLAYER_BASE_URL = "https://screenvault.karthik-upadhyay98.workers.dev";
-export const BACKEND_URL = "https://screenvault-proxy.karthik-upadhyay98.workers.dev";
+export const BACKEND_URL = "https://studiobase-backend.karthik-upadhyay98.workers.dev";

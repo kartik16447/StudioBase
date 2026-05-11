@@ -76,13 +76,14 @@ wrangler queues create studiobase-pipeline
 
 ```bash
 wrangler secret put ADMIN_EMAIL
-# enter: kartik.upadhyay@foyr.com
+# enter: karthik.upadhyay98@gmail.com
 
 wrangler secret put ENCRYPTION_KEY
 # enter: any random 32-char string e.g. openssl rand -hex 16
 ```
 
 OpenAI key (needed for Phase 3, can skip for now):
+
 ```bash
 wrangler secret put OPENAI_API_KEY
 # enter your OpenAI API key
