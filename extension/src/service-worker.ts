@@ -33,6 +33,16 @@ async function init() {
 
 void init();
 
+// ─── Helpers ─────────────────────────────────────────────────
+
+function broadcastToTabs(message: object) {
+  chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] }, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.id) chrome.tabs.sendMessage(tab.id, message).catch(() => {});
+    }
+  });
+}
+
 // ─── Message Handling ────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse) => {
@@ -119,14 +129,7 @@ async function startRecording(target: CaptureTarget) {
       target: { ...target, streamId },
     });
 
-    if (target.tabId) {
-      chrome.tabs.sendMessage(target.tabId, { type: 'START_CAPTURE' })
-        .then(() => sbLog('START_CAPTURE_SENT', { tabId: target.tabId }))
-        .catch((err) => sbLog('START_CAPTURE_FAILED', { tabId: target.tabId, err: err?.message }));
-    } else {
-      sbLog('START_CAPTURE_SKIPPED', { reason: 'no tabId in target' });
-    }
-
+    broadcastToTabs({ type: 'START_CAPTURE' });
     sbLog("RECORDING_STARTED", { sessionId, target });
   } catch (err: any) {
     updateState({ status: "error", errorMessage: err.message });
@@ -138,10 +141,7 @@ async function stopRecording() {
 
   const sessionId = state.sessionId!;
 
-  if (state.target?.tabId) {
-    chrome.tabs.sendMessage(state.target.tabId, { type: 'STOP_CAPTURE' }).catch(() => {});
-  }
-
+  broadcastToTabs({ type: 'STOP_CAPTURE' });
   await updateState({ status: "uploading", uploadProgress: 0 });
 
   try {
