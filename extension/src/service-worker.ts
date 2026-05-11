@@ -107,6 +107,18 @@ async function startRecording(target: CaptureTarget) {
       target: { ...target, streamId },
     });
 
+    // Re-inject content script into all http/https tabs to ensure a fresh
+    // context (reloading the extension invalidates existing content scripts).
+    const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
+    for (const tab of tabs) {
+      if (tab.id) {
+        chrome.scripting.executeScript({
+          target: { tabId: tab.id, allFrames: true },
+          files: ['content.js'],
+        }).catch(() => {}); // ignore tabs where injection is blocked
+      }
+    }
+
     sbLog("RECORDING_STARTED", { sessionId, target });
   } catch (err: any) {
     updateState({ status: "error", errorMessage: err.message });
