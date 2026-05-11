@@ -33,16 +33,6 @@ async function init() {
 
 void init();
 
-// ─── Helpers ─────────────────────────────────────────────────
-
-function broadcastToTabs(message: object) {
-  chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] }, (tabs) => {
-    for (const tab of tabs) {
-      if (tab.id) chrome.tabs.sendMessage(tab.id, message).catch(() => {});
-    }
-  });
-}
-
 // ─── Message Handling ────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse) => {
@@ -80,7 +70,7 @@ chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse)
 
         // Capture screenshot after DOM settles
         setTimeout(() => {
-          chrome.tabs.captureVisibleTab({ format: "jpeg", quality: 85 }, (dataUrl) => {
+          chrome.tabs.captureVisibleTab(undefined as any, { format: "jpeg", quality: 85 }, (dataUrl) => {
             if (chrome.runtime.lastError || !dataUrl) return;
             fetch(dataUrl)
               .then(r => r.blob())
@@ -129,7 +119,6 @@ async function startRecording(target: CaptureTarget) {
       target: { ...target, streamId },
     });
 
-    broadcastToTabs({ type: 'START_CAPTURE' });
     sbLog("RECORDING_STARTED", { sessionId, target });
   } catch (err: any) {
     updateState({ status: "error", errorMessage: err.message });
@@ -141,7 +130,6 @@ async function stopRecording() {
 
   const sessionId = state.sessionId!;
 
-  broadcastToTabs({ type: 'STOP_CAPTURE' });
   await updateState({ status: "uploading", uploadProgress: 0 });
 
   try {
