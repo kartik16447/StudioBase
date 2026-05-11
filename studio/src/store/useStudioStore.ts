@@ -51,7 +51,7 @@ interface StudioState {
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
-  route: { name: 'home', params: {} },
+  route: { name: 'studio', params: {} },
   session: null,
   activeTab: 'script',
   isPanelOpen: true,
@@ -117,25 +117,62 @@ export const useStudioStore = create<StudioState>((set) => ({
 
       // Normalize: extension captures store `events[]`, studio expects `steps[]`
       if (!sessionData.steps && Array.isArray(sessionData.events)) {
+        const rawTitle = data.title || sessionData.tabUrl || 'Untitled Session';
         sessionData = {
+          sessionId: data.id || sessionData.sessionId,
           id: data.id || sessionData.sessionId,
-          title: data.title || sessionData.tabUrl || 'Untitled Session',
+          title: rawTitle,
           sessionType: 'steps' as const,
+          capturedAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
           createdAt: data.createdAt || Date.now(),
           steps: sessionData.events.map((evt: any, idx: number) => ({
             id: `step-${idx}`,
+            sequence: idx + 1,
             index: idx,
+            action: evt.type || 'click',
             title: evt.data?.pageTitle || evt.type || `Step ${idx + 1}`,
             description: `${evt.type} on ${evt.selector || 'element'}`,
             timestamp: evt.timestamp,
             selector: evt.selector || null,
             url: evt.data?.url || null,
-            screenshotKey: null,
+            pageTitle: evt.data?.pageTitle || '',
+            elementText: evt.data?.elementText || null,
+            screenshotKey: evt.data?.screenshotKey || null,
+            generatedText: null,
+            textOverride: null,
+            voiceoverKey: null,
+            annotations: [],
+            animationTarget: null,
             data: evt.data || {},
           })),
+          metadata: {
+            stepCount: sessionData.events.length,
+            durationMs: 0,
+            chapterBreaks: [],
+          },
+          aiOutputs: {
+            title: rawTitle,
+            summary: 'Session captured — AI processing pending.',
+            tags: [],
+          },
+          brand: null,
         };
       } else if (!sessionData.steps) {
         console.warn('[fetchSession] sessionData has neither steps nor events. Keys:', Object.keys(sessionData));
+        // Session exists in D1 but JSON not yet uploaded — pipeline may still be running
+        set({ sessionError: `Session is still uploading or processing (status: ${data.status}). Try again in a moment.` });
+        return;
+      }
+
+      // Ensure required top-level fields have safe defaults even for enriched sessions
+      if (!sessionData.aiOutputs) {
+        sessionData.aiOutputs = { title: sessionData.title || 'Untitled', summary: '', tags: [] };
+      }
+      if (!sessionData.metadata) {
+        sessionData.metadata = { stepCount: sessionData.steps?.length || 0, durationMs: 0, chapterBreaks: [] };
+      }
+      if (!sessionData.metadata.chapterBreaks) {
+        sessionData.metadata.chapterBreaks = [];
       }
 
       set({ session: sessionData });
