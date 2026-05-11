@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useStudioStore } from './store/useStudioStore';
 import { useKeyboardShortcut } from './hooks/useKeyboardShortcut';
 import { AppShell } from './components/layout/AppShell';
@@ -6,15 +7,21 @@ import { StudioPage } from './pages/StudioPage';
 import { BrandKitPage } from './pages/BrandKitPage';
 import { SharePage } from './pages/SharePage';
 import { CommandPalette, KeyboardHintPill } from './components/CommandPalette';
+import { SAMPLE_SESSION } from './data/sample';
 
 function App() {
-  const { 
-    route, 
-    togglePanel, toggleToolbar, setActiveTab, 
-    setActiveTool, commandOpen, setCommandOpen 
+  const {
+    route, navigate,
+    togglePanel, toggleToolbar, setActiveTab,
+    setActiveTool, commandOpen, setCommandOpen,
+    setSession
   } = useStudioStore();
 
-  // Removed auto-seeding of SAMPLE_SESSION
+  // DEV: seed sample session and go straight to studio
+  useEffect(() => {
+    setSession(SAMPLE_SESSION);
+    navigate('studio');
+  }, []);
 
   // Keyboard shortcuts
   useKeyboardShortcut('cmd+\\', () => togglePanel(), []);

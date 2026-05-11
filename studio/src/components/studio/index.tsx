@@ -19,6 +19,7 @@ export const StepCard: React.FC<{
   focused?: boolean;
   onFocus?: () => void;
 }> = ({ step, hue = 244, onEdit, onAnnotate, onDelete, focused, onFocus }) => {
+  const session = useStudioStore(state => state.session);
   const text = step.textOverride || step.generatedText || '';
   return (
     <article
@@ -46,7 +47,7 @@ export const StepCard: React.FC<{
         )}
       </div>
 
-      <ScreenshotPlaceholder step={step} hue={hue} className="mb-5" />
+      <ScreenshotPlaceholder step={step} session={session} hue={hue} className="mb-5" />
 
       <p className="text-[16px] leading-[1.65] text-text relative z-10" style={{ textWrap: 'pretty' as any }}>
         {text}
@@ -145,6 +146,8 @@ export const SessionCard: React.FC<{ session: SessionEnvelope; onClick?: () => v
     >
       <div className="relative">
         <ScreenshotPlaceholder
+          step={session.steps?.[0]}
+          session={session}
           hue={hue}
           aspect="16 / 10"
           rounded=""

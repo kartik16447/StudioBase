@@ -64,7 +64,7 @@ export const StudioPage: React.FC = () => {
                 <div className="flex items-center gap-0 min-w-max">
                   {STUDIO_TABS.map(t => {
                     const active = activeTab === t.id;
-                    const isLocked = ['voice', 'music', 'visuals', 'zooms', 'elements'].includes(t.id);
+                    const isLocked = ['voice', 'music', 'visuals', 'elements'].includes(t.id);
                     return (
                       <button
                         key={t.id}
@@ -129,7 +129,7 @@ export const StudioPage: React.FC = () => {
 };
 
 const SOPCanvas: React.FC = () => {
-  const { session, focusedStepId, setFocusStep } = useStudioStore();
+  const { session, focusedStepId, setFocusStep, setStepIndex } = useStudioStore();
   const [isProcessing, setIsProcessing] = useState(false);
 
   if (!session) return null;
@@ -196,7 +196,10 @@ const SOPCanvas: React.FC = () => {
                   index={it.idx}
                   hue={244 + (it.idx * 11) % 80}
                   focused={focusedStepId === it.step.id}
-                  onFocus={() => setFocusStep(it.step.id)}
+                  onFocus={() => {
+                    setFocusStep(it.step.id);
+                    setStepIndex(it.idx);
+                  }}
                 />
               ) : (
                 <ChapterBreak 
@@ -226,18 +229,190 @@ const SOPCanvas: React.FC = () => {
 };
 
 const VideoCanvas: React.FC = () => {
+  const { 
+    session, 
+    currentStepIndex, 
+    isPlaying, 
+    playbackRate,
+    setPlaying, 
+    setStepIndex 
+  } = useStudioStore();
+
+  const [audio] = useState(new Audio());
+  const [isEnded, setIsEnded] = useState(false);
+
+  const steps = session?.steps || [];
+  const currentStep = steps[currentStepIndex];
+
+  // Handle voiceover playback
+  React.useEffect(() => {
+    if (!currentStep?.voiceoverKey || !isPlaying) {
+      audio.pause();
+      return;
+    }
+
+    const url = `https://assets.studiobase.app/${currentStep.voiceoverKey}`;
+    if (audio.src !== url) {
+      audio.src = url;
+    }
+    
+    audio.playbackRate = playbackRate;
+    audio.play().catch(console.error);
+
+    const handleEnded = () => {
+      if (currentStepIndex < steps.length - 1) {
+        setStepIndex(currentStepIndex + 1);
+      } else {
+        setPlaying(false);
+        setIsEnded(true);
+      }
+    };
+
+    audio.addEventListener('ended', handleEnded);
+    return () => {
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, [currentStepIndex, isPlaying, playbackRate, steps.length, currentStep?.voiceoverKey]);
+
+  if (!session) return null;
+
+  const target = currentStep?.animationTarget || {
+    centerX: 50,
+    centerY: 50,
+    zoomScale: 1,
+    transitionType: 'zoom',
+    transitionDurationMs: 800
+  };
+
+  // Calculate transform
+  // centerX/Y are in % of original viewport
+  // We want to center that point in our player viewport and zoom in.
+  const scale = target.zoomScale;
+  const translateX = (50 - target.centerX) * scale;
+  const translateY = (50 - target.centerY) * scale;
+
   return (
-    <div className="flex-1 studio-gradient flex flex-col items-center justify-center px-10">
-      <div className="relative w-full max-w-4xl aspect-video rounded-img shadow-card-lifted bg-white overflow-hidden">
-        <ScreenshotPlaceholder aspect="16/9" rounded="" className="w-full h-full" />
-        <button className="absolute inset-0 m-auto w-20 h-20 rounded-full glass flex items-center justify-center hover:scale-105 transition">
-          <I.Play size={28} className="text-text translate-x-0.5" />
-        </button>
+    <div className="flex-1 studio-gradient flex flex-col items-center justify-center p-12 overflow-hidden">
+      <div className="relative w-full max-w-5xl aspect-video rounded-img shadow-card-lifted bg-white overflow-hidden">
+        {/* Animated Screenshot */}
+        <motion.div
+          animate={{
+            scale: scale,
+            x: `${translateX}%`,
+            y: `${translateY}%`,
+          }}
+          transition={{
+            type: target.transitionType === 'zoom' ? 'spring' : 'tween',
+            stiffness: 260,
+            damping: 26,
+            duration: target.transitionDurationMs / 1000
+          }}
+          className="w-full h-full origin-center"
+        >
+          <ScreenshotPlaceholder 
+            step={currentStep} 
+            showChrome={false}
+            aspect="16/9" 
+            rounded="" 
+            className="w-full h-full !shadow-none" 
+          />
+        </motion.div>
+
+        {/* Annotation Overlay */}
+        <div className="absolute inset-0 pointer-events-none">
+          <AnimatePresence>
+            {currentStep?.annotations?.map(anno => (
+              <motion.div
+                key={anno.id}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                className="absolute"
+                style={{
+                  left: `${anno.x}%`,
+                  top: `${anno.y}%`,
+                  width: anno.width ? `${anno.width}%` : undefined,
+                  height: anno.height ? `${anno.height}%` : undefined,
+                }}
+              >
+                {anno.shape === 'box' && (
+                  <div className="border-4 border-primary rounded-md w-full h-full shadow-[0_0_20px_rgba(94,92,230,0.4)]" />
+                )}
+                {anno.shape === 'arrow' && (
+                  <div className="relative">
+                    <I.ArrowUpRight size={32} className="text-primary drop-shadow-lg" />
+                    {anno.text && (
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-primary text-white text-xs font-bold rounded shadow-lg whitespace-nowrap">
+                        {anno.text}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+
+        {/* Player Controls Overlay */}
+        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300">
+          <div className="p-6 flex items-center gap-4">
+            <button 
+              onClick={() => setPlaying(!isPlaying)}
+              className="w-12 h-12 rounded-full glass-dark flex items-center justify-center text-white hover:scale-105 transition active:scale-95"
+            >
+              {isPlaying ? <I.Pause size={20} fill="currentColor" /> : <I.Play size={20} fill="currentColor" className="translate-x-0.5" />}
+            </button>
+
+            <div className="flex-1 flex flex-col gap-1.5">
+              <div className="h-1.5 rounded-full bg-white/20 overflow-hidden relative">
+                <motion.div 
+                  className="absolute inset-y-0 left-0 bg-primary"
+                  animate={{ width: `${((currentStepIndex + 1) / steps.length) * 100}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[11px] font-bold text-white/80 tracking-wider">
+                <span>STEP {currentStepIndex + 1} OF {steps.length}</span>
+                <span>{currentStep?.pageTitle || 'Dashboard'}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 glass-dark rounded-pill px-3 h-10">
+              <button 
+                onClick={() => setStepIndex(Math.max(0, currentStepIndex - 1))}
+                className="text-white/80 hover:text-white"
+              >
+                <I.ChevronLeft size={18} />
+              </button>
+              <button 
+                onClick={() => setStepIndex(Math.min(steps.length - 1, currentStepIndex + 1))}
+                className="text-white/80 hover:text-white"
+              >
+                <I.ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        {/* Play Overlay (Initial) */}
+        {!isPlaying && currentStepIndex === 0 && !isEnded && (
+          <div className="absolute inset-0 bg-black/10 backdrop-blur-[2px] flex items-center justify-center">
+            <button 
+              onClick={() => setPlaying(true)}
+              className="w-24 h-24 rounded-full glass shadow-card-lifted flex items-center justify-center text-text hover:scale-110 transition active:scale-95 group"
+            >
+              <div className="w-20 h-20 rounded-full border-2 border-primary/20 flex items-center justify-center group-hover:border-primary/40 transition">
+                <I.Play size={32} fill="currentColor" className="translate-x-1" />
+              </div>
+            </button>
+          </div>
+        )}
       </div>
-      <div className="mt-6 text-center max-w-md">
-        <Badge tone="primary" size="md" icon={I.Lock}>Phase 3</Badge>
-        <h3 className="text-[20px] font-semibold text-text mt-3">Cinematic video preview</h3>
-        <p className="text-[13.5px] text-text-2 mt-1">Auto-zoom, smart cursor, AI voiceover and music will render right here when Phase 3 lands.</p>
+
+      <div className="mt-8 text-center max-w-2xl">
+        <h3 className="text-[20px] font-semibold text-text">{session.aiOutputs.title}</h3>
+        <p className="text-[14px] text-text-2 mt-1.5 leading-relaxed">
+          {currentStep?.textOverride || currentStep?.generatedText || 'Watch this smart walkthrough generated by StudioBase AI.'}
+        </p>
       </div>
     </div>
   );
