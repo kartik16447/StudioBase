@@ -17,11 +17,21 @@ export async function uploadSession(
     workspaceId: string;
   };
 
-  if (!sb_user || !sb_user.accessToken) {
+  if (!sb_user) {
     throw new Error("Authentication required: Please sign in via the extension popup.");
   }
 
-  const token = sb_user.accessToken;
+  // Always get a fresh token — cached tokens expire after ~1 hour
+  const token = await new Promise<string>((resolve, reject) => {
+    chrome.identity.getAuthToken({ interactive: false }, (result) => {
+      const t = typeof result === 'string' ? result : (result as any)?.token;
+      if (chrome.runtime.lastError || !t) {
+        reject(new Error("Session expired: Please sign in again via the extension popup."));
+      } else {
+        resolve(t);
+      }
+    });
+  });
 
   // 2. Initialize the session on the backend
   const initRes = await fetch(`${BACKEND_URL}/sessions`, {
