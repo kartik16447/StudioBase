@@ -132,6 +132,13 @@ Zustand store. activeView toggle. AnimatePresence.
 - **Chapters**: read `session.metadata.chapterBreaks` — render chapter heading cards between steps in SOP view.
 - **Workspace brand settings**: new settings page in Studio where owner sets logo/color/font. Saved to D1, injected into session JSON at pipeline time.
 
+**Chapter marker button in popup (added in Phase 2):**
+- Single "📍 Mark Chapter" button visible in popup during active capture
+- On click: drops a `{ stepIndex, timestamp }` marker into `chrome.storage.session`
+- No UI beyond the button — just a confirmation flash ("Chapter marked")
+- After upload, pipeline reads markers and converts to `session.metadata.chapterBreaks[]`
+- User names chapters in Studio after session is ready (not during recording)
+
 **Deliverable**: Capture session → open Smart Studio link → branded SOP guide with chapter headings, shareable with anyone.
 
 ---
