@@ -15,9 +15,12 @@ function App() {
     commandOpen, setCommandOpen,
   } = useStudioStore();
 
-  // Navigate straight to studio on mount; StudioPage handles session/sample loading.
+  // Only navigate to studio if session param exists
   useEffect(() => {
-    navigate('studio');
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('session')) {
+      navigate('studio');
+    }
   }, []);
 
   // Keyboard shortcuts

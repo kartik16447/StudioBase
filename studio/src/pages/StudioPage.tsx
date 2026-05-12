@@ -215,11 +215,9 @@ const SOPCanvas: React.FC = () => {
   // Scroll the focused card into view when focus changes
   useEffect(() => {
     if (!focusedStepId || !session) return;
-    const isFirstStep = focusedStepId === session.steps[0]?.id;
-    if (isFirstStep && scrollTrigger === 0) return;
     const el = stepRefs.current.get(focusedStepId);
     el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }, [focusedStepId, scrollTrigger, session]);
+  }, [scrollTrigger]);
 
   // ArrowUp / ArrowDown keyboard navigation
   useEffect(() => {
@@ -244,31 +242,6 @@ const SOPCanvas: React.FC = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [session, focusedStepId, setFocusStep, setStepIndex, triggerScroll]);
 
-  // Scroll wheel navigation (debounced — advances focused step without blocking natural scroll)
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || !session) return;
-    let debounceTimer: ReturnType<typeof setTimeout>;
-    const handler = (e: WheelEvent) => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        const currentIndex = session.steps.findIndex(s => s.id === focusedStepId);
-        if (currentIndex === -1) return;
-        const nextIndex = e.deltaY > 0
-          ? Math.min(session.steps.length - 1, currentIndex + 1)
-          : Math.max(0, currentIndex - 1);
-        if (nextIndex !== currentIndex) {
-          setFocusStep(session.steps[nextIndex].id);
-          setStepIndex(nextIndex);
-        }
-      }, 200);
-    };
-    container.addEventListener('wheel', handler, { passive: true });
-    return () => {
-      container.removeEventListener('wheel', handler);
-      clearTimeout(debounceTimer);
-    };
-  }, [session, focusedStepId, setFocusStep, setStepIndex]);
 
   if (!session) return null;
 

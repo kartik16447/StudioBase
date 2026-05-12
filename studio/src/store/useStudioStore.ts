@@ -51,7 +51,7 @@ interface StudioState {
 }
 
 export const useStudioStore = create<StudioState>((set) => ({
-  route: { name: 'studio', params: {} },
+  route: { name: 'home', params: {} },
   session: null,
   activeTab: 'script',
   isPanelOpen: true,
@@ -88,6 +88,9 @@ export const useStudioStore = create<StudioState>((set) => ({
       } else {
         token = sessionStorage.getItem('sb_token');
       }
+
+      const wid = urlParams.get('workspaceId');
+      if (wid) sessionStorage.setItem('sb_workspaceId', wid);
 
       const res = await fetch(`${BACKEND_URL}/sessions/${sessionId}`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}

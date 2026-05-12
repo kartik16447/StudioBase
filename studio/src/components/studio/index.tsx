@@ -118,7 +118,15 @@ export const SummaryCallout: React.FC<{ session: SessionEnvelope }> = ({ session
 };
 
 // ─── SessionCard ───────────────────────────────────────────────────────
-export const SessionCard: React.FC<{ session: SessionEnvelope; onClick?: () => void }> = ({ session, onClick }) => {
+export const SessionCard: React.FC<{ 
+  session: SessionEnvelope; 
+  onClick?: () => void;
+  onRename?: (newTitle: string) => void;
+  onDelete?: () => void;
+}> = ({ session, onClick, onRename, onDelete }) => {
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  
   // @ts-ignore
   const hue = session._hue ?? 244;
   
@@ -137,6 +145,32 @@ export const SessionCard: React.FC<{ session: SessionEnvelope; onClick?: () => v
     if (diff < 86400) return `${Math.round(diff/3600)}h ago`;
     if (diff < 604800) return `${Math.round(diff/86400)}d ago`;
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [menuOpen]);
+
+  const handleRename = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    const newTitle = prompt('Enter new session title:', session.aiOutputs.title || undefined);
+    if (newTitle && newTitle.trim()) {
+      onRename?.(newTitle.trim());
+    }
+  };
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    onDelete?.();
   };
 
   return (
@@ -184,9 +218,36 @@ export const SessionCard: React.FC<{ session: SessionEnvelope; onClick?: () => v
             <Avatar name="Maya Chen" size={22} hue={198} />
             <Avatar name="Diego Ramos" size={22} hue={22} />
           </div>
-          <span className="text-[11px] text-text-3 inline-flex items-center gap-1">
-            <I.Eye size={12} strokeWidth={2} /> {12 + ((session.sessionId.charCodeAt(6) || 0) % 80)}
-          </span>
+          
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-text-3 inline-flex items-center gap-1">
+              <I.Eye size={12} strokeWidth={2} /> {12 + ((session.sessionId.charCodeAt(6) || 0) % 80)}
+            </span>
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+                className="w-6 h-6 rounded-full inline-flex items-center justify-center text-text-3 hover:text-text hover:bg-surface-2 transition-colors"
+              >
+                <I.MoreHorizontal size={15} />
+              </button>
+              {menuOpen && (
+                <div className="absolute bottom-full right-0 mb-1 z-50 min-w-[120px] bg-surface border border-border rounded-sm shadow-card py-1 overflow-hidden">
+                  <button
+                    onClick={handleRename}
+                    className="w-full px-3 py-1.5 text-left text-[13px] text-text hover:bg-surface-2 transition-colors"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="w-full px-3 py-1.5 text-left text-[13px] text-danger hover:bg-surface-2 transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -239,9 +300,10 @@ export const StudioTopBar: React.FC = () => {
     <header className="h-14 bg-surface border-b border-border flex items-center px-4 gap-4 z-40 relative">
       <button 
         onClick={() => navigate('home')}
-        className="w-9 h-9 rounded-full hover:bg-surface-2 inline-flex items-center justify-center transition-colors text-text-2 hover:text-text"
+        className="px-3 h-9 rounded-pill hover:bg-surface-2 inline-flex items-center gap-2 transition-colors text-text-2 hover:text-text font-medium text-[13px]"
       >
-        <I.ArrowLeft size={18} strokeWidth={2.2} />
+        <I.Home size={16} strokeWidth={2.2} />
+        Library
       </button>
 
       <div className="w-px h-6 bg-border mx-1" />

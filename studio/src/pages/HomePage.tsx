@@ -21,13 +21,6 @@ interface BackendSession {
   durationMs: number;
 }
 
-interface SBUser {
-  accessToken: string;
-  workspaceId: string;
-  workspaceSlug?: string;
-  email: string;
-}
-
 export const HomePage: React.FC = () => {
   const { navigate, setSession } = useStudioStore();
   const [view, setView] = useState<'grid' | 'list'>('grid');
@@ -36,23 +29,32 @@ export const HomePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionEnvelope[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [user, setUser] = useState<SBUser | null>(null);
+  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const sbUser = localStorage.getItem('sb_user');
-    if (!sbUser) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const t = urlParams.get('token') || sessionStorage.getItem('sb_token');
+    const wid = urlParams.get('workspaceId') || sessionStorage.getItem('sb_workspaceId');
+
+    if (t) {
+      sessionStorage.setItem('sb_token', t);
+      setToken(t);
+    }
+    if (wid) {
+      sessionStorage.setItem('sb_workspaceId', wid);
+    }
+
+    if (!t || !wid) {
       setLoading(false);
       return;
     }
-    const parsedUser = JSON.parse(sbUser);
-    setUser(parsedUser);
 
     const fetchSessions = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`${BACKEND_URL}/sessions?workspaceId=${parsedUser.workspaceId}`, {
+        const res = await fetch(`${BACKEND_URL}/sessions?workspaceId=${wid}`, {
           headers: {
-            'Authorization': `Bearer ${parsedUser.accessToken}`
+            'Authorization': `Bearer ${t}`
           }
         });
         
@@ -110,7 +112,7 @@ export const HomePage: React.FC = () => {
     navigate('studio');
   };
 
-  if (!user && !loading) {
+  if (!token && !loading) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
         <div className="w-16 h-16 rounded-full bg-surface-2 flex items-center justify-center text-text-3 mb-4">
@@ -132,11 +134,11 @@ export const HomePage: React.FC = () => {
         <div className="flex items-end justify-between mb-1">
           <div>
             <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-primary mb-2">
-              {user ? `Welcome back, ${user.email.split('@')[0]}` : 'Welcome'}
+              Welcome back
             </div>
             <h1 className="text-[34px] font-semibold text-text leading-tight tracking-tight">Your library</h1>
             <p className="text-[15px] text-text-2 mt-1.5">
-              {loading ? 'Loading your workspace...' : `${sessions.length} sessions · ${user?.workspaceSlug || 'Personal'} workspace`}
+              {loading ? 'Loading your workspace...' : `${sessions.length} sessions · Workspace`}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -205,14 +207,81 @@ export const HomePage: React.FC = () => {
             <>
               <NewSessionCard onClick={() => alert('Open browser extension to start a capture session.')} />
               {filtered.map(s => (
-                <SessionCard key={s.sessionId} session={s} onClick={() => openSession(s)} />
+                <SessionCard 
+                  key={s.sessionId} 
+                  session={s} 
+                  onClick={() => openSession(s)}
+                  onDelete={async () => {
+                    try {
+                      const res = await fetch(`${BACKEND_URL}/sessions/${s.sessionId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': `Bearer ${token}` }
+                      });
+                      if (res.ok) {
+                        setSessions(prev => prev.filter(x => x.sessionId !== s.sessionId));
+                      }
+                    } catch (err) {
+                      console.error('[onDelete] failed:', err);
+                    }
+                  }}
+                  onRename={async (newTitle) => {
+                    try {
+                      const res = await fetch(`${BACKEND_URL}/sessions/${s.sessionId}`, {
+                        method: 'PATCH',
+                        headers: { 
+                          'Authorization': `Bearer ${token}`,
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ title: newTitle })
+                      });
+                      if (res.ok) {
+                        setSessions(prev => prev.map(x => 
+                          x.sessionId === s.sessionId 
+                            ? { ...x, aiOutputs: { ...x.aiOutputs, title: newTitle }, capturedTitle: newTitle }
+                            : x
+                        ));
+                      }
+                    } catch (err) {
+                      console.error('[onRename] failed:', err);
+                    }
+                  }}
+                />
               ))}
             </>
           )}
         </div>
 
         {!loading && filtered.length === 0 && !error && (
-          <div className="text-center text-text-2 py-16">No sessions match your filters.</div>
+          <div className="text-center py-24">
+            <div className="w-16 h-16 rounded-full bg-surface-2 flex items-center justify-center text-text-3 mx-auto mb-6">
+              <I.Library size={32} />
+            </div>
+            <h2 className="text-[20px] font-semibold text-text">No sessions found</h2>
+            <p className="text-[14px] text-text-2 mt-2 max-w-[320px] mx-auto">
+              {search || filter !== 'all' 
+                ? "No sessions match your current filters. Try clearing your search or filter."
+                : "Your library is empty. Start a capture session via the extension or load some samples to explore."}
+            </p>
+            <div className="flex items-center justify-center gap-3 mt-8">
+              {search || filter !== 'all' ? (
+                <Button variant="ghost" size="md" onClick={() => { setSearch(''); setFilter('all'); }}>Clear filters</Button>
+              ) : (
+                <>
+                  <Button variant="primary" size="md" icon={I.Plus} onClick={() => alert('Start capture from the StudioBase extension.')}>Capture first session</Button>
+                  <Button 
+                    variant="ghost" 
+                    size="md" 
+                    icon={I.Sparkles}
+                    onClick={() => {
+                      import('../data/sample').then(m => setSessions(m.SAMPLE_SESSIONS as any));
+                    }}
+                  >
+                    Load samples
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

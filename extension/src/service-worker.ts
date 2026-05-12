@@ -121,9 +121,15 @@ async function startRecording(target: CaptureTarget) {
     });
 
     if (target.tabId) {
-      chrome.tabs
-        .sendMessage(target.tabId, { type: "START_CAPTURE" })
-        .catch(() => {});
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: target.tabId },
+          files: ['content.js'],
+        });
+      } catch (_) {
+        // Already injected or restricted page — safe to ignore
+      }
+      chrome.tabs.sendMessage(target.tabId, { type: 'START_CAPTURE' }).catch(() => {});
     }
     sbLog("RECORDING_STARTED", { sessionId, target });
   } catch (err: any) {

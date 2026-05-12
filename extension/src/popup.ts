@@ -185,18 +185,13 @@ async function handleSignIn() {
 
 async function sendStartRecording(target: AppState["target"]) {
   try {
-    // Get the tab we want to record BEFORE anything changes focus
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab?.id) throw new Error("No active tab found");
-
+    if (!target?.tabId) throw new Error("No target tab");
+    
     const payloadTarget = {
-      ...(target || {}),
-      tabId: activeTab.id,
-      tabUrl: activeTab.url || '',
-      tabTitle: activeTab.title || '',
+      ...target,
       includeMic: hasMicPermission && isMicEnabled,
       userTitle: recTitleInput?.value?.trim() || '',
-      streamId: null, // no longer needed
+      streamId: null,
     };
 
     chrome.runtime.sendMessage({ type: "START_RECORDING", target: payloadTarget });
@@ -333,7 +328,7 @@ btnStop.addEventListener("click", () => {
 btnCopyLink.addEventListener("click", async () => {
   const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
   const token = sb_user?.accessToken;
-  const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}`;
+  const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}${sb_user?.workspaceId ? `&workspaceId=${sb_user.workspaceId}` : ""}`;
   navigator.clipboard.writeText(url).then(() => {
     toast.classList.add("visible");
     setTimeout(() => toast.classList.remove("visible"), 2000);
@@ -347,7 +342,7 @@ btnOpenStudio.addEventListener("click", async () => {
   }
   const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
   const token = sb_user?.accessToken;
-  const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}`;
+  const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}${sb_user?.workspaceId ? `&workspaceId=${sb_user.workspaceId}` : ""}`;
   chrome.tabs.create({ url });
 });
 
