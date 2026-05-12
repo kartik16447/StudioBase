@@ -185,34 +185,23 @@ async function handleSignIn() {
 
 async function sendStartRecording(target: AppState["target"]) {
   try {
-    const streamId = await new Promise<string>((resolve, reject) => {
-      if (!chrome.desktopCapture) {
-        return reject(new Error("desktopCapture API not available."));
-      }
-      chrome.desktopCapture.chooseDesktopMedia(
-        ["screen", "window", "tab"],
-        (id) => {
-          if (id) resolve(id);
-          else reject(new Error("Capture cancelled"));
-        }
-      );
-    });
+    // Get the tab we want to record BEFORE anything changes focus
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) throw new Error("No active tab found");
 
-    const payloadTarget = target
-      ? { 
-          ...target, 
-          streamId,
-          includeMic: hasMicPermission && isMicEnabled,
-          userTitle: recTitleInput?.value?.trim() || "" 
-        }
-      : { streamId };
+    const payloadTarget = {
+      ...(target || {}),
+      tabId: activeTab.id,
+      tabUrl: activeTab.url || '',
+      tabTitle: activeTab.title || '',
+      includeMic: hasMicPermission && isMicEnabled,
+      userTitle: recTitleInput?.value?.trim() || '',
+      streamId: null, // no longer needed
+    };
 
-    chrome.runtime.sendMessage({
-      type: "START_RECORDING",
-      target: payloadTarget,
-    });
+    chrome.runtime.sendMessage({ type: "START_RECORDING", target: payloadTarget });
   } catch (err: any) {
-    console.error("Capture picker failed:", err);
+    console.error("Failed to start recording:", err);
     chrome.runtime.sendMessage({ type: "ABORT_RECORDING" });
   }
 }

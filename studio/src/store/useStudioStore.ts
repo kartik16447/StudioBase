@@ -116,11 +116,15 @@ export const useStudioStore = create<StudioState>((set) => ({
       }
 
       // Normalize: extension captures store `events[]`, studio expects `steps[]`
-      if (!sessionData.steps && Array.isArray(sessionData.events)) {
-        const rawTitle = data.title || sessionData.tabUrl || 'Untitled Session';
+      // Always remap from events (authoritative raw source), augmenting with
+      // pipeline-enriched steps (generatedText, voiceoverKey, animationTarget).
+      if (Array.isArray(sessionData.events)) {
+        const rawTitle = sessionData.aiOutputs?.title || data.title || sessionData.tabUrl || 'Untitled Session';
         const screenshotByIndex = new Map<number, string>(
           (sessionData.screenshots || []).map((s: any) => [s.stepIndex, s.r2Key])
         );
+        // Pipeline writes enriched data into steps[] — index-aligned with events[]
+        const pipelineSteps: any[] = Array.isArray(sessionData.steps) ? sessionData.steps : [];
 
         sessionData = {
           sessionId: data.id || sessionData.sessionId,
@@ -129,26 +133,31 @@ export const useStudioStore = create<StudioState>((set) => ({
           sessionType: 'steps' as const,
           capturedAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
           createdAt: data.createdAt || Date.now(),
-          steps: sessionData.events.map((evt: any, idx: number) => ({
-            id: `step-${idx}`,
-            sequence: idx + 1,
-            index: idx,
-            action: evt.type || 'click',
-            title: evt.data?.pageTitle || evt.type || `Step ${idx + 1}`,
-            description: `${evt.type} on ${evt.selector || 'element'}`,
-            timestamp: evt.timestamp,
-            selector: evt.selector || null,
-            url: evt.data?.url || null,
-            pageTitle: evt.data?.pageTitle || '',
-            elementText: evt.data?.elementText || null,
-            screenshotKey: screenshotByIndex.get(idx) ?? evt.data?.screenshotKey ?? null,
-            generatedText: null,
-            textOverride: null,
-            voiceoverKey: null,
-            annotations: [],
-            animationTarget: null,
-            data: evt.data || {},
-          })),
+          steps: sessionData.events.map((evt: any, idx: number) => {
+            const ps = pipelineSteps[idx];
+            const elementText = evt.data?.elementText || ps?.elementText || null;
+            const fallbackText = elementText || `${evt.type || 'click'} on ${evt.selector || 'element'}`;
+            return {
+              id: `step-${idx}`,
+              sequence: idx + 1,
+              index: idx,
+              action: evt.type || 'click',
+              title: evt.data?.pageTitle || evt.type || `Step ${idx + 1}`,
+              description: fallbackText,
+              timestamp: evt.timestamp,
+              selector: evt.selector || null,
+              url: evt.data?.url || null,
+              pageTitle: evt.data?.pageTitle || '',
+              elementText,
+              screenshotKey: screenshotByIndex.get(idx) ?? evt.data?.screenshotKey ?? null,
+              generatedText: ps?.generatedText || null,
+              textOverride: ps?.textOverride || null,
+              voiceoverKey: ps?.voiceoverKey || null,
+              annotations: [],
+              animationTarget: ps?.animationTarget || null,
+              data: evt.data || {},
+            };
+          }),
           metadata: {
             stepCount: sessionData.events.length,
             durationMs: 0,
@@ -156,8 +165,8 @@ export const useStudioStore = create<StudioState>((set) => ({
           },
           aiOutputs: {
             title: rawTitle,
-            summary: 'Session captured — AI processing pending.',
-            tags: [],
+            summary: sessionData.aiOutputs?.summary || (pipelineSteps.length ? '' : 'Session captured — AI processing pending.'),
+            tags: sessionData.aiOutputs?.tags || [],
           },
           brand: null,
         };

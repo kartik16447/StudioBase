@@ -12,6 +12,7 @@ import {
   ScriptPanel, BrandPanel, ChaptersPanel, AIVoicePanel, MusicPanel, VisualsPanel, ZoomsPanel, ElementsPanel 
 } from '../components/studio/Panels';
 import type { Step, ChapterBreak as IChapterBreak } from '../../../shared/types/session';
+import { BACKEND_URL } from '../../../shared/constants';
 
 const STUDIO_TABS = [
   { id: 'script',   label: 'Script',   icon: I.FileText, component: ScriptPanel },
@@ -315,9 +316,23 @@ const SOPCanvas: React.FC = () => {
           <AIButton
             isProcessing={isProcessing}
             icon={I.Sparkles}
-            onClick={() => {
+            onClick={async () => {
+              if (!session) return;
+              const sessionId = session.sessionId;
+              const token = sessionStorage.getItem('sb_token');
               setIsProcessing(true);
-              setTimeout(() => setIsProcessing(false), 3000);
+              try {
+                await fetch(`${BACKEND_URL}/pipeline/trigger`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                  },
+                  body: JSON.stringify({ sessionId, requestedOutputs: { sop: true, demo: true } }),
+                });
+              } finally {
+                setIsProcessing(false);
+              }
             }}
           >
             {isProcessing ? 'Generating AI Content…' : 'Generate AI Content'}

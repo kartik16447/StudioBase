@@ -1,9 +1,4 @@
-import {
-  AppState,
-  CaptureTarget,
-  WorkerMessage,
-  BackendUser,
-} from "./types";
+import { AppState, CaptureTarget, WorkerMessage, BackendUser } from "./types";
 import { sbLog } from "./logger";
 import { BACKEND_URL } from "../../shared/constants";
 import {
@@ -26,7 +21,7 @@ async function init() {
   try {
     const stored = await chrome.storage.local.get(["sb_state"]);
     if (stored.sb_state) state = stored.sb_state as AppState;
-    
+
     sbLog("STATE_REHYDRATED", { status: state.status });
   } catch (err) {
     console.warn("Extension initialization warning:", err);
@@ -37,63 +32,71 @@ void init();
 
 // ─── Message Handling ────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse) => {
-  // GET_STATE is the only synchronous response — handle it and return false
-  if (msg.type === "GET_STATE") {
-    sendResponse(state);
-    return false;
-  }
-
-  // All other messages are fire-and-forget — dispatch async work but
-  // close the channel immediately (return false) to avoid the
-  // "message channel closed before response received" error.
-  switch (msg.type) {
-    case "SET_STATUS":
-      updateState({ status: msg.status });
-      break;
-    case "START_RECORDING":
-      startRecording(msg.target);
-      break;
-    case "STOP_RECORDING":
-      stopRecording();
-      break;
-    case "ABORT_RECORDING":
-      abortRecording();
-      break;
-    case "RETRY_UPLOAD":
-      retryUpload();
-      break;
-    case "CAPTURE_STEP":
-      if (state.status === "recording" && state.sessionId) {
-        const p = msg.payload;
-        const sessionId = state.sessionId;
-        appendEvent(sessionId, {
-          type: p.action,
-          timestamp: p.timestamp,
-          selector: p.selector || "",
-          data: { ...p, cursorMode: p.cursorMode || 'default' },
-        }).then(async () => {
-          try {
-            const session = await getSession(sessionId);
-            const stepIndex = (session?.events?.length ?? 1) - 1;
-            const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'jpeg', quality: 70 });
-            const blob = await fetch(dataUrl).then(r => r.blob());
-            await saveScreenshot(sessionId, stepIndex, blob);
-          } catch (err) {
-            console.warn('[StudioBase] Screenshot capture failed:', err);
-          }
-        }).catch((err) => console.warn("[StudioBase] appendEvent failed:", err));
-      }
-      break;
-    case "LOG": {
-
-      const { tag, data } = msg.logMessage;
-      sbLog(tag, data);
-      break;
+chrome.runtime.onMessage.addListener(
+  (msg: WorkerMessage, _sender, sendResponse) => {
+    // GET_STATE is the only synchronous response — handle it and return false
+    if (msg.type === "GET_STATE") {
+      sendResponse(state);
+      return false;
     }
-  }
-  return false; // channel closed — no async response needed
-});
+
+    // All other messages are fire-and-forget — dispatch async work but
+    // close the channel immediately (return false) to avoid the
+    // "message channel closed before response received" error.
+    switch (msg.type) {
+      case "SET_STATUS":
+        updateState({ status: msg.status });
+        break;
+      case "START_RECORDING":
+        startRecording(msg.target);
+        break;
+      case "STOP_RECORDING":
+        stopRecording();
+        break;
+      case "ABORT_RECORDING":
+        abortRecording();
+        break;
+      case "RETRY_UPLOAD":
+        retryUpload();
+        break;
+      case "CAPTURE_STEP":
+        if (state.status === "recording" && state.sessionId) {
+          const p = msg.payload;
+          const sessionId = state.sessionId;
+          appendEvent(sessionId, {
+            type: p.action,
+            timestamp: p.timestamp,
+            selector: p.selector || "",
+            data: { ...p, cursorMode: p.cursorMode || "default" },
+          })
+            .then(async () => {
+              try {
+                const session = await getSession(sessionId);
+                const stepIndex = (session?.events?.length ?? 1) - 1;
+                const dataUrl = await chrome.tabs.captureVisibleTab({
+                  format: "jpeg",
+                  quality: 70,
+                });
+                const blob = await fetch(dataUrl).then((r) => r.blob());
+                await saveScreenshot(sessionId, stepIndex, blob);
+              } catch (err) {
+                console.warn("[StudioBase] Screenshot capture failed:", err);
+              }
+            })
+            .catch((err) =>
+              console.warn("[StudioBase] appendEvent failed:", err),
+            );
+        }
+        break;
+      case "LOG": {
+        const { tag, data } = msg.logMessage;
+        sbLog(tag, data);
+        break;
+      }
+    }
+    return false; // channel closed — no async response needed
+  },
+);
 
 // ─── State Updates ───────────────────────────────────────────
 
@@ -107,27 +110,21 @@ async function updateState(patch: Partial<AppState>) {
 
 async function startRecording(target: CaptureTarget) {
   try {
-    const streamId = target.streamId;
-    if (!streamId) {
-      throw new Error("No streamId provided for recording");
-    }
-
-    // Bug 1 fix: startSession() generates the UUID AND saves to session storage
-    const tabUrl = target.tabTitle || "";
+    const tabUrl = target.tabTitle || target.tabUrl || "";
     const sessionId = await startSession(tabUrl);
-
     await updateState({
       status: "recording",
       sessionId,
       localSessionId: sessionId,
       startedAt: Date.now(),
-      target: { ...target, streamId },
+      target, // tabId is in here
     });
 
     if (target.tabId) {
-      chrome.tabs.sendMessage(target.tabId, { type: 'START_CAPTURE' }).catch(() => {});
+      chrome.tabs
+        .sendMessage(target.tabId, { type: "START_CAPTURE" })
+        .catch(() => {});
     }
-
     sbLog("RECORDING_STARTED", { sessionId, target });
   } catch (err: any) {
     updateState({ status: "error", errorMessage: err.message });
@@ -139,7 +136,13 @@ async function abortRecording() {
   if (sessionId) {
     await abortSession(sessionId);
   }
-  await updateState({ status: "idle", sessionId: null, localSessionId: null, startedAt: null, target: null });
+  await updateState({
+    status: "idle",
+    sessionId: null,
+    localSessionId: null,
+    startedAt: null,
+    target: null,
+  });
   sbLog("RECORDING_ABORTED", { sessionId });
 }
 
@@ -149,7 +152,9 @@ async function stopRecording() {
   const sessionId = state.sessionId!;
 
   if (state.target?.tabId) {
-    chrome.tabs.sendMessage(state.target.tabId, { type: 'STOP_CAPTURE' }).catch(() => {});
+    chrome.tabs
+      .sendMessage(state.target.tabId, { type: "STOP_CAPTURE" })
+      .catch(() => {});
   }
 
   await updateState({ status: "uploading", uploadProgress: 0 });
@@ -160,7 +165,9 @@ async function stopRecording() {
 
     const session = await getSession(sessionId);
     if (!session) {
-      throw new Error(`[StudioBase] Local session data not found for ${sessionId}`);
+      throw new Error(
+        `[StudioBase] Local session data not found for ${sessionId}`,
+      );
     }
 
     const backendSessionId = await uploadSession(session, (pct) => {
@@ -204,4 +211,3 @@ async function retryUpload() {
     updateState({ status: "failed_enrichment", errorMessage: err.message });
   }
 }
-
