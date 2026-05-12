@@ -7,6 +7,54 @@ import {
   GlassPanel, Avatar, Button
 } from '../ui';
 import { useStudioStore } from '../../store/useStudioStore';
+import { AnimatePresence } from 'framer-motion';
+
+// ─── CopyLinkButton ───────────────────────────────────────────────────
+const CopyLinkButton: React.FC<{ url: string }> = ({ url }) => {
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={cn(
+        'w-6 h-6 rounded-full inline-flex items-center justify-center transition-all duration-300 relative group overflow-hidden',
+        copied ? 'bg-green-50' : 'hover:bg-white/80 active:scale-90'
+      )}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        {copied ? (
+          <motion.div
+            key="check"
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -10, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          >
+            <I.Check size={11} className="text-green-600" strokeWidth={3} />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="copy"
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -10, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+            className="text-text-3 group-hover:text-text"
+          >
+            <I.Copy size={11} strokeWidth={2.5} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </button>
+  );
+};
 
 // ─── StepCard ──────────────────────────────────────────────────────────
 export const StepCard: React.FC<{
@@ -47,16 +95,19 @@ export const StepCard: React.FC<{
         )}
       </div>
 
-      <ScreenshotPlaceholder step={step} session={session} hue={hue} className="mb-5" />
+      <ScreenshotPlaceholder step={step} session={session} mode="blueprint" hue={hue} className="mb-5" />
 
       <p className="text-[16px] leading-[1.65] text-text relative z-10" style={{ textWrap: 'pretty' as any }}>
         {text}
       </p>
 
-      <div className="mt-4 flex items-center gap-3 relative z-10">
-        <Badge tone="neutral" size="sm" icon={I.Globe}>
-          {(step.url || '').replace(/^https?:\/\//,'').split('/')[0]}
-        </Badge>
+      <div className="mt-4 flex items-center gap-2 relative z-10">
+        <div className="flex items-center bg-surface-2 rounded-pill pr-1">
+          <Badge tone="neutral" size="sm" icon={I.Globe} className="bg-transparent border-none">
+            {(step.url || '').replace(/^https?:\/\//,'')}
+          </Badge>
+          <CopyLinkButton url={step.url || ''} />
+        </div>
         {step.textOverride && (
           <Badge tone="primary" size="sm">edited</Badge>
         )}

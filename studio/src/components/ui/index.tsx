@@ -324,6 +324,7 @@ export const Avatar: React.FC<{ name?: string, size?: number, hue?: number, clas
 };
 
 // ─── ScreenshotPlaceholder ────────────────────────────────────────────
+// ─── ScreenshotPlaceholder ────────────────────────────────────────────
 export const ScreenshotPlaceholder: React.FC<{
   step?: Partial<Step>;
   session?: SessionEnvelope | null;
@@ -333,122 +334,108 @@ export const ScreenshotPlaceholder: React.FC<{
   showChrome?: boolean;
   className?: string;
   url?: string;
+  mode?: 'blueprint' | 'stage';
+  parallaxOffset?: { x: number; y: number };
 }> = ({
   step,
   session,
   hue = 244,
   aspect = '16 / 10',
   rounded = 'rounded-img',
-  showChrome = true,
   className = '',
-  url,
+  mode = 'blueprint',
+  parallaxOffset = { x: 0, y: 0 },
 }) => {
   const tint = `hsl(${hue} 70% 60%)`;
   const tintSoft = `hsl(${hue} 70% 96%)`;
 
-  const cx = step?.coordinates?.x ? `${(step.coordinates.x / (step.coordinates.viewportWidth||1440)) * 100}%` : '62%';
-  const cy = step?.coordinates?.y ? `${(step.coordinates.y / (step.coordinates.viewportHeight||900)) * 100}%` : '58%';
+  const vw = step?.data?.coordinates?.viewportWidth || 1440;
+  const vh = step?.data?.coordinates?.viewportHeight || 900;
+  const adaptiveRatio = vw / vh;
 
-  const cursorMode = step?.data?.cursorMode || 'default';
-
-  // Try to get real screenshot URL
   const realUrl = step?.screenshotKey && session?.assets?.[step.screenshotKey] 
     ? session.assets[step.screenshotKey] 
     : null;
 
+  // Render Blueprint (Native Proportions)
+  if (mode === 'blueprint') {
+    return (
+      <div
+        className={cn(rounded, 'relative overflow-hidden shadow-card bg-[#070709]', className)}
+        style={{ aspectRatio: adaptiveRatio, boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
+      >
+        {realUrl ? (
+          <img src={realUrl} className="w-full h-full object-fill" alt="Step screenshot" />
+        ) : (
+          <SkeletonPlaceholder tintSoft={tintSoft} tint={tint} />
+        )}
+      </div>
+    );
+  }
+
+  // Render Stage (Cinematic 16:9 with Layers)
   return (
     <div
-      className={cn(rounded, 'relative overflow-hidden shadow-card bg-white', className)}
-      style={{ aspectRatio: aspect, boxShadow: '0 4px 20px rgba(0,0,0,0.08), inset 0 0 0 1px rgba(0,0,0,0.04)' }}
+      className={cn(rounded, 'relative overflow-hidden bg-black', className)}
+      style={{ aspectRatio: aspect }}
     >
-      {showChrome && (
-        <div className="h-9 px-3 border-b border-border flex items-center gap-2 bg-[#FAFAFC]">
-          <div className="flex gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#FF5F57]" />
-            <span className="w-2.5 h-2.5 rounded-full bg-[#FEBC2E]" />
-            <span className="w-2.5 h-2.5 rounded-full bg-[#28C840]" />
-          </div>
-          <div className="flex-1 mx-3 h-5 rounded-md bg-white border border-border flex items-center px-2 text-[10px] text-text-3 font-mono truncate">
-            {url || step?.url || 'https://app.example.com/dashboard'}
-          </div>
+      {/* LAYER 1: Ambient Backdrop (Blurred & Parallax) */}
+      {realUrl && (
+        <div 
+          className="absolute inset-0 pointer-events-none will-change-transform"
+          style={{
+            transform: `scale(1.25) translate(${parallaxOffset.x * 0.35}%, ${parallaxOffset.y * 0.35}%)`,
+            filter: 'blur(36px) brightness(0.6) saturate(0.9)',
+            opacity: 0.8
+          }}
+        >
+          <img src={realUrl} className="w-full h-full object-cover" alt="" />
         </div>
       )}
 
-      {realUrl ? (
-        <div className={cn('absolute inset-0', showChrome && 'top-9')}>
-          <img src={realUrl} className="w-full h-full object-cover" alt="Step screenshot" />
-          
-          {realUrl && step?.coordinates && (
-            <div className="absolute pointer-events-none" style={{ left: cx, top: cy, transform: 'translate(-50%,-50%)' }}>
-              {(cursorMode === 'default' || cursorMode === 'black' || cursorMode === 'ripple' || cursorMode === 'spotlight') && (
-                <div className="relative">
-                  {cursorMode === 'ripple' && (
-                    <span className="absolute inset-0 rounded-full animate-ping bg-primary/30" style={{ width: 48, height: 48, transform: 'translate(-33%, -33%)' }} />
-                  )}
-                  <svg width={cursorMode === 'black' ? "40" : "32"} height={cursorMode === 'black' ? "40" : "32"} viewBox="0 0 32 32" fill="none">
-                    <path d="M7 2L25 20L15.5 21L11.5 30L7 2Z" fill={cursorMode === 'black' ? "black" : "white"} stroke={cursorMode === 'black' ? "white" : "black"} strokeWidth="2" strokeLinejoin="round"/>
-                  </svg>
-                </div>
-              )}
-              {cursorMode === 'laser' && (
-                <span className="block w-3.5 h-3.5 rounded-full bg-red-600 shadow-[0_0_8px_4px_rgba(255,0,0,0.5)]" />
-              )}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className={cn('absolute inset-0 flex', showChrome && 'top-9')}>
-          <div className="w-[18%] h-full p-2 space-y-1.5" style={{ background: tintSoft }}>
-            <div className="h-3 rounded bg-white/80 w-3/4" />
-            <div className="h-2.5 rounded bg-white/60 w-1/2 mt-3" />
-            <div className="h-2 rounded bg-white/60 w-2/3" />
-            <div className="h-2 rounded bg-white/60 w-1/2" />
-            <div className="h-2 rounded mt-2" style={{ background: tint, width:'70%', opacity: 0.85 }} />
-            <div className="h-2 rounded bg-white/60 w-2/3" />
-            <div className="h-2 rounded bg-white/60 w-3/4" />
-            <div className="h-2 rounded bg-white/60 w-1/2" />
-            <div className="h-2 rounded bg-white/60 w-2/3" />
-            <div className="h-2 rounded bg-white/60 w-3/4 mt-4" />
-            <div className="h-2 rounded bg-white/60 w-1/2" />
-          </div>
-          <div className="flex-1 p-3 bg-white">
-            <div className="flex items-center justify-between mb-2">
-              <div className="h-3 rounded bg-text/80 w-1/3" />
-              <div className="flex gap-1.5">
-                <div className="h-5 w-12 rounded-md bg-surface-2" />
-                <div className="h-5 w-14 rounded-md" style={{ background: tint }} />
-              </div>
-            </div>
-            <div className="h-2 rounded bg-surface-2 w-1/2 mb-3" />
-            <div className="grid grid-cols-3 gap-2 mb-2.5">
-              {[0,1,2].map(i => (
-                <div key={i} className="h-12 rounded-md border border-border bg-[#FAFAFC] p-1.5 flex flex-col justify-between">
-                  <div className="h-1.5 rounded bg-text/60 w-2/3" />
-                  <div className="flex items-end gap-0.5 h-5">
-                    {[0,1,2,3,4,5].map(b => (
-                      <div key={b} className="flex-1 rounded-sm" style={{ background: tint, opacity: 0.2 + (b*0.13), height: `${20 + (b*9 % 60)}%` }} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="space-y-1.5">
-              {[0,1,2,3,4].map(i => (
-                <div key={i} className="h-5 rounded-md border border-border bg-[#FAFAFC] flex items-center px-2 gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: i === 2 ? tint : '#AEAEB2' }} />
-                  <div className="h-1.5 rounded bg-text/40 flex-1" style={{ maxWidth: `${40 + (i * 11 % 50)}%` }} />
-                  <div className="h-1.5 rounded bg-surface-2 w-8" />
-                  <div className="h-3.5 w-3.5 rounded-full" style={{ background: `hsl(${(hue + i*40) % 360} 70% 60%)` }} />
-                </div>
-              ))}
-            </div>
-          </div>
+      {/* LAYER 2: Sharp Foreground */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        {realUrl ? (
+          <img src={realUrl} className="max-w-full max-h-full object-contain shadow-2xl" alt="Step screenshot" />
+        ) : (
+          <SkeletonPlaceholder tintSoft={tintSoft} tint={tint} />
+        )}
+      </div>
 
-        </div>
-      )}
+      {/* LAYER 3: Depth Overlay (Vignette) */}
+      <div 
+        className="absolute inset-0 pointer-events-none" 
+        style={{
+          background: 'radial-gradient(circle at center, transparent 45%, rgba(0,0,0,0.25) 100%)'
+        }}
+      />
     </div>
   );
 };
+
+const SkeletonPlaceholder: React.FC<{ tintSoft: string, tint: string }> = ({ tintSoft, tint }) => (
+  <div className="absolute inset-0 flex">
+    <div className="w-[18%] h-full p-2 space-y-1.5" style={{ background: tintSoft }}>
+      <div className="h-3 rounded bg-white/80 w-3/4" />
+      <div className="h-2.5 rounded bg-white/60 w-1/2 mt-3" />
+      <div className="h-2 rounded bg-white/60 w-2/3" />
+      <div className="h-2 rounded bg-white/60 w-1/2" />
+      <div className="h-2 rounded mt-2" style={{ background: tint, width:'70%', opacity: 0.85 }} />
+      <div className="h-2 rounded bg-white/60 w-3/4" />
+      <div className="h-2 rounded bg-white/60 w-1/2" />
+    </div>
+    <div className="flex-1 p-3 bg-white">
+      <div className="h-3 rounded bg-text/80 w-1/3 mb-4" />
+      <div className="h-2 rounded bg-surface-2 w-1/2 mb-3" />
+      <div className="grid grid-cols-3 gap-2 mb-2.5">
+        {[0,1,2].map(i => <div key={i} className="h-12 rounded-md border border-border bg-[#FAFAFC]" />)}
+      </div>
+      <div className="space-y-1.5">
+        {[0,1,2,3,4].map(i => <div key={i} className="h-5 rounded-md border border-border bg-[#FAFAFC]" />)}
+      </div>
+    </div>
+  </div>
+);
 
 // ─── SectionLabel ──────────────────────────────────────────────────────
 export const SectionLabel: React.FC<{ children: React.ReactNode, hint?: string, className?: string }> = ({ 

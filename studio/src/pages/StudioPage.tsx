@@ -366,12 +366,126 @@ const VideoCanvas: React.FC = () => {
 
   const [audio] = useState(new Audio());
   const [isEnded, setIsEnded] = useState(false);
+  const [zoomPhase, setZoomPhase] = useState<'in' | 'hold' | 'out'>('in');
+  const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const playerRef = useRef<HTMLDivElement>(null);
 
   const steps = session?.steps || [];
   const currentStep = steps[currentStepIndex];
+  const chapterMap = new Map(
+    (session?.metadata?.chapterBreaks || []).map(c => [c.afterStepId, c])
+  );
 
-  // Handle voiceover playback
-  React.useEffect(() => {
+  const isSameContext = (s1: any, s2: any) => {
+    if (!s1 || !s2) return false;
+    return s1.url === s2.url || s1.pageTitle === s2.pageTitle;
+  };
+
+  const prevStep = steps[currentStepIndex - 1];
+  const sameContext = isSameContext(prevStep, currentStep);
+
+  // Normalization & Target Calculation
+  const getTarget = (step: any) => {
+    const manual = step?.animationTarget;
+    const coords = step?.data?.coordinates;
+    const useAuto = !manual || manual.zoomScale <= 1;
+
+    if (useAuto && coords) {
+      return {
+        centerX: Math.max(15, Math.min(85, (coords.x / (coords.viewportWidth || 1440)) * 100)),
+        centerY: Math.max(15, Math.min(85, (coords.y / (coords.viewportHeight || 900)) * 100)),
+        zoomScale: 1.55,
+      };
+    }
+    return manual || { centerX: 50, centerY: 50, zoomScale: 1 };
+  };
+
+  const target = getTarget(currentStep);
+  const hasZoom = target.zoomScale > 1;
+
+  // New Camera Math: translate(tx, ty) scale(scale)
+  // Order: Translate BEFORE scale for physical correctness
+  const scale = (hasZoom || !isPlaying) ? target.zoomScale : 1;
+  const tx = (50 - target.centerX) * scale;
+  const ty = (50 - target.centerY) * scale;
+
+  // Cinematic Re-orientation Sequence for New Context
+  // scale: overview -> stabilize -> enter
+  const cinematicSequence = sameContext 
+    ? { scale, x: `${tx}%`, y: `${ty}%` }
+    : {
+        scale: [1.15, 1.45, scale],
+        x: ['0%', '0%', `${tx}%`],
+        y: ['0%', '0%', `${ty}%`],
+        opacity: [0, 1, 1]
+      };
+
+  const springTransition = {
+    type: 'spring' as const,
+    stiffness: 45, // Decreased for slower, more deliberate movement
+    damping: 22,   // Increased for smoother settling
+    mass: 1.2,     // Added a bit more weight/inertia
+    restDelta: 0.001
+  };
+
+  // Reset zoom phase on context change
+  useEffect(() => {
+    if (!hasZoom) {
+      setZoomPhase('in');
+      return;
+    }
+    if (!sameContext) {
+      setZoomPhase('in');
+      const inTimer = setTimeout(() => setZoomPhase('hold'), 600);
+      return () => clearTimeout(inTimer);
+    }
+  }, [currentStepIndex, hasZoom, sameContext]);
+
+  const advanceStep = React.useCallback(() => {
+    const chapter = chapterMap.get(currentStep?.id);
+    if (chapter) {
+      setShowChapterCard(chapter.chapterTitle);
+      setTimeout(() => {
+        setShowChapterCard(null);
+        setTimeout(() => {
+          if (currentStepIndex < steps.length - 1) {
+            setStepIndex(currentStepIndex + 1);
+          } else {
+            setPlaying(false);
+            setIsEnded(true);
+          }
+        }, 300);
+      }, 2000);
+      return;
+    }
+
+    // Smart Context Advance: No zoom-out if context is same
+    const nextStep = steps[currentStepIndex + 1];
+    const willStayInContext = isSameContext(currentStep, nextStep);
+
+    if (hasZoom && !willStayInContext) {
+      setZoomPhase('out'); 
+      setTimeout(() => {
+        if (currentStepIndex < steps.length - 1) {
+          setStepIndex(currentStepIndex + 1);
+        } else {
+          setPlaying(false);
+          setIsEnded(true);
+        }
+      }, 400);
+    } else {
+      if (currentStepIndex < steps.length - 1) {
+        setStepIndex(currentStepIndex + 1);
+      } else {
+        setPlaying(false);
+        setIsEnded(true);
+      }
+    }
+  }, [currentStepIndex, steps.length, hasZoom, currentStep, chapterMap, setStepIndex, setPlaying]);
+
+  // Voiceover playback
+  useEffect(() => {
     if (!isPlaying) {
       audio.pause();
       return;
@@ -380,91 +494,140 @@ const VideoCanvas: React.FC = () => {
     let timer: ReturnType<typeof setTimeout>;
 
     if (!currentStep?.voiceoverKey) {
-      // Fallback timer for steps without voiceover
-      timer = setTimeout(() => {
-        if (currentStepIndex < steps.length - 1) {
-          setStepIndex(currentStepIndex + 1);
-        } else {
-          setPlaying(false);
-          setIsEnded(true);
-        }
-      }, 3000);
+      timer = setTimeout(() => advanceStep(), 3000);
     } else {
-      const url = `https://assets.studiobase.app/${currentStep.voiceoverKey}`;
+      const url = `${BACKEND_URL}/assets/${currentStep.voiceoverKey}`;
       if (audio.src !== url) {
         audio.src = url;
       }
-      
       audio.playbackRate = playbackRate;
       audio.play().catch(console.error);
 
-      const handleEnded = () => {
-        if (currentStepIndex < steps.length - 1) {
-          setStepIndex(currentStepIndex + 1);
-        } else {
-          setPlaying(false);
-          setIsEnded(true);
-        }
-      };
-
+      const handleEnded = () => advanceStep();
       audio.addEventListener('ended', handleEnded);
       return () => {
         audio.removeEventListener('ended', handleEnded);
       };
     }
 
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [currentStepIndex, isPlaying, playbackRate, steps.length, currentStep?.voiceoverKey]);
+    return () => { if (timer) clearTimeout(timer); };
+  }, [currentStepIndex, isPlaying, playbackRate, steps.length, currentStep?.voiceoverKey, advanceStep]);
+
+  // Synthetic cursor positions
+  const prevCoords = prevStep?.data?.coordinates;
+  const currCoords = currentStep?.data?.coordinates;
+
+  const cursorStartX = prevCoords
+    ? (prevCoords.x / (prevCoords.viewportWidth || 1440)) * 100 : 50;
+  const cursorStartY = prevCoords
+    ? (prevCoords.y / (prevCoords.viewportHeight || 900)) * 100 : 50;
+  const cursorEndX = currCoords
+    ? (currCoords.x / (currCoords.viewportWidth || 1440)) * 100 : 50;
+  const cursorEndY = currCoords
+    ? (currCoords.y / (currCoords.viewportHeight || 900)) * 100 : 50;
+
+  // Export via MediaRecorder
+  async function handleExport() {
+    const canCapture = !!(playerRef.current as any)?.captureStream || !!(playerRef.current as any)?.mozCaptureStream;
+    if (!canCapture) {
+      alert('Export requires Chrome. Please open this page in Chrome to export video.');
+      return;
+    }
+    if (!playerRef.current || isExporting) return;
+    setIsExporting(true);
+    try {
+      const stream = (playerRef.current as any).captureStream
+        ? (playerRef.current as any).captureStream(30)
+        : (playerRef.current as any).mozCaptureStream(30);
+
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9' : 'video/webm';
+      const recorder = new MediaRecorder(stream, { mimeType });
+
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${session?.aiOutputs?.title || 'studiobase'}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setIsExporting(false);
+      };
+
+      recorder.start();
+      setStepIndex(0);
+      setPlaying(true);
+
+      // Poll for playback end to stop recording
+      const pollInterval = setInterval(() => {
+        if (!useStudioStore.getState().isPlaying) {
+          recorder.stop();
+          clearInterval(pollInterval);
+        }
+      }, 500);
+    } catch (err) {
+      console.error('Export failed:', err);
+      setIsExporting(false);
+    }
+  }
 
   if (!session) return null;
 
-  const target = currentStep?.animationTarget || {
-    centerX: 50,
-    centerY: 50,
-    zoomScale: 1,
-    transitionType: 'zoom',
-    transitionDurationMs: 800
-  };
-
-  // Calculate transform
-  // centerX/Y are in % of original viewport
-  // We want to center that point in our player viewport and zoom in.
-  const scale = target.zoomScale;
-  const translateX = (50 - target.centerX) * scale;
-  const translateY = (50 - target.centerY) * scale;
-
   return (
     <div className="flex-1 h-full studio-gradient flex flex-col items-center justify-start py-16 px-8 min-h-0 scroll-y">
-      <div 
-        className="relative w-full max-w-5xl rounded-img shadow-card-lifted bg-white overflow-hidden"
+      {/* Player */}
+      <div
+        ref={playerRef}
+        className="relative w-full max-w-5xl rounded-img shadow-card-lifted overflow-hidden bg-[#12121a]"
         style={{ maxHeight: 'calc(100vh - 280px)', aspectRatio: '16/9' }}
       >
-        {/* Animated Screenshot */}
-        <motion.div
-          animate={{
-            scale: scale,
-            x: `${translateX}%`,
-            y: `${translateY}%`,
-          }}
-          transition={{
-            type: target.transitionType === 'zoom' ? 'spring' : 'tween',
-            stiffness: 260,
-            damping: 26,
-            duration: target.transitionDurationMs / 1000
-          }}
-          className="absolute inset-0 origin-center"
-        >
-          <ScreenshotPlaceholder 
-            step={currentStep}
-            session={session}
-            showChrome={true}
-            aspect="16/9" 
-            rounded="" 
-            className="w-full h-full !shadow-none" 
+        {/* Vibrant Shimmering Background */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          {/* Base Mesh */}
+          <div className="absolute inset-0 bg-[radial-gradient(at_0%_0%,_#5e5ce644_0px,_transparent_50%),radial-gradient(at_100%_100%,_#af52de44_0px,_transparent_50%)]" />
+          
+          {/* High-visibility moving light beam */}
+          <motion.div 
+            animate={{ 
+              x: ['-100%', '150%'],
+              opacity: [0, 0.4, 0]
+            }}
+            transition={{ 
+              duration: 5, 
+              repeat: Infinity, 
+              ease: "linear" 
+            }}
+            className="absolute inset-y-0 w-[500px] bg-gradient-to-r from-transparent via-primary/30 to-transparent blur-[100px] -skew-x-12"
           />
-        </motion.div>
+
+          {/* Core pulsating glow */}
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_#5e5ce655_0%,_transparent_60%)] animate-pulse" />
+          
+          <DotGrid className="opacity-30" glowRadius={500} />
+        </div>
+        {/* Screenshot with Hybrid Camera (Smart Context) */}
+        <div className="absolute inset-0 overflow-hidden">
+          <motion.div
+            key={sameContext ? 'same' : currentStepIndex}
+            animate={cinematicSequence}
+            transition={springTransition}
+            className="absolute inset-0 origin-center"
+          >
+            <ScreenshotPlaceholder
+              step={currentStep}
+              session={session}
+              showChrome={false}
+              aspect="16/9"
+              rounded=""
+              mode="stage"
+              parallaxOffset={{ x: tx, y: ty }}
+              className="w-full h-full !shadow-none"
+            />
+          </motion.div>
+        </div>
 
         {/* Annotation Overlay */}
         <div className="absolute inset-0 pointer-events-none">
@@ -477,8 +640,7 @@ const VideoCanvas: React.FC = () => {
                 exit={{ opacity: 0, scale: 0.8 }}
                 className="absolute"
                 style={{
-                  left: `${anno.x}%`,
-                  top: `${anno.y}%`,
+                  left: `${anno.x}%`, top: `${anno.y}%`,
                   width: anno.width ? `${anno.width}%` : undefined,
                   height: anno.height ? `${anno.height}%` : undefined,
                 }}
@@ -501,10 +663,51 @@ const VideoCanvas: React.FC = () => {
           </AnimatePresence>
         </div>
 
+        {/* Synthetic Cursor */}
+        {isPlaying && currentStep?.coordinates && (
+          <motion.div
+            className="absolute pointer-events-none z-20"
+            initial={{ left: `${cursorStartX}%`, top: `${cursorStartY}%` }}
+            animate={{ left: `${cursorEndX}%`, top: `${cursorEndY}%` }}
+            transition={{ duration: 0.4, ease: 'easeInOut', delay: 0.1 }}
+            style={{ transform: 'translate(-4px, -4px)' }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <path d="M4 2L20 12L12 13L8 22L4 2Z" fill="white" stroke="black" strokeWidth="1.5" strokeLinejoin="round"/>
+            </svg>
+            {zoomPhase === 'in' && (
+              <motion.div
+                className="absolute rounded-full border-2 border-primary"
+                style={{ width: 32, height: 32, top: -12, left: -12 }}
+                initial={{ scale: 0, opacity: 0.8 }}
+                animate={{ scale: 2, opacity: 0 }}
+                transition={{ duration: 0.5, ease: 'easeOut' }}
+              />
+            )}
+          </motion.div>
+        )}
+
+        {/* Chapter Title Card */}
+        <AnimatePresence>
+          {showChapterCard && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-gradient-to-br from-primary/90 to-primary flex items-center justify-center z-30"
+            >
+              <div className="text-center text-white">
+                <p className="text-sm font-semibold opacity-70 uppercase tracking-widest mb-3">Chapter</p>
+                <h2 className="text-3xl font-bold">{showChapterCard}</h2>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Player Controls Overlay */}
-        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300">
+        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300">
           <div className="p-6 flex items-center gap-4">
-            <button 
+            <button
               onClick={() => setPlaying(!isPlaying)}
               className="w-12 h-12 rounded-full glass-dark flex items-center justify-center text-white hover:scale-105 transition active:scale-95"
             >
@@ -513,7 +716,7 @@ const VideoCanvas: React.FC = () => {
 
             <div className="flex-1 flex flex-col gap-1.5">
               <div className="h-1.5 rounded-full bg-white/20 overflow-hidden relative">
-                <motion.div 
+                <motion.div
                   className="absolute inset-y-0 left-0 bg-primary"
                   animate={{ width: `${((currentStepIndex + 1) / steps.length) * 100}%` }}
                 />
@@ -524,27 +727,38 @@ const VideoCanvas: React.FC = () => {
               </div>
             </div>
 
+            {/* Prev / Next */}
             <div className="flex items-center gap-2 glass-dark rounded-pill px-3 h-10">
-              <button 
-                onClick={() => setStepIndex(Math.max(0, currentStepIndex - 1))}
-                className="text-white/80 hover:text-white"
-              >
+              <button onClick={() => setStepIndex(Math.max(0, currentStepIndex - 1))} className="text-white/80 hover:text-white">
                 <I.ChevronLeft size={18} />
               </button>
-              <button 
-                onClick={() => setStepIndex(Math.min(steps.length - 1, currentStepIndex + 1))}
-                className="text-white/80 hover:text-white"
-              >
+              <button onClick={() => setStepIndex(Math.min(steps.length - 1, currentStepIndex + 1))} className="text-white/80 hover:text-white">
                 <I.ChevronRight size={18} />
               </button>
             </div>
+
+            {/* Speed Selector */}
+            <div className="flex items-center gap-1 glass-dark rounded-pill px-3 h-10">
+              {[0.5, 1, 1.5, 2].map(speed => (
+                <button
+                  key={speed}
+                  onClick={() => useStudioStore.getState().setPlaybackRate(speed)}
+                  className={cn(
+                    'text-[11px] font-bold px-2 py-1 rounded transition',
+                    playbackRate === speed ? 'text-white' : 'text-white/50 hover:text-white/80'
+                  )}
+                >
+                  {speed}×
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-        
+
         {/* Play Overlay (Initial) */}
         {!isPlaying && currentStepIndex === 0 && !isEnded && (
           <div className="absolute inset-0 bg-black/10 backdrop-blur-[2px] flex items-center justify-center">
-            <button 
+            <button
               onClick={() => setPlaying(true)}
               className="w-24 h-24 rounded-full glass shadow-card-lifted flex items-center justify-center text-text hover:scale-110 transition active:scale-95 group"
             >
@@ -556,11 +770,25 @@ const VideoCanvas: React.FC = () => {
         )}
       </div>
 
+      {/* Caption */}
       <div className="mt-4 text-center max-w-2xl h-[72px] overflow-hidden flex flex-col justify-start">
         <h3 className="text-[20px] font-semibold text-text leading-snug line-clamp-1">{session.aiOutputs.title}</h3>
         <p className="text-[14px] text-text-2 mt-1 leading-relaxed line-clamp-2">
           {currentStep?.textOverride || currentStep?.generatedText || 'Watch this smart walkthrough generated by StudioBase AI.'}
         </p>
+      </div>
+
+      {/* Export Button */}
+      <div className="mt-4">
+        <Button
+          variant="ghost"
+          size="md"
+          icon={isExporting ? I.Download : I.Download}
+          onClick={handleExport}
+          disabled={isExporting}
+        >
+          {isExporting ? 'Exporting...' : 'Export Video'}
+        </Button>
       </div>
     </div>
   );
