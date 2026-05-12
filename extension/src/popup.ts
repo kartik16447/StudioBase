@@ -213,6 +213,7 @@ async function sendStartRecording(target: AppState["target"]) {
     });
   } catch (err: any) {
     console.error("Capture picker failed:", err);
+    chrome.runtime.sendMessage({ type: "ABORT_RECORDING" });
   }
 }
 
@@ -262,9 +263,27 @@ function renderState(newState: AppState) {
       progressPct.textContent = `${realProgress}%`;
       break;
     case "ready":
+      showScreen(screenSuccess);
+      (document.querySelector(".success-title") as HTMLElement).textContent = "Capture Ready!";
+      (document.querySelector(".success-meta") as HTMLElement).textContent = "Your interactive session is ready.";
+      (document.querySelector(".success-check") as HTMLElement).textContent = "✓";
+      (document.querySelector(".success-actions") as HTMLElement).style.display = "flex";
+      btnOpenStudio.textContent = "Open in Studio";
+      break;
     case "enriching":
+      showScreen(screenSuccess);
+      (document.querySelector(".success-title") as HTMLElement).textContent = "Processing...";
+      (document.querySelector(".success-meta") as HTMLElement).textContent = "Generating steps and descriptions...";
+      (document.querySelector(".success-check") as HTMLElement).textContent = "⌛";
+      (document.querySelector(".success-actions") as HTMLElement).style.display = "none";
+      break;
     case "failed_enrichment":
       showScreen(screenSuccess);
+      (document.querySelector(".success-title") as HTMLElement).textContent = "Processing Failed";
+      (document.querySelector(".success-meta") as HTMLElement).textContent = "We couldn't enrich your capture, but it's saved.";
+      (document.querySelector(".success-check") as HTMLElement).textContent = "⚠️";
+      (document.querySelector(".success-actions") as HTMLElement).style.display = "flex";
+      btnOpenStudio.textContent = "Retry Enrichment";
       break;
     case "error":
       showScreen(screenError);
@@ -333,6 +352,10 @@ btnCopyLink.addEventListener("click", async () => {
 });
 
 btnOpenStudio.addEventListener("click", async () => {
+  if (state.status === "failed_enrichment") {
+    chrome.runtime.sendMessage({ type: "RETRY_UPLOAD" });
+    return;
+  }
   const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
   const token = sb_user?.accessToken;
   const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}`;

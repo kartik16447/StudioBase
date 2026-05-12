@@ -9,6 +9,8 @@ import {
   stopSession,
   getSession,
   appendEvent,
+  abortSession,
+  saveScreenshot,
 } from "./background/session-manager";
 import { uploadSession } from "./background/r2-uploader";
 
@@ -53,17 +55,32 @@ chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse)
     case "STOP_RECORDING":
       stopRecording();
       break;
+    case "ABORT_RECORDING":
+      abortRecording();
+      break;
+    case "RETRY_UPLOAD":
+      retryUpload();
+      break;
     case "CAPTURE_STEP":
       if (state.status === "recording" && state.sessionId) {
         const p = msg.payload;
-        appendEvent(state.sessionId, {
+        const sessionId = state.sessionId;
+        appendEvent(sessionId, {
           type: p.action,
           timestamp: p.timestamp,
           selector: p.selector || "",
           data: p,
-        }).catch((err) =>
-          console.warn("[StudioBase] appendEvent failed:", err)
-        );
+        }).then(async () => {
+          try {
+            const session = await getSession(sessionId);
+            const stepIndex = (session?.events?.length ?? 1) - 1;
+            const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'jpeg', quality: 70 });
+            const blob = await fetch(dataUrl).then(r => r.blob());
+            await saveScreenshot(sessionId, stepIndex, blob);
+          } catch (err) {
+            console.warn('[StudioBase] Screenshot capture failed:', err);
+          }
+        }).catch((err) => console.warn("[StudioBase] appendEvent failed:", err));
       }
       break;
     case "LOG": {
@@ -100,6 +117,7 @@ async function startRecording(target: CaptureTarget) {
     await updateState({
       status: "recording",
       sessionId,
+      localSessionId: sessionId,
       startedAt: Date.now(),
       target: { ...target, streamId },
     });
@@ -112,6 +130,15 @@ async function startRecording(target: CaptureTarget) {
   } catch (err: any) {
     updateState({ status: "error", errorMessage: err.message });
   }
+}
+
+async function abortRecording() {
+  const sessionId = state.localSessionId || state.sessionId;
+  if (sessionId) {
+    await abortSession(sessionId);
+  }
+  await updateState({ status: "idle", sessionId: null, localSessionId: null, startedAt: null, target: null });
+  sbLog("RECORDING_ABORTED", { sessionId });
 }
 
 async function stopRecording() {
@@ -146,6 +173,32 @@ async function stopRecording() {
 
     sbLog("RECORDING_FINISHED", { sessionId: backendSessionId });
   } catch (err: any) {
-    updateState({ status: "error", errorMessage: err.message });
+    console.error("Upload failed:", err);
+    updateState({ status: "failed_enrichment", errorMessage: err.message });
+  }
+}
+
+async function retryUpload() {
+  if (state.status !== "failed_enrichment") return;
+  const localSessionId = state.localSessionId || state.sessionId;
+  if (!localSessionId) return;
+
+  await updateState({ status: "uploading", uploadProgress: 0 });
+  try {
+    const session = await getSession(localSessionId);
+    if (!session) throw new Error("Local session not found");
+
+    const backendSessionId = await uploadSession(session, (pct) => {
+      updateState({ uploadProgress: pct });
+    });
+
+    await updateState({
+      status: "ready",
+      sessionId: backendSessionId,
+      uploadProgress: 100,
+    });
+  } catch (err: any) {
+    console.error("Retry upload failed:", err);
+    updateState({ status: "failed_enrichment", errorMessage: err.message });
   }
 }

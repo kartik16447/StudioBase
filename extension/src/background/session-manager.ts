@@ -154,3 +154,13 @@ export async function recoverSession(): Promise<Session | null> {
   }
   return null;
 }
+
+/**
+ * Aborts and removes the current session from session storage.
+ */
+export async function abortSession(sessionId: string): Promise<void> {
+  const { sb_sessions } = await chrome.storage.session.get('sb_sessions') as { sb_sessions?: Session };
+  if (sb_sessions && sb_sessions.sessionId === sessionId) {
+    await chrome.storage.session.remove('sb_sessions');
+  }
+}

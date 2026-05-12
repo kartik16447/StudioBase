@@ -20,6 +20,7 @@ export interface CaptureTarget {
 export interface AppState {
   status: AppStatus;
   sessionId?: string | null;
+  localSessionId?: string | null;
   startedAt?: number | null;
   target?: CaptureTarget | null;
   uploadProgress?: number;
@@ -97,6 +98,8 @@ export type WorkerMessage =
   | { type: 'SET_STATUS'; status: AppStatus }
   | { type: 'START_RECORDING'; target: CaptureTarget }
   | { type: 'STOP_RECORDING' }
+  | { type: 'ABORT_RECORDING' }
+  | { type: 'RETRY_UPLOAD' }
   | { type: 'STATE_UPDATE'; state: AppState }
   | { type: 'LOG'; logMessage: { tag: string; data: any } }
   | { type: 'CAPTURE_STEP'; payload: any };

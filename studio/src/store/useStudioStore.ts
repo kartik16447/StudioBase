@@ -118,6 +118,10 @@ export const useStudioStore = create<StudioState>((set) => ({
       // Normalize: extension captures store `events[]`, studio expects `steps[]`
       if (!sessionData.steps && Array.isArray(sessionData.events)) {
         const rawTitle = data.title || sessionData.tabUrl || 'Untitled Session';
+        const screenshotByIndex = new Map<number, string>(
+          (sessionData.screenshots || []).map((s: any) => [s.stepIndex, s.r2Key])
+        );
+
         sessionData = {
           sessionId: data.id || sessionData.sessionId,
           id: data.id || sessionData.sessionId,
@@ -137,7 +141,7 @@ export const useStudioStore = create<StudioState>((set) => ({
             url: evt.data?.url || null,
             pageTitle: evt.data?.pageTitle || '',
             elementText: evt.data?.elementText || null,
-            screenshotKey: evt.data?.screenshotKey || null,
+            screenshotKey: screenshotByIndex.get(idx) ?? evt.data?.screenshotKey ?? null,
             generatedText: null,
             textOverride: null,
             voiceoverKey: null,
@@ -157,7 +161,22 @@ export const useStudioStore = create<StudioState>((set) => ({
           },
           brand: null,
         };
-      } else if (!sessionData.steps) {
+      }
+
+      // If events were empty AND backend signals a terminal status, surface the error
+      if (sessionData.steps?.length === 0) {
+        const terminalFailures: Record<string, string> = {
+          credit_exhausted: 'Not enough credits to process this session. Add credits and re-run the pipeline.',
+          failed: 'Session processing failed. Please try recapturing.',
+          deleted: 'This session has been deleted.',
+        };
+        if (terminalFailures[data.status]) {
+          set({ sessionError: terminalFailures[data.status] });
+          return;
+        }
+      }
+
+      if (!sessionData.steps) {
         const terminalFailures: Record<string, string> = {
           credit_exhausted: 'Not enough credits to process this session. Add credits and re-run the pipeline.',
           failed: 'Session processing failed. Please try recapturing.',
@@ -178,6 +197,20 @@ export const useStudioStore = create<StudioState>((set) => ({
       }
       if (!sessionData.metadata.chapterBreaks) {
         sessionData.metadata.chapterBreaks = [];
+      }
+
+      // Build assets map from step screenshot/voiceover keys
+      if (!sessionData.assets) {
+        const assets: Record<string, string> = {};
+        for (const step of sessionData.steps || []) {
+          if (step.screenshotKey) {
+            assets[step.screenshotKey] = `${BACKEND_URL}/assets/${step.screenshotKey}`;
+          }
+          if (step.voiceoverKey) {
+            assets[step.voiceoverKey] = `${BACKEND_URL}/assets/${step.voiceoverKey}`;
+          }
+        }
+        sessionData.assets = assets;
       }
 
       set({ session: sessionData });
