@@ -100,6 +100,8 @@ export type WorkerMessage =
   | { type: 'STOP_RECORDING' }
   | { type: 'ABORT_RECORDING' }
   | { type: 'RETRY_UPLOAD' }
+  | { type: 'SIGN_IN' }
+  | { type: 'SHOW_POPUP'; state: AppState }
   | { type: 'STATE_UPDATE'; state: AppState }
   | { type: 'LOG'; logMessage: { tag: string; data: any } }
   | { type: 'CAPTURE_STEP'; payload: any };

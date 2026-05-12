@@ -1,7 +1,6 @@
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { Step, SessionEnvelope } from '../../../../shared/types/session';
-import { I } from '../icons';
 
 export * from './DotGrid';
 export * from './AIShimmer';
@@ -351,6 +350,8 @@ export const ScreenshotPlaceholder: React.FC<{
   const cx = step?.coordinates?.x ? `${(step.coordinates.x / (step.coordinates.viewportWidth||1440)) * 100}%` : '62%';
   const cy = step?.coordinates?.y ? `${(step.coordinates.y / (step.coordinates.viewportHeight||900)) * 100}%` : '58%';
 
+  const cursorMode = step?.data?.cursorMode || 'default';
+
   // Try to get real screenshot URL
   const realUrl = step?.screenshotKey && session?.assets?.[step.screenshotKey] 
     ? session.assets[step.screenshotKey] 
@@ -377,15 +378,22 @@ export const ScreenshotPlaceholder: React.FC<{
       {realUrl ? (
         <div className="absolute inset-0 top-9">
           <img src={realUrl} className="w-full h-full object-cover" alt="Step screenshot" />
-          {action === 'click' && (
-            <div className="absolute pointer-events-none" style={{ left: cx, top: cy, transform: 'translate(-50%,-50%)' }}>
-              <span className="absolute -inset-6 rounded-full" style={{ background: 'radial-gradient(circle, rgba(94,92,230,0.4), transparent 70%)' }} />
+          
+          <div className="absolute pointer-events-none" style={{ left: cx, top: cy, transform: 'translate(-50%,-50%)' }}>
+            {(cursorMode === 'default' || cursorMode === 'black' || cursorMode === 'ripple' || cursorMode === 'spotlight') && (
               <div className="relative">
-                <span className="block w-4 h-4 rounded-full bg-primary ring-4 ring-primary/30 shadow-lg" />
-                <I.Cursor size={16} className="absolute top-full left-full -translate-x-1 -translate-y-1 text-white drop-shadow-md fill-primary" strokeWidth={2.5} />
+                {cursorMode === 'ripple' && (
+                  <span className="absolute inset-0 rounded-full animate-ping bg-primary/30" style={{ width: 48, height: 48, transform: 'translate(-33%, -33%)' }} />
+                )}
+                <svg width={cursorMode === 'black' ? "40" : "32"} height={cursorMode === 'black' ? "40" : "32"} viewBox="0 0 32 32" fill="none">
+                  <path d="M7 2L25 20L15.5 21L11.5 30L7 2Z" fill={cursorMode === 'black' ? "black" : "white"} stroke={cursorMode === 'black' ? "white" : "black"} strokeWidth="2" strokeLinejoin="round"/>
+                </svg>
               </div>
-            </div>
-          )}
+            )}
+            {cursorMode === 'laser' && (
+              <span className="block w-3.5 h-3.5 rounded-full bg-red-600 shadow-[0_0_8px_4px_rgba(255,0,0,0.5)]" />
+            )}
+          </div>
         </div>
       ) : (
         <div className="absolute inset-0 top-9 flex">

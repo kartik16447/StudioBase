@@ -2,8 +2,10 @@ import {
   AppState,
   CaptureTarget,
   WorkerMessage,
+  BackendUser,
 } from "./types";
 import { sbLog } from "./logger";
+import { BACKEND_URL } from "../../shared/constants";
 import {
   startSession,
   stopSession,
@@ -24,7 +26,7 @@ async function init() {
   try {
     const stored = await chrome.storage.local.get(["sb_state"]);
     if (stored.sb_state) state = stored.sb_state as AppState;
-
+    
     sbLog("STATE_REHYDRATED", { status: state.status });
   } catch (err) {
     console.warn("Extension initialization warning:", err);
@@ -69,7 +71,7 @@ chrome.runtime.onMessage.addListener((msg: WorkerMessage, _sender, sendResponse)
           type: p.action,
           timestamp: p.timestamp,
           selector: p.selector || "",
-          data: p,
+          data: { ...p, cursorMode: p.cursorMode || 'default' },
         }).then(async () => {
           try {
             const session = await getSession(sessionId);
@@ -202,3 +204,4 @@ async function retryUpload() {
     updateState({ status: "failed_enrichment", errorMessage: err.message });
   }
 }
+

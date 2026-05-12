@@ -240,6 +240,9 @@ export interface Step {
   courseware?: CoursewareMeta;
   template?: TemplateMeta;
   overlay?: OverlayMeta;
+
+  // Metadata captured at interaction time
+  data?: Record<string, any>;
 }
 
 // ─── Session Envelope ───────────────────────────────────────

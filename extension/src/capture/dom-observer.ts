@@ -7,6 +7,7 @@
 // ============================================================
 
 import { generateSelector } from './selector-engine';
+import { getActiveCursorMode } from './toolbar';
 
 export type CaptureMessage =
   | { type: 'CAPTURE_STEP'; payload: RawStepPayload }
@@ -35,6 +36,7 @@ export interface RawStepPayload {
   };
   isIframeBlocked: boolean;
   frameUrl: string;
+  cursorMode?: string;
 }
 
 let isCapturing = false;
@@ -133,6 +135,7 @@ function handleInteraction(
     },
     isIframeBlocked: window !== window.top,
     frameUrl: location.href,
+    cursorMode: getActiveCursorMode(),
   };
 
   // Signal background worker to take screenshot after DOM settles
@@ -161,6 +164,7 @@ function scheduleNavigationCapture() {
       },
       isIframeBlocked: false,
       frameUrl: location.href,
+      cursorMode: getActiveCursorMode(),
     };
     chrome.runtime.sendMessage({ type: 'CAPTURE_STEP', payload });
   }, 300); // give SPA time to render the new route
