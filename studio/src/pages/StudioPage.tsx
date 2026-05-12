@@ -26,20 +26,32 @@ const STUDIO_TABS = [
 ];
 
 export const StudioPage: React.FC = () => {
-  const { 
-    navigate, 
-    activeTab, 
-    isPanelOpen, 
-    activeView, 
-    setActiveTab, 
-    togglePanel, 
-    session, 
-    fetchSession, 
+  const {
+    navigate,
+    activeTab,
+    isPanelOpen,
+    activeView,
+    setActiveTab,
+    togglePanel,
+    session,
+    fetchSession,
     setSession,
-    sessionError 
+    sessionError,
+    brand
   } = useStudioStore();
 
   const activeTabItem = STUDIO_TABS.find(t => t.id === activeTab) || STUDIO_TABS[0];
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--color-primary', brand.primaryColor);
+    // Convert hex to RGB for Tailwind opacity utilities (bg-primary/20 etc.)
+    const hex = brand.primaryColor.replace('#', '');
+    const r = parseInt(hex.substring(0,2), 16);
+    const g = parseInt(hex.substring(2,4), 16);
+    const b = parseInt(hex.substring(4,6), 16);
+    document.documentElement.style.setProperty('--color-primary-rgb', `${r} ${g} ${b}`);
+    document.documentElement.style.setProperty('--font-sans', brand.font + ', Inter, system-ui, sans-serif');
+  }, [brand.primaryColor, brand.font]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -197,7 +209,7 @@ export const StudioPage: React.FC = () => {
               transition={{ duration: 0.2, ease: "easeOut" }}
               className="flex-1 flex flex-col min-h-0"
             >
-              {activeView === 'sop' ? <SOPCanvas /> : <VideoCanvas />}
+              {activeView === 'sop' ? <SOPCanvas /> : activeView === 'video' ? <VideoCanvas /> : <DemoCanvas />}
             </motion.div>
           </AnimatePresence>
         </motion.section>
@@ -210,7 +222,6 @@ const SOPCanvas: React.FC = () => {
   const { session, focusedStepId, setFocusStep, setStepIndex, scrollTrigger, triggerScroll } = useStudioStore();
   const [isProcessing, setIsProcessing] = useState(false);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const containerRef = useRef<HTMLDivElement>(null);
 
   // Scroll the focused card into view when focus changes
   useEffect(() => {
@@ -243,7 +254,60 @@ const SOPCanvas: React.FC = () => {
   }, [session, focusedStepId, setFocusStep, setStepIndex, triggerScroll]);
 
 
+  const [isExportingVideo, setIsExportingVideo] = React.useState(false);
+  const sopVideoRef = React.useRef<HTMLDivElement>(null);
+  const [showEmbed, setShowEmbed] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+
+  const handleSOPVideoExport = async () => {
+    if (!sopVideoRef.current || isExportingVideo) return;
+    const canCapture = !!(sopVideoRef.current as any).captureStream ||
+                       !!(sopVideoRef.current as any).mozCaptureStream;
+    if (!canCapture) { alert('Export requires Chrome.'); return; }
+    setIsExportingVideo(true);
+
+    const stream = (sopVideoRef.current as any).captureStream
+      ? (sopVideoRef.current as any).captureStream(30)
+      : (sopVideoRef.current as any).mozCaptureStream(30);
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9' : 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${session?.aiOutputs?.title || 'studiobase-sop'}.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setIsExportingVideo(false);
+    };
+
+    recorder.start();
+    const stepEls = Array.from(
+      sopVideoRef.current.querySelectorAll('article')
+    ) as HTMLElement[];
+    for (const el of stepEls) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await new Promise<void>(res => setTimeout(res, 1800));
+    }
+    await new Promise<void>(res => setTimeout(res, 600));
+    recorder.stop();
+  };
+
   if (!session) return null;
+
+  const sessionId = session?.sessionId || '';
+  const embedUrl = `${window.location.origin}${window.location.pathname}?session=${sessionId}`;
+  const iframeCode = `<iframe\n  src="${embedUrl}&embed=1"\n  width="100%"\n  height="600"\n  frameborder="0"\n  allowfullscreen\n  title="${session?.aiOutputs?.title || 'StudioBase Walkthrough'}"\n></iframe>`;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(iframeCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const chapterMap = new Map((session.metadata.chapterBreaks || []).map(c => [c.afterStepId, c]));
   
@@ -258,7 +322,7 @@ const SOPCanvas: React.FC = () => {
   });
 
   return (
-    <div ref={containerRef} className="flex-1 min-h-0 scroll-y bg-bg relative">
+    <div ref={sopVideoRef} className="flex-1 min-h-0 scroll-y bg-bg relative" data-print="sop">
       <DotGrid className="!fixed" glowRadius={500} />
       <div className="max-w-[860px] mx-auto px-6 pt-16 pb-32 relative z-10">
         <motion.header
@@ -343,11 +407,111 @@ const SOPCanvas: React.FC = () => {
             <I.CheckCircle size={22} strokeWidth={2} />
           </div>
           <h3 className="text-[20px] font-semibold text-text">You're all done</h3>
-          <p className="text-[13.5px] text-text-2 mt-1">Publish to share with your team or export to PDF / Notion.</p>
+          <p className="text-[13.5px] text-text-2 mt-1">
+            Publish to share with your team or embed in Notion, Confluence, or any webpage.
+          </p>
           <div className="flex items-center justify-center gap-2 mt-5">
-            <Button variant="ghost" size="md" icon={I.Download}>Export PDF</Button>
+            <Button
+              variant="ghost"
+              size="md"
+              icon={I.Download}
+              onClick={() => {
+                const style = document.createElement('style');
+                style.id = 'sb-print-style';
+                style.innerHTML = `@media print {
+                  body > * { display: none !important; }
+                  [data-print="sop"] { display: block !important; background: white !important; padding: 32px !important; }
+                  header, aside, .studio-gradient, [class*="fixed"] { display: none !important; }
+                  .shadow-card { box-shadow: none !important; }
+                  img { max-width: 100% !important; page-break-inside: avoid; }
+                  article { page-break-inside: avoid; margin-bottom: 24px !important; }
+                }`;
+                document.head.appendChild(style);
+                setTimeout(() => {
+                  window.print();
+                  setTimeout(() => document.getElementById('sb-print-style')?.remove(), 1000);
+                }, 120);
+              }}
+            >
+              Export PDF
+            </Button>
+            <Button
+              variant="ghost"
+              size="md"
+              icon={I.Code2}
+              onClick={() => setShowEmbed(v => !v)}
+            >
+              Embed
+            </Button>
+            <Button
+              variant="ghost"
+              size="md"
+              icon={isExportingVideo ? I.Loader : I.Video}
+              onClick={handleSOPVideoExport}
+              disabled={isExportingVideo}
+            >
+              {isExportingVideo ? 'Recording...' : 'Export as Video (.webm)'}
+            </Button>
             <Button variant="primary" size="md" icon={I.Share2}>Publish & share</Button>
           </div>
+
+          {session.videoKey && (
+            <div className="mt-8 pt-8 border-t border-border">
+              <div className="flex items-center justify-center gap-3">
+                <div className="flex -space-x-2">
+                  <div className="w-8 h-8 rounded-full border-2 border-surface bg-primary/10 flex items-center justify-center text-primary">
+                    <I.Video size={14} />
+                  </div>
+                </div>
+                <div className="text-left">
+                  <p className="text-[13px] font-semibold text-text">Full screen recording available</p>
+                  <p className="text-[12px] text-text-3">Watch the real-time video of this session</p>
+                </div>
+                <Button 
+                  variant="primary" 
+                  size="sm" 
+                  className="ml-4" 
+                  onClick={() => useStudioStore.getState().setActiveView('video')}
+                >
+                  Switch to Video SOP
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <AnimatePresence>
+            {showEmbed && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-6 text-left">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[12px] font-semibold text-text-2 uppercase tracking-wider">
+                      Embed code
+                    </span>
+                    <button
+                      onClick={handleCopy}
+                      className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-primary hover:opacity-80 transition-opacity"
+                    >
+                      {copied ? <I.Check size={13} strokeWidth={2.5} /> : <I.Copy size={13} strokeWidth={2} />}
+                      {copied ? 'Copied!' : 'Copy code'}
+                    </button>
+                  </div>
+                  <pre className="bg-surface-2 rounded-sm p-4 text-[11.5px] font-mono text-text-2 overflow-x-auto whitespace-pre border border-border">
+                    {iframeCode}
+                  </pre>
+                  <p className="text-[11.5px] text-text-3 mt-2">
+                    Paste into Notion (as embed), Confluence, or any HTML page.
+                    The viewer does not need to be signed in.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>
@@ -355,21 +519,31 @@ const SOPCanvas: React.FC = () => {
 };
 
 const VideoCanvas: React.FC = () => {
-  const { 
-    session, 
-    currentStepIndex, 
-    isPlaying, 
+  const {
+    session,
+    currentStepIndex,
+    isPlaying,
     playbackRate,
-    setPlaying, 
-    setStepIndex 
+    setPlaying,
+    setStepIndex,
+    brand
   } = useStudioStore();
 
   const [audio] = useState(new Audio());
   const [isEnded, setIsEnded] = useState(false);
-  const [zoomPhase, setZoomPhase] = useState<'in' | 'hold' | 'out'>('in');
   const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [showIntroSlide, setShowIntroSlide] = React.useState(false);
+  const [introVisible, setIntroVisible] = React.useState(false);
+  const [showOutroSlide, setShowOutroSlide] = React.useState(false);
+  const [outroVisible, setOutroVisible] = React.useState(false);
+  const [ghostText, setGhostText] = React.useState('');
+  const [ghostVisible, setGhostVisible] = React.useState(false);
+  const ghostIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const playerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const videoUrl = session?.videoKey ? (session.assets?.[session.videoKey] ?? null) : null;
 
   const steps = session?.steps || [];
   const currentStep = steps[currentStepIndex];
@@ -429,18 +603,65 @@ const VideoCanvas: React.FC = () => {
     restDelta: 0.001
   };
 
-  // Reset zoom phase on context change
+
+
   useEffect(() => {
-    if (!hasZoom) {
-      setZoomPhase('in');
-      return;
+    if (ghostIntervalRef.current) {
+      clearInterval(ghostIntervalRef.current);
+      ghostIntervalRef.current = null;
     }
-    if (!sameContext) {
-      setZoomPhase('in');
-      const inTimer = setTimeout(() => setZoomPhase('hold'), 600);
-      return () => clearTimeout(inTimer);
+    setGhostText('');
+    setGhostVisible(false);
+
+    if (!isPlaying) return;
+    const value = currentStep?.inputValue;
+    if (!value || currentStep?.action !== 'input') return;
+
+    setGhostVisible(true);
+    let i = 0;
+    ghostIntervalRef.current = setInterval(() => {
+      i++;
+      setGhostText(value.slice(0, i));
+      if (i >= value.length) {
+        if (ghostIntervalRef.current) clearInterval(ghostIntervalRef.current);
+        ghostIntervalRef.current = null;
+      }
+    }, 60);
+
+    return () => {
+      if (ghostIntervalRef.current) {
+        clearInterval(ghostIntervalRef.current);
+        ghostIntervalRef.current = null;
+      }
+    };
+  }, [currentStepIndex, isPlaying]);
+
+  // Sync video playback and seeking
+  useEffect(() => {
+    if (!videoRef.current || !videoUrl) return;
+    const step = steps[currentStepIndex];
+    if (step?.timestamp != null) {
+      const targetTime = step.timestamp / 1000;
+      // Only seek if far enough away to avoid jitter
+      if (Math.abs(videoRef.current.currentTime - targetTime) > 0.5) {
+        videoRef.current.currentTime = targetTime;
+      }
     }
-  }, [currentStepIndex, hasZoom, sameContext]);
+  }, [currentStepIndex, videoUrl]);
+
+  useEffect(() => {
+    if (!videoRef.current || !videoUrl) return;
+    if (isPlaying) {
+      videoRef.current.play().catch(() => {});
+    } else {
+      videoRef.current.pause();
+    }
+  }, [isPlaying, videoUrl]);
+
+  useEffect(() => {
+    if (!videoRef.current || !videoUrl) return;
+    videoRef.current.playbackRate = playbackRate;
+  }, [playbackRate, videoUrl]);
 
   const advanceStep = React.useCallback(() => {
     const chapter = chapterMap.get(currentStep?.id);
@@ -452,8 +673,23 @@ const VideoCanvas: React.FC = () => {
           if (currentStepIndex < steps.length - 1) {
             setStepIndex(currentStepIndex + 1);
           } else {
-            setPlaying(false);
-            setIsEnded(true);
+            if (brand.showOutro) {
+              setShowOutroSlide(true);
+              setOutroVisible(true);
+              setTimeout(() => {
+                setOutroVisible(false);
+                setTimeout(() => {
+                  setShowOutroSlide(false);
+                  setPlaying(false);
+                  setShowIntroSlide(false);
+                  setIsEnded(true);
+                }, 400);
+              }, 3000);
+            } else {
+              setPlaying(false);
+              setShowIntroSlide(false);
+              setIsEnded(true);
+            }
           }
         }, 300);
       }, 2000);
@@ -465,24 +701,53 @@ const VideoCanvas: React.FC = () => {
     const willStayInContext = isSameContext(currentStep, nextStep);
 
     if (hasZoom && !willStayInContext) {
-      setZoomPhase('out'); 
       setTimeout(() => {
         if (currentStepIndex < steps.length - 1) {
           setStepIndex(currentStepIndex + 1);
         } else {
-          setPlaying(false);
-          setIsEnded(true);
+          if (brand.showOutro) {
+            setShowOutroSlide(true);
+            setOutroVisible(true);
+            setTimeout(() => {
+              setOutroVisible(false);
+              setTimeout(() => {
+                setShowOutroSlide(false);
+                setPlaying(false);
+                setShowIntroSlide(false);
+                setIsEnded(true);
+              }, 400);
+            }, 3000);
+          } else {
+            setPlaying(false);
+            setShowIntroSlide(false);
+            setIsEnded(true);
+          }
         }
       }, 400);
     } else {
       if (currentStepIndex < steps.length - 1) {
         setStepIndex(currentStepIndex + 1);
       } else {
-        setPlaying(false);
-        setIsEnded(true);
+        if (brand.showOutro) {
+          setShowOutroSlide(true);
+          setOutroVisible(true);
+          setTimeout(() => {
+            setOutroVisible(false);
+            setTimeout(() => {
+              setShowOutroSlide(false);
+              setPlaying(false);
+              setShowIntroSlide(false);
+              setIsEnded(true);
+            }, 400);
+          }, 3000);
+        } else {
+          setPlaying(false);
+          setShowIntroSlide(false);
+          setIsEnded(true);
+        }
       }
     }
-  }, [currentStepIndex, steps.length, hasZoom, currentStep, chapterMap, setStepIndex, setPlaying]);
+  }, [currentStepIndex, steps.length, hasZoom, currentStep, chapterMap, setStepIndex, setPlaying, brand.showOutro]);
 
   // Voiceover playback
   useEffect(() => {
@@ -528,50 +793,46 @@ const VideoCanvas: React.FC = () => {
 
   // Export via MediaRecorder
   async function handleExport() {
-    const canCapture = !!(playerRef.current as any)?.captureStream || !!(playerRef.current as any)?.mozCaptureStream;
+    if (!playerRef.current || isExporting) return;
+    const canCapture = !!(playerRef.current as any).captureStream ||
+                       !!(playerRef.current as any).mozCaptureStream;
     if (!canCapture) {
-      alert('Export requires Chrome. Please open this page in Chrome to export video.');
+      alert('Export requires Chrome.');
       return;
     }
-    if (!playerRef.current || isExporting) return;
     setIsExporting(true);
-    try {
-      const stream = (playerRef.current as any).captureStream
-        ? (playerRef.current as any).captureStream(30)
-        : (playerRef.current as any).mozCaptureStream(30);
+    setStepIndex(0);
 
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9' : 'video/webm';
-      const recorder = new MediaRecorder(stream, { mimeType });
+    await new Promise<void>(res => setTimeout(res, 300));
 
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${session?.aiOutputs?.title || 'studiobase'}.webm`;
-        a.click();
-        URL.revokeObjectURL(url);
-        setIsExporting(false);
-      };
-
-      recorder.start();
-      setStepIndex(0);
-      setPlaying(true);
-
-      // Poll for playback end to stop recording
-      const pollInterval = setInterval(() => {
-        if (!useStudioStore.getState().isPlaying) {
-          recorder.stop();
-          clearInterval(pollInterval);
-        }
-      }, 500);
-    } catch (err) {
-      console.error('Export failed:', err);
+    const stream = (playerRef.current as any).captureStream
+      ? (playerRef.current as any).captureStream(30)
+      : (playerRef.current as any).mozCaptureStream(30);
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9' : 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${session?.aiOutputs?.title || 'studiobase-video'}.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
       setIsExporting(false);
-    }
+    };
+
+    recorder.start();
+    setPlaying(true);
+
+    const poll = setInterval(() => {
+      if (!useStudioStore.getState().isPlaying) {
+        recorder.stop();
+        clearInterval(poll);
+      }
+    }, 500);
   }
 
   if (!session) return null;
@@ -616,16 +877,27 @@ const VideoCanvas: React.FC = () => {
             transition={springTransition}
             className="absolute inset-0 origin-center"
           >
-            <ScreenshotPlaceholder
-              step={currentStep}
-              session={session}
-              showChrome={false}
-              aspect="16/9"
-              rounded=""
-              mode="stage"
-              parallaxOffset={{ x: tx, y: ty }}
-              className="w-full h-full !shadow-none"
-            />
+            {videoUrl ? (
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                className="w-full h-full object-cover"
+                muted
+                playsInline
+                preload="auto"
+              />
+            ) : (
+              <ScreenshotPlaceholder
+                step={currentStep}
+                session={session}
+                showChrome={false}
+                aspect="16/9"
+                rounded=""
+                mode="stage"
+                parallaxOffset={{ x: tx, y: ty }}
+                className="w-full h-full !shadow-none"
+              />
+            )}
           </motion.div>
         </div>
 
@@ -658,13 +930,22 @@ const VideoCanvas: React.FC = () => {
                     )}
                   </div>
                 )}
+                {anno.shape === 'blur' && (
+                  <div
+                    className="absolute pointer-events-none w-full h-full"
+                    style={{
+                      backdropFilter: 'blur(12px)',
+                      background: 'rgba(0,0,0,0.3)',
+                    }}
+                  />
+                )}
               </motion.div>
             ))}
           </AnimatePresence>
         </div>
 
         {/* Synthetic Cursor */}
-        {isPlaying && currentStep?.coordinates && (
+        {isPlaying && currentStep?.data?.coordinates && (
           <motion.div
             className="absolute pointer-events-none z-20"
             initial={{ left: `${cursorStartX}%`, top: `${cursorStartY}%` }}
@@ -675,17 +956,104 @@ const VideoCanvas: React.FC = () => {
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
               <path d="M4 2L20 12L12 13L8 22L4 2Z" fill="white" stroke="black" strokeWidth="1.5" strokeLinejoin="round"/>
             </svg>
-            {zoomPhase === 'in' && (
-              <motion.div
-                className="absolute rounded-full border-2 border-primary"
-                style={{ width: 32, height: 32, top: -12, left: -12 }}
-                initial={{ scale: 0, opacity: 0.8 }}
-                animate={{ scale: 2, opacity: 0 }}
-                transition={{ duration: 0.5, ease: 'easeOut' }}
-              />
-            )}
+            <AnimatePresence>
+              {isPlaying && (
+                <>
+                  <motion.div
+                    key={`ripple-1-${currentStepIndex}`}
+                    className="absolute rounded-full border-2 border-primary"
+                    style={{ width: 32, height: 32, top: -12, left: -12 }}
+                    initial={{ scale: 0, opacity: 0.75 }}
+                    animate={{ scale: 2.2, opacity: 0 }}
+                    transition={{ duration: 0.6, ease: 'easeOut' }}
+                  />
+                  <motion.div
+                    key={`ripple-2-${currentStepIndex}`}
+                    className="absolute rounded-full border border-primary"
+                    style={{ width: 32, height: 32, top: -12, left: -12 }}
+                    initial={{ scale: 0, opacity: 0.5 }}
+                    animate={{ scale: 2.8, opacity: 0 }}
+                    transition={{ duration: 0.6, ease: 'easeOut', delay: 0.12 }}
+                  />
+                </>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
+
+        {/* Ghost Typing */}
+        <AnimatePresence>
+          {ghostVisible && ghostText && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
+            >
+              <div className="bg-black/75 backdrop-blur-sm text-white px-4 py-2 rounded-lg
+                              text-[15px] font-mono shadow-card-lifted flex items-center gap-2
+                              max-w-[460px] overflow-hidden">
+                <I.Type size={13} className="opacity-60 shrink-0" />
+                <span className="truncate">{ghostText}</span>
+                <span className="w-px h-4 bg-white/80 animate-pulse shrink-0" />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Intro Slide */}
+        <AnimatePresence>
+          {showIntroSlide && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: introVisible ? 1 : 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.4 }}
+              className="absolute inset-0 z-30 flex flex-col items-center justify-center text-white text-center px-10"
+              style={{
+                background: `linear-gradient(135deg, ${brand.primaryColor}f0, ${brand.primaryColor})`
+              }}
+            >
+              {brand.logoUrl ? (
+                <img src={brand.logoUrl} className="h-14 object-contain mb-6 drop-shadow-lg" />
+              ) : (
+                <div className="text-5xl font-bold mb-4 tracking-tight drop-shadow-lg">
+                  {session?.aiOutputs?.title}
+                </div>
+              )}
+              <p className="text-white/70 text-[15px] font-medium tracking-wide uppercase">
+                A StudioBase walkthrough
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Outro Slide */}
+        <AnimatePresence>
+          {showOutroSlide && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: outroVisible ? 1 : 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.4 }}
+              className="absolute inset-0 z-30 flex flex-col items-center justify-center text-white text-center px-10"
+              style={{
+                background: `linear-gradient(135deg, ${brand.primaryColor}f0, ${brand.primaryColor})`
+              }}
+            >
+              {brand.logoUrl && (
+                <img src={brand.logoUrl} className="h-12 object-contain mb-6 drop-shadow-lg" />
+              )}
+              <div className="text-4xl font-bold mb-3 tracking-tight drop-shadow-lg">
+                {session?.aiOutputs?.title}
+              </div>
+              {brand.watermark && (
+                <p className="text-white/70 text-[15px] font-medium">{brand.watermark}</p>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Chapter Title Card */}
         <AnimatePresence>
@@ -694,7 +1062,8 @@ const VideoCanvas: React.FC = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-gradient-to-br from-primary/90 to-primary flex items-center justify-center z-30"
+              className="absolute inset-0 flex items-center justify-center z-30"
+              style={{ background: `linear-gradient(135deg, ${brand.primaryColor}e6, ${brand.primaryColor})` }}
             >
               <div className="text-center text-white">
                 <p className="text-sm font-semibold opacity-70 uppercase tracking-widest mb-3">Chapter</p>
@@ -704,22 +1073,67 @@ const VideoCanvas: React.FC = () => {
           )}
         </AnimatePresence>
 
+        {/* Watermark */}
+        {brand.watermark && (
+          <div
+            className="absolute bottom-3 right-4 z-10 pointer-events-none"
+            style={{ opacity: 0.55 }}
+          >
+            {brand.logoUrl
+              ? <img src={brand.logoUrl} className="h-5 object-contain" />
+              : <span className="text-white text-[11px] font-semibold tracking-wide">
+                  {brand.watermark}
+                </span>
+            }
+          </div>
+        )}
+
         {/* Player Controls Overlay */}
         <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300">
           <div className="p-6 flex items-center gap-4">
             <button
-              onClick={() => setPlaying(!isPlaying)}
+              onClick={() => {
+                if (!isPlaying && currentStepIndex === 0 && brand.showIntro) {
+                  setShowIntroSlide(true);
+                  setIntroVisible(true);
+                  setTimeout(() => {
+                    setIntroVisible(false);
+                    setTimeout(() => {
+                      setShowIntroSlide(false);
+                      setPlaying(true);
+                    }, 400);
+                  }, 3000);
+                } else {
+                  setPlaying(!isPlaying);
+                }
+              }}
               className="w-12 h-12 rounded-full glass-dark flex items-center justify-center text-white hover:scale-105 transition active:scale-95"
             >
               {isPlaying ? <I.Pause size={20} fill="currentColor" /> : <I.Play size={20} fill="currentColor" className="translate-x-0.5" />}
             </button>
 
             <div className="flex-1 flex flex-col gap-1.5">
-              <div className="h-1.5 rounded-full bg-white/20 overflow-hidden relative">
+              <div className="h-1.5 rounded-full bg-white/20 relative" style={{ overflow: 'visible' }}>
                 <motion.div
-                  className="absolute inset-y-0 left-0 bg-primary"
+                  className="absolute inset-y-0 left-0 bg-primary rounded-full"
                   animate={{ width: `${((currentStepIndex + 1) / steps.length) * 100}%` }}
                 />
+                {(session?.metadata?.chapterBreaks || []).map(c => {
+                  const stepIdx = steps.findIndex(s => s.id === c.afterStepId);
+                  if (stepIdx < 0) return null;
+                  const pct = ((stepIdx + 1) / steps.length) * 100;
+                  return (
+                    <div
+                      key={c.afterStepId}
+                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
+                      style={{ left: `${pct}%` }}
+                      title={c.chapterTitle}
+                    >
+                      <div className="w-2.5 h-2.5 rounded-full bg-white border-2 shadow-sm"
+                           style={{ borderColor: brand.primaryColor }} />
+                    </div>
+                  );
+                })}
               </div>
               <div className="flex justify-between text-[11px] font-bold text-white/80 tracking-wider">
                 <span>STEP {currentStepIndex + 1} OF {steps.length}</span>
@@ -759,7 +1173,21 @@ const VideoCanvas: React.FC = () => {
         {!isPlaying && currentStepIndex === 0 && !isEnded && (
           <div className="absolute inset-0 bg-black/10 backdrop-blur-[2px] flex items-center justify-center">
             <button
-              onClick={() => setPlaying(true)}
+              onClick={() => {
+                if (!isPlaying && currentStepIndex === 0 && brand.showIntro) {
+                  setShowIntroSlide(true);
+                  setIntroVisible(true);
+                  setTimeout(() => {
+                    setIntroVisible(false);
+                    setTimeout(() => {
+                      setShowIntroSlide(false);
+                      setPlaying(true);
+                    }, 400);
+                  }, 3000);
+                } else {
+                  setPlaying(!isPlaying);
+                }
+              }}
               className="w-24 h-24 rounded-full glass shadow-card-lifted flex items-center justify-center text-text hover:scale-110 transition active:scale-95 group"
             >
               <div className="w-20 h-20 rounded-full border-2 border-primary/20 flex items-center justify-center group-hover:border-primary/40 transition">
@@ -772,10 +1200,21 @@ const VideoCanvas: React.FC = () => {
 
       {/* Caption */}
       <div className="mt-4 text-center max-w-2xl h-[72px] overflow-hidden flex flex-col justify-start">
-        <h3 className="text-[20px] font-semibold text-text leading-snug line-clamp-1">{session.aiOutputs.title}</h3>
-        <p className="text-[14px] text-text-2 mt-1 leading-relaxed line-clamp-2">
-          {currentStep?.textOverride || currentStep?.generatedText || 'Watch this smart walkthrough generated by StudioBase AI.'}
-        </p>
+        <h3 className="text-[20px] font-semibold text-text leading-snug line-clamp-1">
+          {session.aiOutputs.title}
+        </h3>
+        <AnimatePresence mode="wait">
+          <motion.p
+            key={currentStepIndex}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="text-[14px] text-text-2 mt-1 leading-relaxed line-clamp-2"
+          >
+            {currentStep?.textOverride || currentStep?.generatedText || 'Watch this smart walkthrough generated by StudioBase AI.'}
+          </motion.p>
+        </AnimatePresence>
       </div>
 
       {/* Export Button */}
@@ -787,8 +1226,202 @@ const VideoCanvas: React.FC = () => {
           onClick={handleExport}
           disabled={isExporting}
         >
-          {isExporting ? 'Exporting...' : 'Export Video'}
+          {isExporting ? 'Exporting...' : 'Export Video (.webm)'}
         </Button>
+      </div>
+    </div>
+  );
+};
+
+const DemoCanvas: React.FC = () => {
+  const { session, setActiveView, brand } = useStudioStore();
+  const [stepIndex, setStepIndex] = React.useState(0);
+  const [showChapter, setShowChapter] = React.useState<string | null>(null);
+  const [isExporting, setIsExporting] = React.useState(false);
+  const demoRef = React.useRef<HTMLDivElement>(null);
+
+  const steps = session?.steps || [];
+  const step = steps[stepIndex];
+  const chapterMap = new Map(
+    (session?.metadata?.chapterBreaks || []).map(c => [c.afterStepId, c])
+  );
+
+  const advance = React.useCallback(() => {
+    const chapter = chapterMap.get(step?.id);
+    if (chapter) {
+      setShowChapter(chapter.chapterTitle);
+      setTimeout(() => {
+        setShowChapter(null);
+        setStepIndex(i => Math.min(steps.length - 1, i + 1));
+      }, 2000);
+      return;
+    }
+    setStepIndex(i => Math.min(steps.length - 1, i + 1));
+  }, [step, steps.length, chapterMap]);
+
+  const retreat = React.useCallback(() => {
+    setStepIndex(i => Math.max(0, i - 1));
+  }, []);
+
+  const handleDemoExport = async () => {
+    if (!demoRef.current || isExporting) return;
+    const canCapture = !!(demoRef.current as any).captureStream ||
+                       !!(demoRef.current as any).mozCaptureStream;
+    if (!canCapture) { alert('Export requires Chrome.'); return; }
+    setIsExporting(true);
+    setStepIndex(0);
+    await new Promise<void>(res => setTimeout(res, 400));
+
+    const stream = (demoRef.current as any).captureStream
+      ? (demoRef.current as any).captureStream(30)
+      : (demoRef.current as any).mozCaptureStream(30);
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9' : 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${session?.aiOutputs?.title || 'studiobase-demo'}.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setIsExporting(false);
+    };
+    recorder.start();
+
+    const totalSteps = steps.length;
+    let current = 0;
+    const advanceAndRecord = () => {
+      if (current >= totalSteps - 1) {
+        setTimeout(() => recorder.stop(), 1500);
+        return;
+      }
+      current++;
+      setStepIndex(current);
+      setTimeout(advanceAndRecord, 2500);
+    };
+    setTimeout(advanceAndRecord, 2000);
+  };
+
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setActiveView('sop');
+      if (e.key === ' ' || e.key === 'ArrowRight') { e.preventDefault(); advance(); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); retreat(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [advance, retreat, setActiveView]);
+
+  if (!session || !step) return null;
+
+  const coords = step.data?.coordinates;
+  const hotspotX = coords ? (coords.x / (coords.viewportWidth || 1440)) * 100 : 50;
+  const hotspotY = coords ? (coords.y / (coords.viewportHeight || 900)) * 100 : 50;
+  const stepText = step.textOverride || step.generatedText || '';
+
+  return (
+    <div
+      ref={demoRef}
+      className="flex-1 relative bg-black flex flex-col overflow-hidden"
+      onClick={advance}
+      style={{ cursor: 'pointer' }}
+    >
+      {/* Screenshot fullscreen */}
+      <div className="absolute inset-0">
+        <ScreenshotPlaceholder
+          step={step}
+          session={session}
+          showChrome={false}
+          aspect="16/9"
+          rounded=""
+          mode="stage"
+          className="w-full h-full !shadow-none"
+        />
+      </div>
+
+      {/* Hotspot */}
+      {coords && (
+        <div
+          className="absolute z-10 pointer-events-none"
+          style={{ left: `${hotspotX}%`, top: `${hotspotY}%`, transform: 'translate(-50%, -50%)' }}
+        >
+          <div
+            className="w-8 h-8 rounded-full border-4 border-white shadow-lg"
+            style={{
+              background: brand.primaryColor + '99',
+              animation: 'demo-pulse 1.4s ease-in-out infinite',
+            }}
+          />
+          {stepText && (
+            <div
+              className="absolute left-1/2 -translate-x-1/2 mt-3 top-full bg-black/80 text-white text-[13px] leading-snug px-3 py-2 rounded-lg shadow-xl max-w-[260px] text-center pointer-events-none"
+              style={{ whiteSpace: 'pre-wrap' }}
+            >
+              {stepText}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Chapter card */}
+      <AnimatePresence>
+        {showChapter && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-30 flex items-center justify-center"
+            style={{ background: `linear-gradient(135deg, ${brand.primaryColor}e6, ${brand.primaryColor})` }}
+          >
+            <div className="text-center text-white">
+              <p className="text-sm font-semibold opacity-70 uppercase tracking-widest mb-3">Chapter</p>
+              <h2 className="text-3xl font-bold">{showChapter}</h2>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Progress dots */}
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 z-20 pointer-events-none">
+        {steps.map((_, i) => (
+          <div
+            key={i}
+            className="rounded-full transition-all duration-200"
+            style={{
+              width: i === stepIndex ? 20 : 8,
+              height: 8,
+              background: i === stepIndex ? '#fff' : 'rgba(255,255,255,0.4)',
+            }}
+          />
+        ))}
+      </div>
+
+      {!isExporting ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); handleDemoExport(); }}
+          className="absolute bottom-16 right-4 z-20 h-8 px-3 rounded-pill
+                     bg-black/60 text-white/80 text-[12px] font-semibold
+                     hover:bg-black/80 transition-colors flex items-center gap-1.5"
+        >
+          <I.Download size={13} /> Export (.webm)
+        </button>
+      ) : (
+        <div className="absolute bottom-16 right-4 z-20 h-8 px-3 rounded-pill
+                        bg-black/60 text-white/60 text-[12px] font-semibold
+                        flex items-center gap-1.5">
+          <I.Loader size={13} className="animate-spin" /> Recording…
+        </div>
+      )}
+
+      {/* Escape hint */}
+      <div className="absolute top-4 right-4 z-20 pointer-events-none">
+        <div className="bg-black/50 text-white/60 text-[11px] px-2 py-1 rounded font-mono">
+          ESC to exit
+        </div>
       </div>
     </div>
   );

@@ -5,7 +5,8 @@ import {
   Sparkles, Play, Pause, Eye, X, Check, CheckCircle, Clock, Languages, Type, 
   Highlighter, MousePointer, Circle, Square, User, Users, Folder, PlusCircle, 
   Globe, Filter, Grid, List, Wand, Upload, MousePointer2 as Cursor, Crosshair, 
-  Command, History, Headphones, Volume2 as Volume, Wand2, Zap, Move, Copy
+  Command, History, Headphones, Volume2 as Volume, Wand2, Zap, Move, Copy, EyeOff, Presentation,
+  Code2, Video, Loader2 as Loader
 } from 'lucide-react';
 
 export const I = {
@@ -15,5 +16,6 @@ export const I = {
   Sparkles, Play, Pause, Eye, X, Check, CheckCircle, Clock, Languages, Type,
   Highlighter, MousePointer, Circle, Square, User, Users, Folder, PlusCircle,
   Globe, Filter, Grid, List, Wand, Upload, Cursor, Crosshair, Command, History,
-  Headphones, Volume, Wand2, Zap, Move, Copy
+  Headphones, Volume, Wand2, Zap, Move, Copy, EyeOff, Presentation,
+  Code2, Video, Loader
 };

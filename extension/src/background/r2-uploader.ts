@@ -10,6 +10,7 @@ import { sbLog } from "../logger";
 export async function uploadSession(
   session: Session,
   onProgress?: (pct: number) => void,
+  videoBlob?: Blob | null,
 ): Promise<string> {
   // 1. Fetch the authenticated user and workspace
   const { sb_user, workspaceId } = (await chrome.storage.local.get([
@@ -114,10 +115,36 @@ export async function uploadSession(
 
   if (onProgress) onProgress(50);
 
+  let videoKey: string | null = null;
+  if (videoBlob) {
+    videoKey = `sessions/${activeSessionId}/screen-recording.webm`;
+    const presignRes = await fetch(`${BACKEND_URL}/upload/presign`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: activeSessionId,
+        files: [{ key: videoKey, contentType: 'video/webm' }]
+      })
+    });
+    
+    if (presignRes.ok) {
+      const presignData = await presignRes.json();
+      const uploadUrl = presignData.files?.[0]?.uploadUrl;
+      if (uploadUrl) {
+        await fetch(uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'video/webm', Authorization: `Bearer ${token}` },
+          body: videoBlob
+        });
+      }
+    }
+  }
+
   // 4. Assemble the final session envelope
   const finalEnvelope = {
     ...session,
     screenshots: screenshotMetadata,
+    videoKey: videoKey || null,
   };
 
   // 5. Upload the final session JSON
@@ -186,6 +213,7 @@ export async function uploadSession(
       body: JSON.stringify({
         status: "uploaded",
         r2JsonKey: jsonKey,
+        r2VideoKey: videoKey || undefined,
         stepCount,
         durationMs,
       }),

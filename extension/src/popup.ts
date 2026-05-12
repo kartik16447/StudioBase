@@ -37,6 +37,7 @@ const btnOpenStudio = document.getElementById("btn-open-studio")!;
 const btnRecordAgain = document.getElementById("btn-record-again")!;
 const btnTryAgain = document.getElementById("btn-try-again")!;
 const btnToggleMic = document.getElementById("btn-toggle-mic") as HTMLButtonElement;
+const btnToggleVideo = document.getElementById("btn-toggle-video") as HTMLButtonElement;
 const btnSkipCountdown = document.getElementById("btn-skip-countdown") as HTMLButtonElement;
 
 const recTimer = document.getElementById("rec-timer")!;
@@ -53,6 +54,7 @@ let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let pendingCountdownTarget: AppState["target"] | null = null;
 let hasMicPermission = false;
 let isMicEnabled = false;
+let isVideoEnabled = true;
 
 // 1. Initial State Load
 chrome.storage.local.get(["sb_user", "sb_state", "email", "picture"], (stored: any) => {
@@ -112,6 +114,12 @@ function renderMicToggleState() {
   if (isMicEnabled) btnToggleMic.classList.add("active");
 }
 
+function renderVideoToggleState() {
+  btnToggleVideo.classList.remove("active");
+  btnToggleVideo.title = isVideoEnabled ? "Disable Screen Video" : "Enable Screen Video";
+  if (isVideoEnabled) btnToggleVideo.classList.add("active");
+}
+
 async function detectMicPermissionState() {
   try {
     if (navigator.permissions?.query) {
@@ -131,6 +139,7 @@ async function detectMicPermissionState() {
     hasMicPermission = false;
   }
   renderMicToggleState();
+  renderVideoToggleState();
 }
 
 async function handleSignIn() {
@@ -190,6 +199,7 @@ async function sendStartRecording(target: AppState["target"]) {
     const payloadTarget = {
       ...target,
       includeMic: hasMicPermission && isMicEnabled,
+      includeVideo: isVideoEnabled,
       userTitle: recTitleInput?.value?.trim() || '',
       streamId: null,
     };
@@ -310,6 +320,11 @@ btnToggleMic.addEventListener("click", async () => {
   }
   isMicEnabled = !isMicEnabled;
   renderMicToggleState();
+});
+
+btnToggleVideo.addEventListener("click", () => {
+  isVideoEnabled = !isVideoEnabled;
+  renderVideoToggleState();
 });
 
 btnSkipCountdown.addEventListener("click", () => {

@@ -9,12 +9,21 @@ interface Route {
   params: Record<string, any>;
 }
 
+interface BrandState {
+  primaryColor: string;
+  font: string;
+  showIntro: boolean;
+  showOutro: boolean;
+  watermark: string;
+  logoUrl: string | null;
+}
+
 interface StudioState {
   route: Route;
   session: SessionEnvelope | null;
   activeTab: string;
   isPanelOpen: boolean;
-  activeView: 'sop' | 'video';
+  activeView: 'sop' | 'video' | 'demo';
   activeTool: string;
   isToolbarVisible: boolean;
   focusedStepId: string | null;
@@ -29,12 +38,15 @@ interface StudioState {
   scrollTrigger: number;
   sessionError: string | null;
 
+  brand: BrandState;
+  setBrand: (updates: Partial<BrandState>) => void;
+
   // Actions
   navigate: (name: RouteName, params?: Record<string, any>) => void;
   setSession: (session: SessionEnvelope | null) => void;
   setActiveTab: (id: string) => void;
   togglePanel: () => void;
-  setActiveView: (view: 'sop' | 'video') => void;
+  setActiveView: (view: 'sop' | 'video' | 'demo') => void;
   setActiveTool: (tool: string) => void;
   toggleToolbar: () => void;
   setFocusStep: (id: string | null) => void;
@@ -68,6 +80,19 @@ export const useStudioStore = create<StudioState>((set) => ({
   currentTime: 0,
   scrollTrigger: 0,
   sessionError: null,
+
+  brand: {
+    primaryColor: '#5E5CE6',
+    font: 'Inter',
+    showIntro: true,
+    showOutro: false,
+    watermark: 'StudioBase',
+    logoUrl: null,
+  },
+
+  setBrand: (updates) => set((state) => ({
+    brand: { ...state.brand, ...updates },
+  })),
 
   navigate: (name, params = {}) => set({ route: { name, params } }),
   setSession: (session) => {
@@ -171,6 +196,7 @@ export const useStudioStore = create<StudioState>((set) => ({
             summary: sessionData.aiOutputs?.summary || (pipelineSteps.length ? '' : 'Session captured — AI processing pending.'),
             tags: sessionData.aiOutputs?.tags || [],
           },
+          videoKey: sessionData.videoKey || data.videoKey || null,
           brand: null,
         };
       }
@@ -222,7 +248,24 @@ export const useStudioStore = create<StudioState>((set) => ({
             assets[step.voiceoverKey] = `${BACKEND_URL}/assets/${step.voiceoverKey}`;
           }
         }
+        if (sessionData.videoKey) {
+          assets[sessionData.videoKey] = `${BACKEND_URL}/assets/${sessionData.videoKey}`;
+        }
         sessionData.assets = assets;
+      }
+
+      if (sessionData.brand) {
+        set((state) => ({
+          brand: {
+            ...state.brand,
+            primaryColor: sessionData.brand.primaryColor ?? state.brand.primaryColor,
+            logoUrl: sessionData.brand.logoUrl ?? state.brand.logoUrl,
+            watermark: sessionData.brand.watermarkText ?? state.brand.watermark,
+            showIntro: sessionData.brand.introSlide ?? state.brand.showIntro,
+            showOutro: sessionData.brand.outroSlide ?? state.brand.showOutro,
+            font: sessionData.brand.fontFamily ?? state.brand.font,
+          },
+        }));
       }
 
       set({ session: sessionData });

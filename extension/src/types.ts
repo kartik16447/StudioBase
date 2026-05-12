@@ -11,6 +11,7 @@ export type AppStatus =
 
 export interface CaptureTarget {
   includeMic?: boolean;
+  includeVideo?: boolean;
   streamId?: string | null;
   tabId?: number;
   tabUrl?: string;
@@ -23,6 +24,8 @@ export interface AppState {
   sessionId?: string | null;
   localSessionId?: string | null;
   startedAt?: number | null;
+  includeMic?: boolean;
+  includeVideo?: boolean;
   target?: CaptureTarget | null;
   uploadProgress?: number;
   uploadUrl?: string | null;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import type { Step, SessionEnvelope } from '../../../../shared/types/session';
+import type { Step, SessionEnvelope, AnnotationShape } from '../../../../shared/types/session';
 import { I } from '../icons';
 import { 
   cn, Badge, IconButton, Tooltip, StepNumber, ScreenshotPlaceholder, 
@@ -56,6 +56,227 @@ const CopyLinkButton: React.FC<{ url: string }> = ({ url }) => {
   );
 };
 
+export const AnnotationCanvas: React.FC<{
+  step: Step;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  onSave: (annotation: NonNullable<Step['annotations']>[number]) => void;
+  onClear: () => void;
+}> = ({ step, containerRef: _containerRef, onSave, onClear }) => {
+  const { activeTool } = useStudioStore();
+  const [drawing, setDrawing] = React.useState(false);
+  const [startPct, setStartPct] = React.useState({ x: 0, y: 0 });
+  const [currentPct, setCurrentPct] = React.useState({ x: 0, y: 0 });
+  const [textInput, setTextInput] = React.useState<{ x: number; y: number } | null>(null);
+  const [textValue, setTextValue] = React.useState('');
+  const svgRef = React.useRef<SVGSVGElement>(null);
+
+  const isActive = activeTool !== 'cursor' && activeTool !== 'zoom' && activeTool !== 'move' && activeTool !== 'spotlight';
+  const annotations = step.annotations || [];
+
+  const getPct = (e: React.MouseEvent) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return {
+      x: Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100)),
+    };
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!isActive) return;
+    if (activeTool === 'text') {
+      const pct = getPct(e);
+      setTextInput(pct);
+      setTextValue('');
+      return;
+    }
+    e.preventDefault();
+    const pct = getPct(e);
+    setStartPct(pct);
+    setCurrentPct(pct);
+    setDrawing(true);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!drawing) return;
+    setCurrentPct(getPct(e));
+  };
+
+  const handleMouseUp = () => {
+    if (!drawing) return;
+    setDrawing(false);
+    const x = Math.min(startPct.x, currentPct.x);
+    const y = Math.min(startPct.y, currentPct.y);
+    const w = Math.abs(currentPct.x - startPct.x);
+    const h = Math.abs(currentPct.y - startPct.y);
+    if (w < 1 && h < 1) return;
+    const shape = activeTool === 'highlight' ? 'box'
+      : activeTool === 'blur' ? 'blur'
+      : activeTool === 'circle' ? 'circle'
+      : activeTool as AnnotationShape;
+    const color = activeTool === 'highlight' ? '#FFC107'
+      : activeTool === 'blur' ? 'blur'
+      : 'var(--color-primary, #5E5CE6)';
+    onSave({
+      id: `anno-${Date.now()}`,
+      shape,
+      x,
+      y,
+      width: w,
+      height: h,
+      color,
+    });
+  };
+
+  const handleTextSubmit = () => {
+    if (!textInput || !textValue.trim()) { setTextInput(null); return; }
+    onSave({
+      id: `anno-${Date.now()}`,
+      shape: 'text',
+      x: textInput.x,
+      y: textInput.y,
+      text: textValue.trim(),
+      color: 'var(--color-primary, #5E5CE6)',
+    });
+    setTextInput(null);
+    setTextValue('');
+  };
+
+  const draftX = Math.min(startPct.x, currentPct.x);
+  const draftY = Math.min(startPct.y, currentPct.y);
+  const draftW = Math.abs(currentPct.x - startPct.x);
+  const draftH = Math.abs(currentPct.y - startPct.y);
+
+  return (
+    <div className="absolute inset-0 z-10">
+      <svg
+        ref={svgRef}
+        className="absolute inset-0 w-full h-full"
+        style={{ cursor: isActive ? 'crosshair' : 'default', pointerEvents: isActive ? 'all' : 'none' }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => setDrawing(false)}
+      >
+        {/* Saved annotations */}
+        {annotations.map(a => {
+          if (a.shape === 'blur') return null;
+          if (a.shape === 'box') return (
+            <rect key={a.id}
+              x={`${a.x}%`} y={`${a.y}%`}
+              width={`${a.width}%`} height={`${a.height}%`}
+              fill={a.color === '#FFC107' ? 'rgba(255,193,7,0.25)' : 'none'}
+              stroke={a.color === '#FFC107' ? '#FFC107' : 'var(--color-primary,#5E5CE6)'}
+              strokeWidth="2" rx="3"
+            />
+          );
+          if (a.shape === 'arrow') {
+            const x1 = a.x; const y1 = a.y;
+            const x2 = (a.x + (a.width ?? 10)); const y2 = (a.y + (a.height ?? 10));
+            return (
+              <g key={a.id}>
+                <defs>
+                  <marker id={`ah-${a.id}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L8,3 z" fill="var(--color-primary,#5E5CE6)" />
+                  </marker>
+                </defs>
+                <line x1={`${x1}%`} y1={`${y1}%`} x2={`${x2}%`} y2={`${y2}%`}
+                  stroke="var(--color-primary,#5E5CE6)" strokeWidth="2.5"
+                  markerEnd={`url(#ah-${a.id})`} />
+              </g>
+            );
+          }
+          if (a.shape === 'circle') return (
+            <ellipse
+              key={a.id}
+              cx={`${a.x + (a.width ?? 10) / 2}%`}
+              cy={`${a.y + (a.height ?? 10) / 2}%`}
+              rx={`${(a.width ?? 10) / 2}%`}
+              ry={`${(a.height ?? 10) / 2}%`}
+              fill="none"
+              stroke="var(--color-primary,#5E5CE6)"
+              strokeWidth="2"
+            />
+          );
+          if (a.shape === 'text') return (
+            <foreignObject key={a.id} x={`${a.x}%`} y={`${a.y}%`} width="200" height="40">
+              <div className="bg-primary text-white text-[12px] font-bold px-2 py-1 rounded shadow-lg whitespace-nowrap" style={{ background: 'var(--color-primary,#5E5CE6)' }}>
+                {a.text}
+              </div>
+            </foreignObject>
+          );
+          return null;
+        })}
+
+        {/* Draft shape while drawing */}
+        {drawing && (activeTool === 'box' || activeTool === 'highlight' || activeTool === 'blur') && (
+          <rect
+            x={`${draftX}%`} y={`${draftY}%`}
+            width={`${draftW}%`} height={`${draftH}%`}
+            fill={activeTool === 'highlight' ? 'rgba(255,193,7,0.2)' : activeTool === 'blur' ? 'rgba(0,0,0,0.2)' : 'none'}
+            stroke={activeTool === 'highlight' ? '#FFC107' : activeTool === 'blur' ? '#888' : 'var(--color-primary,#5E5CE6)'}
+            strokeWidth="2" strokeDasharray="4 2" rx="3"
+          />
+        )}
+        {drawing && activeTool === 'circle' && (
+          <ellipse
+            cx={`${draftX + draftW / 2}%`}
+            cy={`${draftY + draftH / 2}%`}
+            rx={`${draftW / 2}%`}
+            ry={`${draftH / 2}%`}
+            fill="none"
+            stroke="var(--color-primary,#5E5CE6)"
+            strokeWidth="2" strokeDasharray="4 2"
+          />
+        )}
+        {drawing && activeTool === 'arrow' && (
+          <line x1={`${startPct.x}%`} y1={`${startPct.y}%`}
+            x2={`${currentPct.x}%`} y2={`${currentPct.y}%`}
+            stroke="var(--color-primary,#5E5CE6)" strokeWidth="2.5" strokeDasharray="4 2" />
+        )}
+      </svg>
+
+      {/* Blur annotations as DOM divs (backdrop-filter) */}
+      {annotations.filter(a => a.shape === 'blur').map(a => (
+        <div key={a.id}
+          className="absolute pointer-events-none"
+          style={{
+            left: `${a.x}%`, top: `${a.y}%`,
+            width: `${a.width}%`, height: `${a.height}%`,
+            backdropFilter: 'blur(12px)',
+            background: 'rgba(0,0,0,0.3)',
+          }}
+        />
+      ))}
+
+      {/* Text input popover */}
+      {textInput && (
+        <div className="absolute z-20" style={{ left: `${textInput.x}%`, top: `${textInput.y}%` }}>
+          <input
+            autoFocus
+            value={textValue}
+            onChange={e => setTextValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleTextSubmit(); if (e.key === 'Escape') setTextInput(null); }}
+            onBlur={handleTextSubmit}
+            placeholder="Type label…"
+            className="bg-white border-2 border-primary rounded px-2 py-1 text-[13px] outline-none shadow-card-lifted min-w-[120px]"
+          />
+        </div>
+      )}
+
+      {/* Clear button */}
+      {annotations.length > 0 && !isActive && (
+        <button
+          onClick={onClear}
+          className="absolute top-2 right-2 z-20 h-6 px-2 rounded-pill bg-surface/90 text-[11px] font-semibold text-text-2 hover:text-danger hover:bg-surface transition-colors shadow-card flex items-center gap-1"
+        >
+          <I.X size={10} /> Clear
+        </button>
+      )}
+    </div>
+  );
+};
+
 // ─── StepCard ──────────────────────────────────────────────────────────
 export const StepCard: React.FC<{
   step: Step;
@@ -67,7 +288,10 @@ export const StepCard: React.FC<{
   focused?: boolean;
   onFocus?: () => void;
 }> = ({ step, hue = 244, onEdit, onAnnotate, onDelete, focused, onFocus }) => {
-  const session = useStudioStore(state => state.session);
+  const { session, updateStep } = useStudioStore(state => ({
+    session: state.session,
+    updateStep: state.updateStep,
+  }));
   const text = step.textOverride || step.generatedText || '';
   return (
     <article
@@ -95,7 +319,18 @@ export const StepCard: React.FC<{
         )}
       </div>
 
-      <ScreenshotPlaceholder step={step} session={session} mode="blueprint" hue={hue} className="mb-5" />
+      <div className="relative mb-5">
+        <ScreenshotPlaceholder step={step} session={session} mode="blueprint" hue={hue} />
+        <AnnotationCanvas
+          step={step}
+          containerRef={React.useRef<HTMLDivElement>(null)}
+          onSave={(anno) => {
+            const existing = step.annotations || [];
+            updateStep(step.id, { annotations: [...existing, anno] });
+          }}
+          onClear={() => updateStep(step.id, { annotations: [] })}
+        />
+      </div>
 
       <p className="text-[16px] leading-[1.65] text-text relative z-10" style={{ textWrap: 'pretty' as any }}>
         {text}
@@ -307,17 +542,19 @@ export const SessionCard: React.FC<{
 
 // ─── FloatingToolbar ───────────────────────────────────────────────────
 export const FloatingToolbar: React.FC = () => {
-  const { isToolbarVisible, activeTool, setActiveTool } = useStudioStore();
+  const { isToolbarVisible, activeTool, setActiveTool, activeView } = useStudioStore();
   
-  if (!isToolbarVisible) return null;
+  if (!isToolbarVisible || activeView !== 'sop') return null;
 
   const tools = [
     { id: 'cursor',    icon: I.Cursor,     label: 'Select (V)', key: 'v' },
     { id: 'spotlight', icon: I.Crosshair,  label: 'Spotlight (S)', key: 's' },
     { id: 'highlight', icon: I.Highlighter, label: 'Highlight (B)', key: 'b' },
+    { id: 'circle', icon: I.Circle, label: 'Circle (C)', key: 'c' },
     { id: 'text',      icon: I.Type,        label: 'Text (T)', key: 't' },
     { id: 'zoom',      icon: I.ZoomIn,      label: 'Zoom (Z)', key: 'z' },
     { id: 'move',      icon: I.Move,        label: 'Move canvas', key: 'm' },
+    { id: 'blur', icon: I.EyeOff, label: 'Blur / Redact (R)', key: 'r' },
   ];
 
   return (
@@ -376,6 +613,15 @@ export const StudioTopBar: React.FC = () => {
           {activeView==='video' && <motion.span layoutId="view-bg" className="absolute inset-0 bg-white rounded-pill shadow-sm" />}
           <span className="relative inline-flex items-center gap-1.5">
             <I.Play size={14} /> Video Preview
+          </span>
+        </button>
+        <button
+          onClick={() => setActiveView('demo')}
+          className={cn('relative px-4 h-8 rounded-pill text-[12.5px] font-semibold transition-colors', activeView==='demo' ? 'text-text' : 'text-text-2')}
+        >
+          {activeView==='demo' && <motion.span layoutId="view-bg" className="absolute inset-0 bg-white rounded-pill shadow-sm" />}
+          <span className="relative inline-flex items-center gap-1.5">
+            <I.Presentation size={14} /> Demo
           </span>
         </button>
       </div>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../../store/useStudioStore';
 import { I } from '../icons';
 import { 
@@ -179,114 +180,170 @@ const ScriptStepRow: React.FC<{
 };
 
 // ─── Brand panel ───────────────────────────────────────────────────────
-export const BrandPanel: React.FC = () => {
-  const [primaryColor, setPrimaryColor] = useState('#5E5CE6');
-  const [font, setFont] = useState('SF Pro');
-  const [showIntro, setShowIntro] = useState(true);
-  const [showOutro, setShowOutro] = useState(false);
-  const [watermark, setWatermark] = useState('StudioBase');
-  const swatches = ['#5E5CE6', '#0A84FF', '#30D158', '#FF9F0A', '#FF453A', '#BF5AF2', '#FF375F', '#1D1D1F'];
-  const fonts = ['SF Pro', 'Inter', 'Geist', 'Söhne', 'Söhne Mono', 'Helvetica Neue'];
+  export const BrandPanel: React.FC = () => {
+    const { brand, setBrand } = useStudioStore();
+    const [saved, setSaved] = React.useState(false);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  return (
-    <div className="h-full scroll-y px-5 py-5 space-y-7">
-      <section>
-        <SectionLabel hint="PNG or SVG, up to 2 MB">Workspace logo</SectionLabel>
-        <div className="grad-border h-24 flex items-center justify-center">
-          <div className="text-center">
-            <I.Upload size={20} className="text-primary mx-auto mb-1" strokeWidth={2} />
-            <div className="text-[12.5px] font-medium text-text">Drop your logo</div>
-            <div className="text-[11px] text-text-3">or click to browse</div>
-          </div>
-        </div>
-      </section>
+    const swatches = ['#5E5CE6','#0A84FF','#30D158','#FF9F0A','#FF453A','#BF5AF2','#FF375F','#1D1D1F'];
+    const fonts = ['Inter','SF Pro','Geist','Söhne','Helvetica Neue'];
 
-      <section>
-        <SectionLabel>Primary color</SectionLabel>
-        <div className="flex items-center gap-2 mb-3">
-          {swatches.map(c => (
-            <button
-              key={c}
-              onClick={() => setPrimaryColor(c)}
-              className={cn(
-                'relative w-8 h-8 rounded-full transition-transform hover:scale-110',
-                primaryColor === c && 'ring-2 ring-offset-2 ring-text',
-              )}
-              style={{ background: c, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.1)' }}
+    const update = (updates: Parameters<typeof setBrand>[0]) => {
+      setBrand(updates);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      update({ logoUrl: url });
+    };
+
+    return (
+      <div className="h-full scroll-y px-5 py-5 space-y-7">
+
+        {/* Saved indicator */}
+        <AnimatePresence>
+          {saved && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-1.5 text-[12px] text-green-600 font-medium"
             >
-              {primaryColor === c && (
-                <I.Check size={14} className="text-white absolute inset-0 m-auto" strokeWidth={3} />
-              )}
-            </button>
-          ))}
-        </div>
-        <FieldShell icon={I.Type}>
-          <span className="text-text-3 text-xs font-mono">HEX</span>
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+              Applied live
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Logo */}
+        <section>
+          <SectionLabel hint="PNG or SVG, up to 2 MB">Workspace logo</SectionLabel>
           <input
-            value={primaryColor}
-            onChange={e => setPrimaryColor(e.target.value)}
-            className="flex-1 bg-transparent outline-none text-sm font-mono"
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileChange}
           />
-          <span className="w-5 h-5 rounded" style={{ background: primaryColor }} />
-        </FieldShell>
-      </section>
-
-      <section>
-        <SectionLabel>Font family</SectionLabel>
-        <div className="space-y-1.5">
-          {fonts.map(f => (
-            <button
-              key={f}
-              onClick={() => setFont(f)}
-              className={cn(
-                'w-full flex items-center justify-between p-3 rounded-sm transition-colors text-left',
-                font === f ? 'bg-primary-light ring-1 ring-primary/40' : 'bg-surface-2 hover:bg-[#E6E6EC]',
-              )}
+          {brand.logoUrl ? (
+            <div className="relative grad-border h-24 flex items-center justify-center">
+              <img src={brand.logoUrl} className="max-h-14 max-w-[160px] object-contain" />
+              <button
+                onClick={() => update({ logoUrl: null })}
+                className="absolute top-2 right-2 w-6 h-6 rounded-full bg-surface-2 flex items-center justify-center text-text-2 hover:text-danger transition-colors"
+              >
+                <I.X size={12} />
+              </button>
+            </div>
+          ) : (
+            <div
+              className="grad-border h-24 flex items-center justify-center cursor-pointer hover:bg-surface-2 transition-colors"
+              onClick={() => fileInputRef.current?.click()}
             >
-              <div>
-                <div className="text-[13.5px] font-semibold text-text">{f}</div>
-                <div className="text-[18px] text-text-2 leading-tight mt-0.5">The quick brown fox</div>
+              <div className="text-center">
+                <I.Upload size={20} className="text-primary mx-auto mb-1" strokeWidth={2} />
+                <div className="text-[12.5px] font-medium text-text">Drop your logo</div>
+                <div className="text-[11px] text-text-3">or click to browse</div>
               </div>
-              {font === f && <I.Check size={16} className="text-primary" />}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <SectionLabel>Slides</SectionLabel>
-        <div className="space-y-2">
-          <div className="flex items-center justify-between p-3 rounded-sm bg-surface-2">
-            <div>
-              <div className="text-[13.5px] font-semibold text-text">Branded intro slide</div>
-              <div className="text-[11.5px] text-text-2">Show before step 1</div>
             </div>
-            <Toggle checked={showIntro} onChange={setShowIntro} />
-          </div>
-          <div className="flex items-center justify-between p-3 rounded-sm bg-surface-2">
-            <div>
-              <div className="text-[13.5px] font-semibold text-text">Outro slide</div>
-              <div className="text-[11.5px] text-text-2">Closing card with logo + CTA</div>
-            </div>
-            <Toggle checked={showOutro} onChange={setShowOutro} />
-          </div>
-        </div>
-      </section>
+          )}
+        </section>
 
-      <section>
-        <SectionLabel>Watermark</SectionLabel>
-        <FieldShell icon={I.Type}>
-          <input
-            value={watermark}
-            onChange={e => setWatermark(e.target.value)}
-            placeholder="Watermark text"
-            className="flex-1 bg-transparent outline-none text-sm"
-          />
-        </FieldShell>
-      </section>
-    </div>
-  );
-};
+        {/* Primary color */}
+        <section>
+          <SectionLabel>Primary color</SectionLabel>
+          <div className="flex items-center gap-2 mb-3">
+            {swatches.map(c => (
+              <button
+                key={c}
+                onClick={() => update({ primaryColor: c })}
+                className={cn(
+                  'relative w-8 h-8 rounded-full transition-transform hover:scale-110',
+                  brand.primaryColor === c && 'ring-2 ring-offset-2 ring-text',
+                )}
+                style={{ background: c, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.1)' }}
+              >
+                {brand.primaryColor === c && (
+                  <I.Check size={14} className="text-white absolute inset-0 m-auto" strokeWidth={3} />
+                )}
+              </button>
+            ))}
+          </div>
+          <FieldShell icon={I.Type}>
+            <span className="text-text-3 text-xs font-mono">HEX</span>
+            <input
+              value={brand.primaryColor}
+              onChange={e => update({ primaryColor: e.target.value })}
+              className="flex-1 bg-transparent outline-none text-sm font-mono"
+            />
+            <span className="w-5 h-5 rounded" style={{ background: brand.primaryColor }} />
+          </FieldShell>
+        </section>
+
+        {/* Font */}
+        <section>
+          <SectionLabel>Font family</SectionLabel>
+          <div className="space-y-1.5">
+            {fonts.map(f => (
+              <button
+                key={f}
+                onClick={() => update({ font: f })}
+                className={cn(
+                  'w-full flex items-center justify-between p-3 rounded-sm transition-colors text-left',
+                  brand.font === f ? 'bg-primary-light ring-1 ring-primary/40' : 'bg-surface-2 hover:bg-[#E6E6EC]',
+                )}
+              >
+                <div>
+                  <div className="text-[13.5px] font-semibold text-text">{f}</div>
+                  <div className="text-[18px] text-text-2 leading-tight mt-0.5">The quick brown fox</div>
+                </div>
+                {brand.font === f && <I.Check size={16} className="text-primary" />}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Slides */}
+        <section>
+          <SectionLabel>Slides</SectionLabel>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between p-3 rounded-sm bg-surface-2">
+              <div>
+                <div className="text-[13.5px] font-semibold text-text">Branded intro slide</div>
+                <div className="text-[11.5px] text-text-2">Show before step 1</div>
+              </div>
+              <Toggle checked={brand.showIntro} onChange={v => update({ showIntro: v })} />
+            </div>
+            <div className="flex items-center justify-between p-3 rounded-sm bg-surface-2">
+              <div>
+                <div className="text-[13.5px] font-semibold text-text">Outro slide</div>
+                <div className="text-[11.5px] text-text-2">Closing card with logo + CTA</div>
+              </div>
+              <Toggle checked={brand.showOutro} onChange={v => update({ showOutro: v })} />
+            </div>
+          </div>
+        </section>
+
+        {/* Watermark */}
+        <section>
+          <SectionLabel>Watermark</SectionLabel>
+          <FieldShell icon={I.Type}>
+            <input
+              value={brand.watermark}
+              onChange={e => update({ watermark: e.target.value })}
+              placeholder="Watermark text"
+              className="flex-1 bg-transparent outline-none text-sm"
+            />
+          </FieldShell>
+        </section>
+
+      </div>
+    );
+  };
 
 // ─── Chapters panel ────────────────────────────────────────────────────
 export const ChaptersPanel: React.FC = () => {

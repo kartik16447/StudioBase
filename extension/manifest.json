@@ -11,7 +11,8 @@
     "activeTab",
     "scripting",
     "downloads",
-    "desktopCapture"
+    "desktopCapture",
+    "offscreen"
   ],
   "host_permissions": ["https://www.googleapis.com/*", "<all_urls>"],
   "background": {

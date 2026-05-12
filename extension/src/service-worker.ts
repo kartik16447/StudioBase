@@ -118,6 +118,8 @@ async function startRecording(target: CaptureTarget) {
       localSessionId: sessionId,
       startedAt: Date.now(),
       target, // tabId is in here
+      includeMic: target.includeMic ?? false,
+      includeVideo: target.includeVideo ?? false,
     });
 
     if (target.tabId) {
@@ -131,6 +133,19 @@ async function startRecording(target: CaptureTarget) {
       }
       chrome.tabs.sendMessage(target.tabId, { type: 'START_CAPTURE' }).catch(() => {});
     }
+
+    if (target.includeVideo) {
+      const hasDoc = await chrome.offscreen.hasDocument().catch(() => false);
+      if (!hasDoc) {
+        await chrome.offscreen.createDocument({
+          url: 'offscreen.html',
+          reasons: [chrome.offscreen.Reason.USER_MEDIA],
+          justification: 'Screen recording for StudioBase session'
+        });
+      }
+      chrome.runtime.sendMessage({ type: 'START_VIDEO_RECORDING' }).catch(() => {});
+    }
+
     sbLog("RECORDING_STARTED", { sessionId, target });
   } catch (err: any) {
     updateState({ status: "error", errorMessage: err.message });
@@ -176,9 +191,23 @@ async function stopRecording() {
       );
     }
 
+    let videoBlob: Blob | null = null;
+    if (state.includeVideo) {
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'STOP_VIDEO_RECORDING' });
+        if (res?.blob) {
+          // Convert Data URL back to Blob
+          const response = await fetch(res.blob);
+          videoBlob = await response.blob();
+        }
+      } catch (err) {
+        console.warn("[StudioBase] Failed to collect video from offscreen:", err);
+      }
+    }
+
     const backendSessionId = await uploadSession(session, (pct) => {
       updateState({ uploadProgress: pct });
-    });
+    }, videoBlob);
 
     await updateState({
       status: "ready",
