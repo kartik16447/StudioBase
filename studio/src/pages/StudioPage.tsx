@@ -487,7 +487,7 @@ const VideoCanvas: React.FC = () => {
           <ScreenshotPlaceholder 
             step={currentStep}
             session={session}
-            showChrome={false}
+            showChrome={true}
             aspect="16/9" 
             rounded="" 
             className="w-full h-full !shadow-none" 

@@ -375,7 +375,7 @@ export const ScreenshotPlaceholder: React.FC<{
       )}
 
       {realUrl ? (
-        <div className="absolute inset-0 top-9">
+        <div className={cn('absolute inset-0', showChrome && 'top-9')}>
           <img src={realUrl} className="w-full h-full object-cover" alt="Step screenshot" />
           
           {realUrl && step?.coordinates && (
@@ -397,7 +397,7 @@ export const ScreenshotPlaceholder: React.FC<{
           )}
         </div>
       ) : (
-        <div className="absolute inset-0 top-9 flex">
+        <div className={cn('absolute inset-0 flex', showChrome && 'top-9')}>
           <div className="w-[18%] h-full p-2 space-y-1.5" style={{ background: tintSoft }}>
             <div className="h-3 rounded bg-white/80 w-3/4" />
             <div className="h-2.5 rounded bg-white/60 w-1/2 mt-3" />
