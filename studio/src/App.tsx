@@ -11,8 +11,8 @@ import { CommandPalette, KeyboardHintPill } from './components/CommandPalette';
 function App() {
   const {
     route, navigate,
-    togglePanel, toggleToolbar, setActiveTab,
-    setActiveTool, commandOpen, setCommandOpen,
+    togglePanel, setActiveTab,
+    commandOpen, setCommandOpen,
   } = useStudioStore();
 
   // Navigate straight to studio on mount; StudioPage handles session/sample loading.
@@ -22,7 +22,6 @@ function App() {
 
   // Keyboard shortcuts
   useKeyboardShortcut('cmd+\\', () => togglePanel(), []);
-  useKeyboardShortcut('h', () => toggleToolbar(), []);
   useKeyboardShortcut('cmd+k', () => setCommandOpen(!commandOpen), [commandOpen]);
   useKeyboardShortcut('escape', () => setCommandOpen(false), []);
 
@@ -37,12 +36,6 @@ function App() {
     }, [route.name]);
   });
 
-  // Tool keys
-  useKeyboardShortcut('v', () => setActiveTool('cursor'), []);
-  useKeyboardShortcut('s', () => setActiveTool('spotlight'), []);
-  useKeyboardShortcut('b', () => setActiveTool('highlight'), []);
-  useKeyboardShortcut('t', () => setActiveTool('text'), []);
-  useKeyboardShortcut('z', () => setActiveTool('zoom'), []);
 
   const renderRoute = () => {
     switch (route.name) {

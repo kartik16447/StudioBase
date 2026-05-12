@@ -6,7 +6,7 @@ import {
   cn, Badge, Kbd, AIShimmer, AIButton, DotGrid, ScreenshotPlaceholder, Button 
 } from '../components/ui';
 import { 
-  StudioTopBar, FloatingToolbar, SummaryCallout, StepCard, ChapterBreak 
+  StudioTopBar, SummaryCallout, StepCard, ChapterBreak 
 } from '../components/studio';
 import { 
   ScriptPanel, BrandPanel, ChaptersPanel, AIVoicePanel, MusicPanel, VisualsPanel, ZoomsPanel, ElementsPanel 
@@ -202,7 +202,6 @@ export const StudioPage: React.FC = () => {
           </AnimatePresence>
         </motion.section>
       </div>
-      <FloatingToolbar />
     </div>
   );
 };
