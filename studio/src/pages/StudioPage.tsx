@@ -26,60 +26,93 @@ const STUDIO_TABS = [
 ];
 
 export const StudioPage: React.FC = () => {
-  const {
-    navigate,
-    activeTab,
-    isPanelOpen,
-    activeView,
-    setActiveTab,
-    togglePanel,
-    session,
-    fetchSession,
-    setSession,
-    sessionError,
-    brand
-  } = useStudioStore();
+  const session = useStudioStore(state => state.session);
+  const fetchSession = useStudioStore(state => state.fetchSession);
+  const sessionError = useStudioStore(state => state.sessionError);
+  const brand = useStudioStore(state => state.brand);
+  const activeTab = useStudioStore(state => state.activeTab);
+  const activeView = useStudioStore(state => state.activeView);
+  const isPanelOpen = useStudioStore(state => state.isPanelOpen);
+  const navigate = useStudioStore(state => state.navigate);
+  const setActiveTab = useStudioStore(state => state.setActiveTab);
+  const togglePanel = useStudioStore(state => state.togglePanel);
 
   const activeTabItem = STUDIO_TABS.find(t => t.id === activeTab) || STUDIO_TABS[0];
 
   useEffect(() => {
-    document.documentElement.style.setProperty('--color-primary', brand.primaryColor);
-    // Convert hex to RGB for Tailwind opacity utilities (bg-primary/20 etc.)
-    const hex = brand.primaryColor.replace('#', '');
-    const r = parseInt(hex.substring(0,2), 16);
-    const g = parseInt(hex.substring(2,4), 16);
-    const b = parseInt(hex.substring(4,6), 16);
-    document.documentElement.style.setProperty('--color-primary-rgb', `${r} ${g} ${b}`);
-    document.documentElement.style.setProperty('--font-sans', brand.font + ', Inter, system-ui, sans-serif');
-  }, [brand.primaryColor, brand.font]);
+    if (!brand) return;
+    const color = (brand.primaryColor && typeof brand.primaryColor === 'string' && brand.primaryColor.startsWith('#'))
+      ? brand.primaryColor
+      : '#5E5CE6';
+
+    document.documentElement.style.setProperty('--color-primary', color);
+    
+    const hex = color.replace('#', '');
+    try {
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+        document.documentElement.style.setProperty('--color-primary-rgb', `${r} ${g} ${b}`);
+      } else {
+        document.documentElement.style.setProperty('--color-primary-rgb', '94 92 230');
+      }
+    } catch (e) {
+      document.documentElement.style.setProperty('--color-primary-rgb', '94 92 230');
+    }
+    
+    const font = brand.font || 'Inter';
+    document.documentElement.style.setProperty('--font-sans', font + ', Inter, system-ui, sans-serif');
+  }, [brand?.primaryColor, brand?.font]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get('session');
+    console.log('[StudioPage] Initial mount, sessionId:', sessionId);
     if (sessionId) {
       fetchSession(sessionId);
-    } else if (!session) {
-      // Fallback to sample data for development when no real session provided
-      import('../data/sample').then(m => setSession(m.SAMPLE_SESSION));
     }
   }, []);
+
+  // Background Asset Refresh (Keep signed URLs alive)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session');
+    if (!sessionId) return;
+    
+    // Refresh tokens every 15 minutes
+    const interval = setInterval(() => {
+      console.log('🔄 [StudioPage] Refreshing assets...');
+      fetchSession(sessionId);
+    }, 15 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [fetchSession]);
+
+  console.log('[StudioPage] Render state:', { 
+    hasSession: !!session, 
+    stepCount: session?.steps?.length, 
+    sessionError,
+    activeView
+  });
 
   if (sessionError) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
         <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-6">
-          <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-          </svg>
+          <I.AlertCircle size={32} className="text-red-600" />
         </div>
         <h2 className="text-2xl font-bold text-gray-900 mb-2">Error Loading Session</h2>
         <p className="text-gray-600 max-w-md">{sessionError}</p>
-        <button 
-          onClick={() => window.location.reload()}
-          className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Try Again
-        </button>
+        <div className="mt-8 flex gap-3">
+          <Button variant="ghost" onClick={() => {
+            sessionStorage.clear();
+            localStorage.clear();
+            window.location.href = window.location.pathname; // Reload without query params
+          }}>Reset Session & Logout</Button>
+          <Button variant="ghost" onClick={() => window.location.reload()}>Try Again</Button>
+          <Button variant="primary" onClick={() => navigate('home')}>Go to Library</Button>
+        </div>
       </div>
     );
   }
@@ -87,21 +120,14 @@ export const StudioPage: React.FC = () => {
   if (!session) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
-        <div className="w-16 h-16 rounded-full bg-surface-2 flex items-center justify-center text-text-3 mb-4">
-          <I.Library size={32} />
-        </div>
-        <h2 className="text-[22px] font-semibold text-text">No session selected</h2>
-        <p className="text-[14px] text-text-2 mt-2 max-w-[320px]">
-          Please select a capture session from your library to start editing in the studio.
-        </p>
-        <Button variant="primary" size="md" className="mt-6" onClick={() => navigate('home')}>
-          Go to library
-        </Button>
+        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-6" />
+        <h2 className="text-xl font-medium text-text">Loading session data...</h2>
       </div>
     );
   }
 
-  if (session.steps.length === 0) {
+  const steps = session.steps || [];
+  if (steps.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
         <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-6">
@@ -112,10 +138,10 @@ export const StudioPage: React.FC = () => {
           This session was recorded but no interactions were captured. Make sure you click, type, or navigate during the recording, then record a new session.
         </p>
         <button
-          onClick={() => window.close()}
+          onClick={() => navigate('home')}
           className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
-          Close
+          Back to Library
         </button>
       </div>
     );
@@ -175,7 +201,7 @@ export const StudioPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.18 }}
-                    className="absolute inset-0 overflow-y-auto"
+                    className="absolute inset-0"
                   >
                     <activeTabItem.component />
                   </motion.div>
@@ -219,7 +245,12 @@ export const StudioPage: React.FC = () => {
 };
 
 const SOPCanvas: React.FC = () => {
-  const { session, focusedStepId, setFocusStep, setStepIndex, scrollTrigger, triggerScroll } = useStudioStore();
+  const session = useStudioStore(state => state.session);
+  const focusedStepId = useStudioStore(state => state.focusedStepId);
+  const setFocusStep = useStudioStore(state => state.setFocusStep);
+  const setStepIndex = useStudioStore(state => state.setStepIndex);
+  const scrollTrigger = useStudioStore(state => state.scrollTrigger);
+  const triggerScroll = useStudioStore(state => state.triggerScroll);
   const [isProcessing, setIsProcessing] = useState(false);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -543,7 +574,9 @@ const VideoCanvas: React.FC = () => {
   const playerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const videoUrl = session?.videoKey ? (session.assets?.[session.videoKey] ?? null) : null;
+  const renderMode = useStudioStore(state => state.renderMode);
+  const rawVideoUrl = session?.videoKey ? (session.assets?.[session.videoKey] ?? null) : null;
+  const videoUrl = renderMode === 'hybrid' ? rawVideoUrl : null;
 
   const steps = session?.steps || [];
   const currentStep = steps[currentStepIndex];
@@ -564,42 +597,65 @@ const VideoCanvas: React.FC = () => {
     const manual = step?.animationTarget;
     const coords = step?.data?.coordinates;
     const useAuto = !manual || manual.zoomScale <= 1;
-
     if (useAuto && coords) {
       return {
         centerX: Math.max(15, Math.min(85, (coords.x / (coords.viewportWidth || 1440)) * 100)),
         centerY: Math.max(15, Math.min(85, (coords.y / (coords.viewportHeight || 900)) * 100)),
-        zoomScale: 1.55,
+        zoomScale: renderMode === 'hybrid' ? 1 : 1.55, // 100% for video, 155% for slides
       };
     }
     return manual || { centerX: 50, centerY: 50, zoomScale: 1 };
   };
 
+  const prevTarget = getTarget(prevStep);
   const target = getTarget(currentStep);
   const hasZoom = target.zoomScale > 1;
 
-  // New Camera Math: translate(tx, ty) scale(scale)
-  // Order: Translate BEFORE scale for physical correctness
+  useEffect(() => {
+    console.log(`🎬 [VideoCanvas] Step Transition: ${currentStepIndex} (${currentStep?.id})`);
+  }, [currentStepIndex, currentStep?.id]);
+
+  // Camera Math: translate(tx, ty) scale(scale)
+  // Physical Correctness: Translate relative to the center, then scale
   const scale = (hasZoom || !isPlaying) ? target.zoomScale : 1;
   const tx = (50 - target.centerX) * scale;
   const ty = (50 - target.centerY) * scale;
 
-  // Cinematic Re-orientation Sequence for New Context
-  // scale: overview -> stabilize -> enter
+  const prevTX = (50 - prevTarget.centerX) * prevTarget.zoomScale;
+  const prevTY = (50 - prevTarget.centerY) * prevTarget.zoomScale;
+
+  // Momentum Logic for Large Jumps
+  const dx = tx - prevTX;
+  const dy = ty - prevTY;
+  const isLargeJump = Math.abs(dx) > 15 || Math.abs(dy) > 15;
+  const overshootX = tx + dx * 0.08;
+  const overshootY = ty + dy * 0.08;
+
+  // Cinematic Re-orientation Sequence
   const cinematicSequence = sameContext 
-    ? { scale, x: `${tx}%`, y: `${ty}%` }
-    : {
-        scale: [1.15, 1.45, scale],
-        x: ['0%', '0%', `${tx}%`],
-        y: ['0%', '0%', `${ty}%`],
-        opacity: [0, 1, 1]
-      };
+    ? (isLargeJump && renderMode === 'slideshow'
+        ? { 
+            scale: [prevTarget.zoomScale, scale, scale], 
+            x: [`${prevTX}%`, `${overshootX}%`, `${tx}%`], 
+            y: [`${prevTY}%`, `${overshootY}%`, `${ty}%`] 
+          }
+        : { scale, x: `${tx}%`, y: `${ty}%` }
+      )
+    : (renderMode === 'hybrid' 
+        ? { scale: 1, x: '0%', y: '0%', opacity: [0, 1, 1] } 
+        : {
+            scale: [1.6, 1.15, 1.45, scale], // Apple-style re-orientation
+            x: ['0%', '0%', '0%', `${tx}%`],
+            y: ['0%', '0%', '0%', `${ty}%`],
+            opacity: [0, 1, 1, 1]
+          }
+      );
 
   const springTransition = {
     type: 'spring' as const,
-    stiffness: 45, // Decreased for slower, more deliberate movement
-    damping: 22,   // Increased for smoother settling
-    mass: 1.2,     // Added a bit more weight/inertia
+    stiffness: 70, // Premium inertia
+    damping: 18,   // Smooth settling
+    mass: 1.1,     // Physically weighted
     restDelta: 0.001
   };
 
@@ -639,15 +695,34 @@ const VideoCanvas: React.FC = () => {
   // Sync video playback and seeking
   useEffect(() => {
     if (!videoRef.current || !videoUrl) return;
+    
+    const v = videoRef.current;
+    const handleVideoError = () => {
+      console.error("🎬 [VideoPlayer] Video playback error:", v.error);
+    };
+    const handleCanPlay = () => {
+      console.log("🎬 [VideoPlayer] Video is ready to play");
+    };
+    
+    v.addEventListener('error', handleVideoError);
+    v.addEventListener('canplay', handleCanPlay);
+    
+    return () => {
+      v.removeEventListener('error', handleVideoError);
+      v.removeEventListener('canplay', handleCanPlay);
+    };
+  }, [videoUrl]);
+
+  useEffect(() => {
+    if (!videoRef.current || !videoUrl || isPlaying) return; // Don't force seek while playing
     const step = steps[currentStepIndex];
     if (step?.timestamp != null) {
       const targetTime = step.timestamp / 1000;
-      // Only seek if far enough away to avoid jitter
       if (Math.abs(videoRef.current.currentTime - targetTime) > 0.5) {
         videoRef.current.currentTime = targetTime;
       }
     }
-  }, [currentStepIndex, videoUrl]);
+  }, [currentStepIndex, videoUrl, isPlaying]);
 
   useEffect(() => {
     if (!videoRef.current || !videoUrl) return;
@@ -872,7 +947,7 @@ const VideoCanvas: React.FC = () => {
         {/* Screenshot with Hybrid Camera (Smart Context) */}
         <div className="absolute inset-0 overflow-hidden">
           <motion.div
-            key={sameContext ? 'same' : currentStepIndex}
+            key={videoUrl ? 'cinematic-video' : (sameContext ? 'same' : currentStepIndex)}
             animate={cinematicSequence}
             transition={springTransition}
             className="absolute inset-0 origin-center"
@@ -881,10 +956,13 @@ const VideoCanvas: React.FC = () => {
               <video
                 ref={videoRef}
                 src={videoUrl}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
                 muted
                 playsInline
                 preload="auto"
+                onSeeked={() => console.log(`🎬 [VideoCanvas] Seeked to: ${videoRef.current?.currentTime}s`)}
+                onPlay={() => console.log('🎬 [VideoCanvas] Playback started')}
+                onPause={() => console.log('🎬 [VideoCanvas] Playback paused')}
               />
             ) : (
               <ScreenshotPlaceholder
@@ -944,8 +1022,8 @@ const VideoCanvas: React.FC = () => {
           </AnimatePresence>
         </div>
 
-        {/* Synthetic Cursor */}
-        {isPlaying && currentStep?.data?.coordinates && (
+        {/* Synthetic Cursor (Disabled because screenshots/video already have real cursor) */}
+        {false && isPlaying && !videoUrl && currentStep?.data?.coordinates && (
           <motion.div
             className="absolute pointer-events-none z-20"
             initial={{ left: `${cursorStartX}%`, top: `${cursorStartY}%` }}
@@ -1234,7 +1312,9 @@ const VideoCanvas: React.FC = () => {
 };
 
 const DemoCanvas: React.FC = () => {
-  const { session, setActiveView, brand } = useStudioStore();
+  const session = useStudioStore(state => state.session);
+  const setActiveView = useStudioStore(state => state.setActiveView);
+  const brand = useStudioStore(state => state.brand);
   const [stepIndex, setStepIndex] = React.useState(0);
   const [showChapter, setShowChapter] = React.useState<string | null>(null);
   const [isExporting, setIsExporting] = React.useState(false);

@@ -37,6 +37,7 @@ interface StudioState {
   currentTime: number;
   scrollTrigger: number;
   sessionError: string | null;
+  renderMode: 'hybrid' | 'slideshow';
 
   brand: BrandState;
   setBrand: (updates: Partial<BrandState>) => void;
@@ -57,8 +58,10 @@ interface StudioState {
   setStepIndex: (index: number) => void;
   setPlaybackRate: (rate: number) => void;
   setCurrentTime: (time: number) => void;
-  updateStep: (stepId: string, updates: Partial<Step>) => void;
+   updateStep: (stepId: string, updates: Partial<Step>) => void;
+  deleteStep: (stepId: string) => void;
   triggerScroll: () => void;
+  setRenderMode: (mode: 'hybrid' | 'slideshow') => void;
   fetchSession: (sessionId: string) => Promise<void>;
 }
 
@@ -80,6 +83,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   currentTime: 0,
   scrollTrigger: 0,
   sessionError: null,
+  renderMode: 'hybrid',
 
   brand: {
     primaryColor: '#5E5CE6',
@@ -105,130 +109,150 @@ export const useStudioStore = create<StudioState>((set) => ({
     try {
       set({ sessionError: null });
 
-      // Get token from URL or session storage
+      // Get token from URL or storage (extension syncs to both)
       const urlParams = new URLSearchParams(window.location.search);
-      let token = urlParams.get('token');
-      if (token) {
-        sessionStorage.setItem('sb_token', token);
-      } else {
-        token = sessionStorage.getItem('sb_token');
+      const urlToken = urlParams.get('token');
+      const storageToken = localStorage.getItem('sb_token') || sessionStorage.getItem('sb_token');
+      
+      // Source of truth: Storage (synced by extension) > URL (may be stale)
+      let token = storageToken || urlToken;
+
+      if (urlToken && urlToken !== storageToken && !storageToken) {
+        console.log('🔑 [fetchSession] No storage token found, using URL token...');
+        sessionStorage.setItem('sb_token', urlToken);
+        localStorage.setItem('sb_token', urlToken);
+        token = urlToken;
       }
 
-      const wid = urlParams.get('workspaceId');
-      if (wid) sessionStorage.setItem('sb_workspaceId', wid);
+      const wid = urlParams.get('workspaceId') || sessionStorage.getItem('sb_workspaceId') || localStorage.getItem('sb_workspaceId');
+      if (wid) {
+        sessionStorage.setItem('sb_workspaceId', wid);
+        localStorage.setItem('sb_workspaceId', wid);
+      }
 
+      const displayToken = token ? `${token.substring(0, 10)}...${token.substring(token.length - 5)}` : 'MISSING';
+      console.log('[fetchSession] Using token:', displayToken);
+      console.log('[fetchSession] Fetching session from backend:', `${BACKEND_URL}/sessions/${sessionId}`);
       const res = await fetch(`${BACKEND_URL}/sessions/${sessionId}`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
 
       if (!res.ok) {
         const errBody = await res.text().catch(() => '');
-        if (res.status === 401) throw new Error('Unauthorized: Please sign in through the extension');
+        console.error('[fetchSession] Backend error:', res.status, errBody);
+        if (res.status === 401) {
+          sessionStorage.removeItem('sb_token');
+          localStorage.removeItem('sb_token');
+          throw new Error('Session Expired: Please close this tab and re-open the session from your Extension library.');
+        }
         if (res.status === 404) throw new Error('Session not found — it may still be uploading. Try again in a moment.');
         throw new Error(`Failed to fetch session (${res.status}): ${errBody}`);
       }
 
       const data = await res.json();
-      let sessionData = data;
+      console.log('[fetchSession] Initial backend response (data):', data);
+      if (!data) throw new Error('Empty response from server');
+
+      // Start with the raw backend data as our sessionData
+      let sessionData: SessionEnvelope = {
+        ...data,
+        sessionId: data.id || data.sessionId,
+      };
 
       if (data.sessionJsonUrl) {
+        console.log('[fetchSession] Fetching full JSON from R2:', data.sessionJsonUrl);
         const jsonRes = await fetch(data.sessionJsonUrl);
         if (jsonRes.ok) {
-          sessionData = await jsonRes.json();
+          const jsonContent = await jsonRes.json();
+          console.log('[fetchSession] Received R2 JSON content:', jsonContent);
+          if (jsonContent) {
+            sessionData = { ...sessionData, ...jsonContent };
+          }
         } else {
-          const r2Err = await jsonRes.text().catch(() => '');
-          console.error('[fetchSession] R2 JSON fetch failed:', jsonRes.status, r2Err);
+          console.error('[fetchSession] R2 fetch failed:', jsonRes.status);
         }
-      } else {
-        console.warn('[fetchSession] no sessionJsonUrl — status:', data.status, '| r2JsonKey:', data.r2JsonKey);
       }
 
-      // Normalize: extension captures store `events[]`, studio expects `steps[]`
-      // Always remap from events (authoritative raw source), augmenting with
-      // pipeline-enriched steps (generatedText, voiceoverKey, animationTarget).
-      if (Array.isArray(sessionData.events)) {
-        const rawTitle = sessionData.aiOutputs?.title || data.title || sessionData.tabUrl || 'Untitled Session';
+      // ─── Normalization ───
+      // If the session has raw events but NO processed steps, we map them here.
+      // If it already has steps, we respect the backend's enriched data.
+      const rawEvents = (sessionData as any).events;
+      if (Array.isArray(rawEvents) && (!sessionData.steps || sessionData.steps.length === 0)) {
+        const rawTitle = sessionData.aiOutputs?.title || (data as any).title || sessionData.capturedUrl || 'Untitled Session';
         const screenshotByIndex = new Map<number, string>(
-          (sessionData.screenshots || []).map((s: any) => [s.stepIndex, s.r2Key])
+          ((sessionData as any).screenshots || []).map((s: any) => [s.stepIndex, s.r2Key])
         );
-        // Pipeline writes enriched data into steps[] — index-aligned with events[]
-        const pipelineSteps: any[] = Array.isArray(sessionData.steps) ? sessionData.steps : [];
+        let currentContext: 'browser' | 'desktop' = 'browser';
+        const steps: Step[] = [];
+
+        for (const evt of rawEvents) {
+          if (evt.type === 'context_switch') {
+            currentContext = evt.data?.context || 'browser';
+            continue; // Meta-event, skip step creation
+          }
+
+          const isDesktop = evt.type === 'desktop_anchor' || currentContext === 'desktop';
+          const elementText = evt.data?.elementText || null;
+          
+          steps.push({
+            id: evt.id || `step-${steps.length}`,
+            sequence: steps.length + 1,
+            action: evt.type || 'click',
+            timestamp: evt.timestamp,
+            selector: evt.selector || null,
+            url: isDesktop ? '' : (evt.data?.url || ''),
+            pageTitle: isDesktop ? 'Desktop' : (evt.data?.pageTitle || ''),
+            elementText,
+            elementRole: evt.data?.elementRole || null,
+            elementType: evt.data?.elementType || null,
+            inputValue: evt.data?.inputValue || null,
+            coordinates: evt.data?.coordinates || null,
+            screenshotKey: screenshotByIndex.get(rawEvents.indexOf(evt)) ?? evt.data?.screenshotKey ?? "",
+            generatedText: evt.data?.generatedText || (evt.type === 'desktop_anchor' ? 'Desktop Activity' : null),
+            textOverride: evt.data?.textOverride || null,
+            voiceoverKey: evt.data?.voiceoverKey || null,
+            voiceoverDurationMs: evt.data?.voiceoverDurationMs || null,
+            annotations: [],
+            animationTarget: evt.data?.animationTarget || null,
+            data: { ...evt.data, context: currentContext },
+          } as Step);
+        }
 
         sessionData = {
+          ...sessionData,
           sessionId: data.id || sessionData.sessionId,
-          id: data.id || sessionData.sessionId,
-          title: rawTitle,
-          sessionType: 'steps' as const,
+          capturedTitle: rawTitle,
+          sessionType: (sessionData.sessionType as any) || 'steps',
           capturedAt: data.createdAt ? new Date(data.createdAt).toISOString() : new Date().toISOString(),
-          createdAt: data.createdAt || Date.now(),
-          steps: sessionData.events.map((evt: any, idx: number) => {
-            const ps = pipelineSteps[idx];
-            const elementText = evt.data?.elementText || ps?.elementText || null;
-            const fallbackText = elementText || `${evt.type || 'click'} on ${evt.selector || 'element'}`;
-            return {
-              id: `step-${idx}`,
-              sequence: idx + 1,
-              index: idx,
-              action: evt.type || 'click',
-              title: evt.data?.pageTitle || evt.type || `Step ${idx + 1}`,
-              description: fallbackText,
-              timestamp: evt.timestamp,
-              selector: evt.selector || null,
-              url: evt.data?.url || null,
-              pageTitle: evt.data?.pageTitle || '',
-              elementText,
-              screenshotKey: screenshotByIndex.get(idx) ?? evt.data?.screenshotKey ?? null,
-              generatedText: ps?.generatedText || null,
-              textOverride: ps?.textOverride || null,
-              voiceoverKey: ps?.voiceoverKey || null,
-              annotations: [],
-              animationTarget: ps?.animationTarget || null,
-              data: evt.data || {},
-            };
-          }),
+          steps,
           metadata: {
-            stepCount: sessionData.events.length,
-            durationMs: 0,
-            chapterBreaks: [],
+            stepCount: steps.length,
+            durationMs: sessionData.metadata?.durationMs || 0,
+            chapterBreaks: sessionData.metadata?.chapterBreaks || [],
           },
           aiOutputs: {
             title: rawTitle,
-            summary: sessionData.aiOutputs?.summary || (pipelineSteps.length ? '' : 'Session captured — AI processing pending.'),
+            summary: sessionData.aiOutputs?.summary || 'Session captured — AI processing pending.',
             tags: sessionData.aiOutputs?.tags || [],
           },
-          videoKey: sessionData.videoKey || data.videoKey || null,
-          brand: null,
         };
       }
 
-      // If events were empty AND backend signals a terminal status, surface the error
-      if (sessionData.steps?.length === 0) {
-        const terminalFailures: Record<string, string> = {
-          credit_exhausted: 'Not enough credits to process this session. Add credits and re-run the pipeline.',
-          failed: 'Session processing failed. Please try recapturing.',
-          deleted: 'This session has been deleted.',
-        };
-        if (terminalFailures[data.status]) {
-          set({ sessionError: terminalFailures[data.status] });
-          return;
-        }
-      }
-
+      // Final safety checks for required SessionEnvelope fields
       if (!sessionData.steps) {
         const terminalFailures: Record<string, string> = {
-          credit_exhausted: 'Not enough credits to process this session. Add credits and re-run the pipeline.',
-          failed: 'Session processing failed. Please try recapturing.',
+          credit_exhausted: 'Not enough credits to process this session.',
+          failed: 'Session processing failed.',
           deleted: 'This session has been deleted.',
         };
         const msg = terminalFailures[data.status]
-          ?? `Session is still uploading or processing (status: ${data.status}). Try again in a moment.`;
+          ?? `Session is still uploading or processing (status: ${data.status}).`;
         set({ sessionError: msg });
         return;
       }
 
-      // Ensure required top-level fields have safe defaults even for enriched sessions
       if (!sessionData.aiOutputs) {
-        sessionData.aiOutputs = { title: sessionData.title || 'Untitled', summary: '', tags: [] };
+        sessionData.aiOutputs = { title: (sessionData as any).title || 'Untitled', summary: '', tags: [] };
       }
       if (!sessionData.metadata) {
         sessionData.metadata = { stepCount: sessionData.steps?.length || 0, durationMs: 0, chapterBreaks: [] };
@@ -237,8 +261,13 @@ export const useStudioStore = create<StudioState>((set) => ({
         sessionData.metadata.chapterBreaks = [];
       }
 
+      // Final field normalization (Backend DB uses r2VideoKey, Extension uses videoKey)
+      if (!sessionData.videoKey && (sessionData as any).r2VideoKey) {
+        sessionData.videoKey = (sessionData as any).r2VideoKey;
+      }
+
       // Build assets map from step screenshot/voiceover keys
-      if (!sessionData.assets) {
+      if (!sessionData.assets || Object.keys(sessionData.assets).length === 0) {
         const assets: Record<string, string> = {};
         for (const step of sessionData.steps || []) {
           if (step.screenshotKey) {
@@ -255,19 +284,21 @@ export const useStudioStore = create<StudioState>((set) => ({
       }
 
       if (sessionData.brand) {
+        console.log('[fetchSession] Merging brand config:', sessionData.brand);
         set((state) => ({
           brand: {
             ...state.brand,
-            primaryColor: sessionData.brand.primaryColor ?? state.brand.primaryColor,
-            logoUrl: sessionData.brand.logoUrl ?? state.brand.logoUrl,
-            watermark: sessionData.brand.watermarkText ?? state.brand.watermark,
-            showIntro: sessionData.brand.introSlide ?? state.brand.showIntro,
-            showOutro: sessionData.brand.outroSlide ?? state.brand.showOutro,
-            font: sessionData.brand.fontFamily ?? state.brand.font,
+            primaryColor: sessionData.brand?.primaryColor ?? state.brand.primaryColor,
+            logoUrl: sessionData.brand?.logoUrl ?? state.brand.logoUrl,
+            watermark: sessionData.brand?.watermarkText ?? state.brand.watermark,
+            showIntro: sessionData.brand?.introSlide ?? state.brand.showIntro,
+            showOutro: sessionData.brand?.outroSlide ?? state.brand.showOutro,
+            font: sessionData.brand?.fontFamily ?? state.brand.font,
           },
         }));
       }
 
+      console.log('[fetchSession] Final normalized sessionData:', sessionData);
       set({ session: sessionData });
       if (sessionData.steps?.length > 0) {
         set({ focusedStepId: sessionData.steps[0].id, focusedStepIndex: 0 });
@@ -303,5 +334,36 @@ export const useStudioStore = create<StudioState>((set) => ({
     );
     return { session: { ...state.session, steps: newSteps } };
   }),
-  triggerScroll: () => set(state => ({ scrollTrigger: state.scrollTrigger + 1 })),
+  deleteStep: (stepId) => set((state) => {
+    if (!state.session) return state;
+    const newSteps = state.session.steps.filter(s => s.id !== stepId);
+    // Re-sequence steps after deletion
+    const sequencedSteps = newSteps.map((s, i) => ({ ...s, sequence: i + 1 }));
+    return { 
+      session: { 
+        ...state.session, 
+        steps: sequencedSteps,
+        metadata: { ...state.session.metadata, stepCount: sequencedSteps.length }
+      } 
+    };
+  }),
+  triggerScroll: () => set((state) => ({ scrollTrigger: state.scrollTrigger + 1 })),
+  setRenderMode: (mode) => set({ renderMode: mode }),
 }));
+
+// Listen for token updates from the extension content script
+if (typeof window !== 'undefined') {
+  window.addEventListener('SB_TOKEN_UPDATED', () => {
+    const state = useStudioStore.getState();
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session');
+    
+    console.log('🔑 [useStudioStore] SB_TOKEN_UPDATED event received');
+    
+    // If we have an error or no session, try fetching again with the new token
+    if (sessionId && (state.sessionError || !state.session)) {
+      console.log('🔑 [useStudioStore] Re-fetching session with new token...');
+      state.fetchSession(sessionId);
+    }
+  });
+}

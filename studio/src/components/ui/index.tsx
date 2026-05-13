@@ -324,7 +324,6 @@ export const Avatar: React.FC<{ name?: string, size?: number, hue?: number, clas
 };
 
 // ─── ScreenshotPlaceholder ────────────────────────────────────────────
-// ─── ScreenshotPlaceholder ────────────────────────────────────────────
 export const ScreenshotPlaceholder: React.FC<{
   step?: Partial<Step>;
   session?: SessionEnvelope | null;
@@ -346,6 +345,7 @@ export const ScreenshotPlaceholder: React.FC<{
   mode = 'blueprint',
   parallaxOffset = { x: 0, y: 0 },
 }) => {
+  const [isLoaded, setIsLoaded] = React.useState(false);
   const tint = `hsl(${hue} 70% 60%)`;
   const tintSoft = `hsl(${hue} 70% 96%)`;
 
@@ -357,6 +357,19 @@ export const ScreenshotPlaceholder: React.FC<{
     ? session.assets[step.screenshotKey] 
     : null;
 
+  // Explicitly reset load state when step changes to prevent ghosting
+  React.useEffect(() => {
+    if (isLoaded) {
+      console.log(`🖼️ [ScreenshotPlaceholder] Invalidate: ${step?.id}`);
+      setIsLoaded(false);
+    }
+  }, [step?.id]);
+
+  const handleLoad = () => {
+    console.log(`🖼️ [ScreenshotPlaceholder] Loaded: ${step?.id}`);
+    setIsLoaded(true);
+  };
+
   // Render Blueprint (Native Proportions)
   if (mode === 'blueprint') {
     return (
@@ -365,7 +378,15 @@ export const ScreenshotPlaceholder: React.FC<{
         style={{ aspectRatio: adaptiveRatio, boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
       >
         {realUrl ? (
-          <img src={realUrl} className="w-full h-full object-fill" alt="Step screenshot" />
+          <img 
+            src={realUrl} 
+            className={cn(
+              "w-full h-full object-contain transition-opacity duration-200",
+              isLoaded ? "opacity-100" : "opacity-0"
+            )}
+            onLoad={handleLoad}
+            alt="Step screenshot" 
+          />
         ) : (
           <SkeletonPlaceholder tintSoft={tintSoft} tint={tint} />
         )}
@@ -382,11 +403,13 @@ export const ScreenshotPlaceholder: React.FC<{
       {/* LAYER 1: Ambient Backdrop (Blurred & Parallax) */}
       {realUrl && (
         <div 
-          className="absolute inset-0 pointer-events-none will-change-transform"
+          className={cn(
+            "absolute inset-0 pointer-events-none will-change-transform transition-opacity duration-300",
+            isLoaded ? "opacity-80" : "opacity-0"
+          )}
           style={{
             transform: `scale(1.25) translate(${parallaxOffset.x * 0.35}%, ${parallaxOffset.y * 0.35}%)`,
             filter: 'blur(36px) brightness(0.6) saturate(0.9)',
-            opacity: 0.8
           }}
         >
           <img src={realUrl} className="w-full h-full object-cover" alt="" />
@@ -396,7 +419,15 @@ export const ScreenshotPlaceholder: React.FC<{
       {/* LAYER 2: Sharp Foreground */}
       <div className="absolute inset-0 flex items-center justify-center">
         {realUrl ? (
-          <img src={realUrl} className="max-w-full max-h-full object-contain shadow-2xl" alt="Step screenshot" />
+          <img 
+            src={realUrl} 
+            onLoad={handleLoad}
+            className={cn(
+              "max-w-full max-h-full object-contain shadow-2xl transition-all duration-300",
+              isLoaded ? "opacity-100 scale-100" : "opacity-0 scale-95"
+            )}
+            alt="Step screenshot" 
+          />
         ) : (
           <SkeletonPlaceholder tintSoft={tintSoft} tint={tint} />
         )}

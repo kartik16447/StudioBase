@@ -5,7 +5,10 @@ import { I } from '../components/icons';
 import { Kbd } from '../components/ui';
 
 export const CommandPalette: React.FC = () => {
-  const { commandOpen, setCommandOpen, navigate, setActiveTab } = useStudioStore();
+  const commandOpen = useStudioStore(state => state.commandOpen);
+  const setCommandOpen = useStudioStore(state => state.setCommandOpen);
+  const navigate = useStudioStore(state => state.navigate);
+  const setActiveTab = useStudioStore(state => state.setActiveTab);
   const [q, setQ] = useState('');
 
   const items = [
@@ -72,7 +75,7 @@ export const CommandPalette: React.FC = () => {
 };
 
 export const KeyboardHintPill: React.FC = () => {
-  const { setCommandOpen } = useStudioStore();
+  const setCommandOpen = useStudioStore(state => state.setCommandOpen);
   return (
     <button
       onClick={() => setCommandOpen(true)}

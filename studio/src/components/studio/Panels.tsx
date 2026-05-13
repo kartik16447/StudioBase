@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../../store/useStudioStore';
 import { I } from '../icons';
 import { 
-  cn, Badge, IconButton, StepNumber, SectionLabel, FieldShell, AIShimmer, Toggle, Button, ScreenshotPlaceholder
+  cn, Badge, IconButton, StepNumber, SectionLabel, FieldShell, AIShimmer, Toggle, Button, ScreenshotPlaceholder, Tooltip
 } from '../ui';
 import type { Step } from '../../../../shared/types/session';
 
@@ -11,7 +11,14 @@ import type { Step } from '../../../../shared/types/session';
 // ─── Script panel ──────────────────────────────────────────────────────
 // Per-step text editor — list with selectable rows, edit inline.
 export const ScriptPanel: React.FC = () => {
-  const { session, focusedStepId, setFocusStep, currentStepIndex, setStepIndex, updateStep, triggerScroll, scrollTrigger } = useStudioStore();
+  const session = useStudioStore(state => state.session);
+  const focusedStepId = useStudioStore(state => state.focusedStepId);
+  const setFocusStep = useStudioStore(state => state.setFocusStep);
+  const currentStepIndex = useStudioStore(state => state.focusedStepIndex);
+  const setStepIndex = useStudioStore(state => state.setStepIndex);
+  const updateStep = useStudioStore(state => state.updateStep);
+  const triggerScroll = useStudioStore(state => state.triggerScroll);
+  const scrollTrigger = useStudioStore(state => state.scrollTrigger);
   
   const [tone, setTone] = useState('Friendly & concise');
   const [search, setSearch] = useState('');
@@ -73,7 +80,7 @@ export const ScriptPanel: React.FC = () => {
 
       {/* Step list — wrapped in AIShimmer for processing state */}
       <AIShimmer isActive={isGenerating} className="flex-1 min-h-0">
-        <div className="h-full scroll-y px-3 py-3 space-y-1.5">
+        <div className="h-full scroll-y p-2 space-y-1">
           {steps.map((step, idx) => (
             <ScriptStepRow 
               key={step.id} 
@@ -90,15 +97,23 @@ export const ScriptPanel: React.FC = () => {
             />
           ))}
           {steps.length === 0 && (
-            <div className="text-center text-text-3 text-sm py-12">No steps match your search.</div>
+            <div className="text-center text-text-3 text-sm py-12 px-6">
+              No steps match your search. Try different keywords.
+            </div>
           )}
         </div>
       </AIShimmer>
 
       {/* Footer — bulk actions */}
-      <div className="px-5 py-3 border-t border-border flex items-center justify-between">
-        <span className="text-[12px] text-text-2">{steps.length} of {session.steps.length} steps</span>
-        <Button variant="ghost" size="sm" icon={I.Languages}>Translate</Button>
+      <div className="px-5 py-3 border-t border-border flex items-center justify-between shrink-0 bg-surface/80 backdrop-blur-sm">
+        <span className="text-[12px] text-text-3 font-medium">
+          {steps.length} of {session.steps.length} steps
+        </span>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" icon={I.Languages} className="h-8 text-[12px]">
+            Translate
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -114,48 +129,72 @@ const ScriptStepRow: React.FC<{
 }> = ({ step, active, isPlaying, onClick, onUpdate, innerRef }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(step.textOverride || step.generatedText || '');
+  const deleteStep = useStudioStore(state => state.deleteStep);
 
   return (
     <div
       ref={innerRef}
       onClick={onClick}
       className={cn(
-        'rounded-sm p-3 cursor-pointer transition-all border group relative',
-        active ? 'bg-primary-light border-primary/30' : 'bg-transparent border-transparent hover:bg-surface-2',
-        isPlaying && !active && 'ring-1 ring-primary/20'
+        'group relative rounded-sm p-4 transition-all duration-200 cursor-pointer border-l-[3px]',
+        active 
+          ? 'bg-primary-light border-primary shadow-sm ring-1 ring-primary/5' 
+          : 'bg-transparent border-transparent hover:bg-surface-2 hover:border-text-3/30',
+        isPlaying && !active && 'bg-surface-2 ring-1 ring-primary/10'
       )}
     >
-      <div className="flex items-start gap-3">
-        <div className="relative">
-          <StepNumber n={step.sequence} size="badge" />
+      <div className="flex items-start gap-4">
+        <div className="relative shrink-0 pt-0.5">
+          <StepNumber n={step.sequence} size="badge" className={cn(
+            'transition-transform duration-200',
+            active ? 'scale-110 shadow-sm' : 'bg-surface-3 text-text-3'
+          )} />
           {isPlaying && (
-            <span className="absolute -right-1 -top-1 w-2.5 h-2.5 bg-primary rounded-full ring-2 ring-white animate-pulse" />
+            <span className="absolute -right-0.5 -top-0.5 w-2.5 h-2.5 bg-primary rounded-full ring-2 ring-white animate-pulse" />
           )}
         </div>
+        
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-1">
-            <span className="text-[10.5px] font-bold tracking-wider uppercase text-text-3">{step.action}</span>
-            {step.elementText && (
-              <span className="text-[11px] text-text-2 font-mono truncate">· {step.elementText}</span>
+          <header className="flex items-center gap-2 mb-1.5 h-5">
+            <span className={cn(
+              "text-[10px] font-black uppercase tracking-widest px-1.5 rounded-[4px] leading-relaxed",
+              active ? "bg-primary text-white" : "bg-text-3/10 text-text-3"
+            )}>
+              {step.data?.context === 'desktop' ? 'desktop' : step.action}
+            </span>
+            <span className="text-[11px] text-text-2 font-mono truncate max-w-[140px] opacity-70">
+              · {step.data?.context === 'desktop' ? '◎ Desktop Activity' : (step.elementText || 'Browser Tab')}
+            </span>
+            {step.textOverride && (
+              <div className="w-1 h-1 rounded-full bg-primary ml-auto" title="Manually edited" />
             )}
-            {step.textOverride && <Badge tone="primary" size="sm" className="ml-auto">edited</Badge>}
-          </div>
+          </header>
           
           {isEditing ? (
             <textarea
               autoFocus
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  setIsEditing(false);
+                  onUpdate(text);
+                }
+              }}
               onBlur={() => {
                 setIsEditing(false);
                 onUpdate(text);
               }}
-              className="w-full bg-white border border-primary rounded-md p-2 text-[13px] text-text outline-none resize-none"
+              className="w-full bg-white border border-primary rounded-md p-3 text-[13.5px] text-text outline-none shadow-card-lifted resize-none leading-relaxed"
               rows={3}
             />
           ) : (
             <p 
-              className="text-[13px] text-text leading-snug line-clamp-3 group-hover:line-clamp-none transition-all" 
+              className={cn(
+                "text-[13.5px] leading-[1.6] transition-all",
+                text ? "text-text" : "text-text-3 italic font-medium"
+              )}
               style={{ textWrap: 'pretty' as any }}
               onClick={(e) => {
                 if (active) {
@@ -164,15 +203,39 @@ const ScriptStepRow: React.FC<{
                 }
               }}
             >
-              {text}
+              {text || 'Click to add a voiceover script for this step...'}
             </p>
           )}
         </div>
       </div>
       
       {active && !isEditing && (
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <IconButton icon={I.Edit2} label="Edit text" size={28} onClick={() => setIsEditing(true)} />
+        <div className="absolute top-1/2 -translate-y-1/2 right-3 flex items-center gap-0.5 bg-white border border-border shadow-card-lifted rounded-pill p-1 opacity-0 group-hover:opacity-100 transition-all scale-95 group-hover:scale-100 origin-right z-20">
+          <Tooltip content="Edit Script">
+            <IconButton 
+              icon={I.Edit2} 
+              label="Edit" 
+              size={28} 
+              onClick={(e) => { e.stopPropagation(); setIsEditing(true); }} 
+            />
+          </Tooltip>
+          <Tooltip content="AI Regenerate">
+            <IconButton 
+              icon={I.Sparkles} 
+              label="AI" 
+              size={28} 
+              className="text-primary hover:text-primary-700" 
+            />
+          </Tooltip>
+          <Tooltip content="Delete Step">
+            <IconButton 
+              icon={I.Trash2} 
+              label="Delete" 
+              size={28} 
+              className="hover:text-danger hover:bg-danger/10" 
+              onClick={(e) => { e.stopPropagation(); deleteStep(step.id); }} 
+            />
+          </Tooltip>
         </div>
       )}
     </div>
@@ -181,7 +244,8 @@ const ScriptStepRow: React.FC<{
 
 // ─── Brand panel ───────────────────────────────────────────────────────
   export const BrandPanel: React.FC = () => {
-    const { brand, setBrand } = useStudioStore();
+  const brand = useStudioStore(state => state.brand);
+  const setBrand = useStudioStore(state => state.setBrand);
     const [saved, setSaved] = React.useState(false);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -456,7 +520,9 @@ export const VisualsPanel: React.FC = () => (
   <ComingSoon title="Smart Visuals" phase={4} description="Auto-blur PII, swap backgrounds, beautify cursor paths, and apply screen recordings styling." />
 );
 export const ZoomsPanel: React.FC = () => {
-  const { session, focusedStepIndex, updateStep } = useStudioStore();
+  const session = useStudioStore(state => state.session);
+  const focusedStepIndex = useStudioStore(state => state.focusedStepIndex);
+  const updateStep = useStudioStore(state => state.updateStep);
   const currentStep = session?.steps[focusedStepIndex];
 
   if (!session || !currentStep) return null;

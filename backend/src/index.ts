@@ -197,7 +197,12 @@ async function getSessions(request: Request, env: Env) {
       : null;
 
     return Response.json({ sessions, nextCursor, hasMore });
-  } catch (e: any) { return jsonError(e.message); }
+  } catch (e: any) {
+    if (e.message.includes('Authorization') || e.message.includes('token') || e.message.includes('sign in')) {
+      return jsonError(e.message, 'UNAUTHORIZED', 401);
+    }
+    return jsonError(e.message);
+  }
 }
 
 async function getSession(request: Request, env: Env) {
@@ -366,8 +371,8 @@ async function handleFileUpload(request: Request, env: Env) {
     const key = url.searchParams.get('key');
     if (!key) return jsonError('key query param required', 'VALIDATION_ERROR');
 
-    // Security: only allow uploads under sessions/ or screenshots/ prefixes
-    if (!key.startsWith('sessions/') && !key.startsWith('screenshots/')) {
+    // Security: only allow uploads under specific prefixes
+    if (!key.startsWith('sessions/') && !key.startsWith('screenshots/') && !key.startsWith('videos/')) {
       return jsonError('Invalid upload path', 'FORBIDDEN', 403);
     }
 

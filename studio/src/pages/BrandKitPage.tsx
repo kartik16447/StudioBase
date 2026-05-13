@@ -88,7 +88,8 @@ export const BrandKitPage: React.FC = () => {
 };
 
 const LogosTab: React.FC = () => {
-  const { brand, setBrand } = useStudioStore();
+  const brand = useStudioStore(state => state.brand);
+  const setBrand = useStudioStore(state => state.setBrand);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   return (

@@ -10,7 +10,7 @@ import { sbLog } from "../logger";
 export async function uploadSession(
   session: Session,
   onProgress?: (pct: number) => void,
-  videoBlob?: Blob | null,
+  includeVideo?: boolean,
 ): Promise<string> {
   // 1. Fetch the authenticated user and workspace
   const { sb_user, workspaceId } = (await chrome.storage.local.get([
@@ -116,8 +116,10 @@ export async function uploadSession(
   if (onProgress) onProgress(50);
 
   let videoKey: string | null = null;
-  if (videoBlob) {
-    videoKey = `sessions/${activeSessionId}/screen-recording.webm`;
+  if (includeVideo) {
+    videoKey = `videos/${activeSessionId}/screen-recording.webm`;
+    
+    // 1. Get presigned URL from backend
     const presignRes = await fetch(`${BACKEND_URL}/upload/presign`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -130,13 +132,25 @@ export async function uploadSession(
     if (presignRes.ok) {
       const presignData = await presignRes.json();
       const uploadUrl = presignData.files?.[0]?.uploadUrl;
+      
       if (uploadUrl) {
-        await fetch(uploadUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'video/webm', Authorization: `Bearer ${token}` },
-          body: videoBlob
+        // 2. Delegate the upload to offscreen script to avoid Base64 overhead
+        // We await this message, and offscreen will send heartbeats to keep SW alive
+        const uploadResult = await chrome.runtime.sendMessage({ 
+          type: 'UPLOAD_VIDEO', 
+          uploadUrl, 
+          token 
         });
+        
+        if (uploadResult?.error) {
+          console.warn("[StudioBase] Offscreen video upload failed:", uploadResult.error);
+          videoKey = null; // Don't include it in final envelope if upload failed
+        }
+      } else {
+        videoKey = null;
       }
+    } else {
+      videoKey = null;
     }
   }
 

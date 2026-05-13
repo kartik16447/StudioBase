@@ -22,7 +22,8 @@ interface BackendSession {
 }
 
 export const HomePage: React.FC = () => {
-  const { navigate, setSession } = useStudioStore();
+  const navigate = useStudioStore(state => state.navigate);
+  const setSession = useStudioStore(state => state.setSession);
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [filter, setFilter] = useState<'all' | 'sop' | 'video'>('all');
   const [search, setSearch] = useState('');
@@ -33,15 +34,20 @@ export const HomePage: React.FC = () => {
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const t = urlParams.get('token') || sessionStorage.getItem('sb_token');
-    const wid = urlParams.get('workspaceId') || sessionStorage.getItem('sb_workspaceId');
+    const storageToken = localStorage.getItem('sb_token') || sessionStorage.getItem('sb_token');
+    const urlToken = urlParams.get('token');
+    const t = storageToken || urlToken;
+    
+    const wid = urlParams.get('workspaceId') || localStorage.getItem('sb_workspaceId') || sessionStorage.getItem('sb_workspaceId');
 
     if (t) {
       sessionStorage.setItem('sb_token', t);
+      localStorage.setItem('sb_token', t);
       setToken(t);
     }
     if (wid) {
       sessionStorage.setItem('sb_workspaceId', wid);
+      localStorage.setItem('sb_workspaceId', wid);
     }
 
     if (!t || !wid) {
@@ -96,6 +102,18 @@ export const HomePage: React.FC = () => {
     };
 
     fetchSessions();
+
+    const handleSync = () => {
+      console.log('🔑 [HomePage] SB_TOKEN_UPDATED event received, re-fetching...');
+      const newToken = localStorage.getItem('sb_token') || sessionStorage.getItem('sb_token');
+      if (newToken) {
+        setToken(newToken);
+        fetchSessions();
+      }
+    };
+
+    window.addEventListener('SB_TOKEN_UPDATED', handleSync);
+    return () => window.removeEventListener('SB_TOKEN_UPDATED', handleSync);
   }, []);
 
   const filtered = useMemo(() => {

@@ -23,7 +23,7 @@
     {
       "matches": ["<all_urls>"],
       "js": ["content.js"],
-      "run_at": "document_idle",
+      "run_at": "document_start",
       "all_frames": true
     }
   ],
@@ -34,6 +34,9 @@
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
+  },
+  "externally_connectable": {
+    "matches": ["http://localhost:5173/*", "https://studio.studiobase.app/*"]
   },
   "oauth2": {
     "client_id": "813435932187-l9vpdot4lsa51o4qa617o83111jgirot.apps.googleusercontent.com",

@@ -62,7 +62,7 @@ export const AnnotationCanvas: React.FC<{
   onSave: (annotation: NonNullable<Step['annotations']>[number]) => void;
   onClear: () => void;
 }> = ({ step, containerRef: _containerRef, onSave, onClear }) => {
-  const { activeTool } = useStudioStore();
+  const activeTool = useStudioStore(state => state.activeTool);
   const [drawing, setDrawing] = React.useState(false);
   const [startPct, setStartPct] = React.useState({ x: 0, y: 0 });
   const [currentPct, setCurrentPct] = React.useState({ x: 0, y: 0 });
@@ -288,10 +288,8 @@ export const StepCard: React.FC<{
   focused?: boolean;
   onFocus?: () => void;
 }> = ({ step, hue = 244, onEdit, onAnnotate, onDelete, focused, onFocus }) => {
-  const { session, updateStep } = useStudioStore(state => ({
-    session: state.session,
-    updateStep: state.updateStep,
-  }));
+  const session = useStudioStore(state => state.session);
+  const updateStep = useStudioStore(state => state.updateStep);
   const text = step.textOverride || step.generatedText || '';
   return (
     <article
@@ -542,7 +540,10 @@ export const SessionCard: React.FC<{
 
 // ─── FloatingToolbar ───────────────────────────────────────────────────
 export const FloatingToolbar: React.FC = () => {
-  const { isToolbarVisible, activeTool, setActiveTool, activeView } = useStudioStore();
+  const isToolbarVisible = useStudioStore(state => state.isToolbarVisible);
+  const activeTool = useStudioStore(state => state.activeTool);
+  const setActiveTool = useStudioStore(state => state.setActiveTool);
+  const activeView = useStudioStore(state => state.activeView);
   
   if (!isToolbarVisible || activeView !== 'sop') return null;
 
@@ -583,7 +584,13 @@ export const FloatingToolbar: React.FC = () => {
 
 // ─── StudioTopBar ──────────────────────────────────────────────────────
 export const StudioTopBar: React.FC = () => {
-  const { navigate, activeView, setActiveView } = useStudioStore();
+  const navigate = useStudioStore(state => state.navigate);
+  const activeView = useStudioStore(state => state.activeView);
+  const setActiveView = useStudioStore(state => state.setActiveView);
+  const renderMode = useStudioStore(state => state.renderMode);
+  const setRenderMode = useStudioStore(state => state.setRenderMode);
+  const session = useStudioStore(state => state.session);
+  const hasVideo = !!session?.videoKey;
   return (
     <header className="h-14 bg-surface border-b border-border flex items-center px-4 gap-4 z-40 relative">
       <button 
@@ -625,6 +632,34 @@ export const StudioTopBar: React.FC = () => {
           </span>
         </button>
       </div>
+      
+      {activeView === 'video' && (
+        <>
+          <div className="w-px h-6 bg-border mx-1" />
+          <div className="flex items-center bg-surface-2 rounded-pill p-0.5 relative">
+            {hasVideo && (
+              <button 
+                onClick={() => setRenderMode('hybrid')}
+                className={cn('relative px-3 h-8 rounded-pill text-[11px] font-bold uppercase tracking-wider transition-colors', renderMode==='hybrid' ? 'text-text' : 'text-text-2')}
+              >
+                {renderMode==='hybrid' && <motion.span layoutId="mode-bg" className="absolute inset-0 bg-white rounded-pill shadow-sm" />}
+                <span className="relative inline-flex items-center gap-1.5">
+                  <I.Video size={12} /> Video
+                </span>
+              </button>
+            )}
+            <button 
+              onClick={() => setRenderMode('slideshow')}
+              className={cn('relative px-3 h-8 rounded-pill text-[11px] font-bold uppercase tracking-wider transition-colors', renderMode==='slideshow' ? 'text-text' : 'text-text-2')}
+            >
+              {renderMode==='slideshow' && <motion.span layoutId="mode-bg" className="absolute inset-0 bg-white rounded-pill shadow-sm" />}
+              <span className="relative inline-flex items-center gap-1.5">
+                <I.Layers size={12} /> Slides
+              </span>
+            </button>
+          </div>
+        </>
+      )}
 
       <div className="ml-auto flex items-center gap-3">
         <div className="flex -space-x-1.5 mr-2">

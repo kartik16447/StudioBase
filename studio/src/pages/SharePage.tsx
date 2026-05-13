@@ -6,7 +6,8 @@ import { Avatar, StepCardSkeleton, Button } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants/index';
 
 export const SharePage: React.FC = () => {
-  const { session, setSession } = useStudioStore();
+  const session = useStudioStore(state => state.session);
+  const setSession = useStudioStore(state => state.setSession);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

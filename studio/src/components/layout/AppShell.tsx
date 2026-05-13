@@ -49,7 +49,8 @@ const SidebarItem: React.FC<SidebarItemProps> = ({ icon: Icon, label, active, on
 };
 
 export const Sidebar: React.FC = () => {
-  const { route, navigate } = useStudioStore();
+  const route = useStudioStore(state => state.route);
+  const navigate = useStudioStore(state => state.navigate);
   const active = route.name;
 
   return (

@@ -15,6 +15,9 @@ import { uploadSession } from "./background/r2-uploader";
 
 let state: AppState = { status: "idle" };
 
+let isOffscreenReady = false;
+const ENABLE_OFFSCREEN_CAPTURE = true;
+
 // ─── Initialization ──────────────────────────────────────────
 
 async function init() {
@@ -30,13 +33,68 @@ async function init() {
 
 void init();
 
+// ─── Focus Sensor ────────────────────────────────────────────
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  if (state.status !== "recording") return;
+  
+  // If windowId is -1, it means focus is completely outside of Chrome
+  const isChromeFocused = windowId !== chrome.windows.WINDOW_ID_NONE;
+  
+  console.log(`🧭 [ServiceWorker] Focus changed. Chrome focused: ${isChromeFocused}`);
+  
+  chrome.runtime.sendMessage({ 
+    type: 'WINDOW_FOCUS_CHANGED', 
+    isChromeFocused 
+  }).catch(() => {});
+});
+
 // ─── Message Handling ────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(
-  (msg: WorkerMessage, _sender, sendResponse) => {
+  (msg: any, _sender, sendResponse) => {
     // GET_STATE is the only synchronous response — handle it and return false
     if (msg.type === "GET_STATE") {
       sendResponse(state);
+      return false;
+    }
+
+    if (msg.type === 'OFFSCREEN_READY') {
+      console.log("🚀 [ServiceWorker] Offscreen is ready for frame capture.");
+      isOffscreenReady = true;
+      return false;
+    }
+
+    if (msg.type === 'SAVE_DESKTOP_EVENT') {
+      if (state.status === 'recording' && state.sessionId) {
+        const { eventType, payload, blob } = msg;
+        console.log(`💾 [ServiceWorker] Saving desktop event: ${eventType}`);
+        
+        // 1. Handle Screenshot if present
+        const handleCapture = async () => {
+          if (blob && state.sessionId) {
+            const session = await getSession(state.sessionId);
+            const stepIndex = (session?.events?.length ?? 0);
+            await saveScreenshot(state.sessionId, stepIndex, blob);
+            return `screenshots/${state.sessionId}/${stepIndex}.jpg`;
+          }
+          return null;
+        };
+
+        handleCapture().then(async (screenshotKey) => {
+          if (!state.sessionId) return;
+          await appendEvent(state.sessionId, {
+            type: eventType,
+            timestamp: payload.timestamp || Date.now(),
+            selector: "",
+            data: { 
+              ...payload, 
+              screenshotKey: screenshotKey || payload.screenshotKey,
+              context: payload.context || 'desktop'
+            },
+          });
+        });
+      }
       return false;
     }
 
@@ -73,12 +131,7 @@ chrome.runtime.onMessage.addListener(
               try {
                 const session = await getSession(sessionId);
                 const stepIndex = (session?.events?.length ?? 1) - 1;
-                const dataUrl = await chrome.tabs.captureVisibleTab({
-                  format: "jpeg",
-                  quality: 70,
-                });
-                const blob = await fetch(dataUrl).then((r) => r.blob());
-                await saveScreenshot(sessionId, stepIndex, blob);
+                await captureCurrentStep(sessionId, stepIndex);
               } catch (err) {
                 console.warn("[StudioBase] Screenshot capture failed:", err);
               }
@@ -93,9 +146,78 @@ chrome.runtime.onMessage.addListener(
         sbLog(tag, data);
         break;
       }
+      case "UPLOAD_HEARTBEAT":
+        // This keeps the service worker alive during long offscreen uploads
+        chrome.storage.local.get(['sb_state']).catch(() => {});
+        break;
     }
     return false; // channel closed — no async response needed
   },
+);
+
+// ... rest of the functions ...
+
+async function captureCurrentStep(sessionId: string, stepIndex: number) {
+  let blob: Blob | null = null;
+  let captureSource = 'unknown';
+
+  if (ENABLE_OFFSCREEN_CAPTURE && isOffscreenReady) {
+    try {
+      console.log(`📸 [ServiceWorker] Requesting frame from offscreen for step ${stepIndex}`);
+      // Timeout the message just in case offscreen is frozen
+      const responsePromise = chrome.runtime.sendMessage({ type: 'GET_FRAME' });
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject('timeout'), 2000));
+      
+      const response = await Promise.race([responsePromise, timeoutPromise]) as any;
+      
+      if (response && response.blob) {
+        blob = response.blob;
+        captureSource = 'offscreen';
+      } else {
+        console.warn("📸 [ServiceWorker] Offscreen capture returned no blob, falling back...");
+      }
+    } catch (err) {
+      console.error("📸 [ServiceWorker] Offscreen capture failed:", err);
+    }
+  }
+
+  // Fallback to captureVisibleTab if offscreen fails or is disabled
+  if (!blob) {
+    try {
+      console.log(`⚠️ [ServiceWorker] Using fallback captureVisibleTab for step ${stepIndex}`);
+      const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'jpeg', quality: 80 });
+      const res = await fetch(dataUrl);
+      blob = await res.blob();
+      captureSource = 'browser-tab';
+    } catch (err) {
+      console.error("📸 [ServiceWorker] All capture methods failed:", err);
+      return;
+    }
+  }
+
+  console.log(`✅ [ServiceWorker] Step ${stepIndex} captured via ${captureSource} (${blob?.size} bytes)`);
+
+  if (blob) {
+    await saveScreenshot(sessionId, stepIndex, blob);
+  }
+}
+ 
+// ─── External Message Handling (for Studio Website) ──────────
+ 
+chrome.runtime.onMessageExternal.addListener(
+  (msg: any, _sender, sendResponse) => {
+    if (msg.type === "GET_AUTH_TOKEN") {
+      chrome.storage.local.get(["sb_user"]).then((stored) => {
+        sendResponse({ 
+          token: stored.sb_user?.accessToken || null,
+          workspaceId: stored.sb_user?.workspaceId || null,
+          userId: stored.sb_user?.userId || null
+        });
+      }).catch(() => sendResponse({ token: null }));
+      return true; // Keep channel open for async response
+    }
+    return false;
+  }
 );
 
 // ─── State Updates ───────────────────────────────────────────
@@ -191,23 +313,17 @@ async function stopRecording() {
       );
     }
 
-    let videoBlob: Blob | null = null;
     if (state.includeVideo) {
       try {
-        const res = await chrome.runtime.sendMessage({ type: 'STOP_VIDEO_RECORDING' });
-        if (res?.blob) {
-          // Convert Data URL back to Blob
-          const response = await fetch(res.blob);
-          videoBlob = await response.blob();
-        }
+        await chrome.runtime.sendMessage({ type: 'STOP_VIDEO_RECORDING' });
       } catch (err) {
-        console.warn("[StudioBase] Failed to collect video from offscreen:", err);
+        console.warn("[StudioBase] Failed to stop offscreen recording:", err);
       }
     }
 
     const backendSessionId = await uploadSession(session, (pct) => {
       updateState({ uploadProgress: pct });
-    }, videoBlob);
+    }, state.includeVideo);
 
     await updateState({
       status: "ready",
