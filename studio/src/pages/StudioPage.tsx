@@ -14,7 +14,8 @@ import {
 } from '../components/studio/Panels';
 import type { Step, ChapterBreak as IChapterBreak } from '../../../shared/types/session';
 import { BACKEND_URL } from '../../../shared/constants';
-
+import { RenderConstants } from '../modules/render-engine/RenderConstants';
+import { CinematicMath } from '../modules/render-engine/CinematicMath';
 const STUDIO_TABS = [
   { id: 'script',   label: 'Script',   icon: I.FileText, component: ScriptPanel },
   { id: 'brand',    label: 'Brand',    icon: I.Palette,  component: BrandPanel },
@@ -85,7 +86,7 @@ export const StudioPage: React.FC = () => {
     const interval = setInterval(() => {
       console.log('🔄 [StudioPage] Refreshing assets...');
       fetchSession(sessionId);
-    }, 15 * 60 * 1000);
+    }, RenderConstants.ASSET_REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
   }, [fetchSession]);
@@ -158,9 +159,9 @@ export const StudioPage: React.FC = () => {
           {isPanelOpen && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 480, opacity: 1 }}
+              animate={{ width: RenderConstants.PANEL_WIDTH, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 280, damping: 36 }}
+              transition={RenderConstants.PANEL_SPRING}
               className="shrink-0 border-r border-border bg-surface flex flex-col overflow-hidden"
             >
               <div className="px-3 pt-2 border-b border-border overflow-x-auto">
@@ -215,7 +216,7 @@ export const StudioPage: React.FC = () => {
         {/* Canvas */}
         <motion.section 
           layout
-          transition={{ type: 'spring', stiffness: 280, damping: 36 }}
+          transition={RenderConstants.PANEL_SPRING}
           className="flex-1 min-w-0 flex flex-col relative"
         >
           <button
@@ -319,8 +320,8 @@ const SOPCanvas: React.FC = () => {
 
   return (
     <div ref={sopVideoRef} className="flex-1 min-h-0 scroll-y bg-bg relative" data-print="sop">
-      <DotGrid className="!fixed" glowRadius={500} />
-      <div className="max-w-[860px] mx-auto px-6 pt-16 pb-32 relative z-10">
+      <DotGrid className="!fixed" glowRadius={RenderConstants.GLOW_RADIUS} />
+      <div className="mx-auto px-6 pt-16 pb-32 relative z-10" style={{ maxWidth: RenderConstants.SOP_MAX_WIDTH }}>
         <motion.header
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -588,23 +589,11 @@ const VideoCanvas: React.FC = () => {
   const sameContext = isSameContext(prevStep, currentStep);
 
   // Normalization & Target Calculation
-  const getTarget = (step: any) => {
-    const manual = step?.animationTarget;
-    const coords = step?.data?.coordinates;
-    const useAuto = !manual || manual.zoomScale <= 1;
-    if (useAuto && coords) {
-      return {
-        centerX: Math.max(15, Math.min(85, (coords.x / (coords.viewportWidth || 1440)) * 100)),
-        centerY: Math.max(15, Math.min(85, (coords.y / (coords.viewportHeight || 900)) * 100)),
-        zoomScale: renderMode === 'hybrid' ? 1 : 1.55, // 100% for video, 155% for slides
-      };
-    }
-    return manual || { centerX: 50, centerY: 50, zoomScale: 1 };
-  };
-
-  const prevTarget = getTarget(prevStep);
-  const target = getTarget(currentStep);
+  const prevTarget = CinematicMath.getTarget(prevStep, renderMode);
+  const target = CinematicMath.getTarget(currentStep, renderMode);
   const hasZoom = target.zoomScale > 1;
+
+  const camera = CinematicMath.calculateCamera(target, prevTarget, isPlaying);
 
   useEffect(() => {
     if (!isExporting) {
@@ -612,49 +601,13 @@ const VideoCanvas: React.FC = () => {
     }
   }, [currentStepIndex, currentStep?.id, isExporting]);
 
-  // Camera Math: translate(tx, ty) scale(scale)
-  // Physical Correctness: Translate relative to the center, then scale
-  const scale = (hasZoom || !isPlaying) ? target.zoomScale : 1;
-  const tx = (50 - target.centerX) * scale;
-  const ty = (50 - target.centerY) * scale;
-
-  const prevTX = (50 - prevTarget.centerX) * prevTarget.zoomScale;
-  const prevTY = (50 - prevTarget.centerY) * prevTarget.zoomScale;
-
-  // Momentum Logic for Large Jumps
-  const dx = tx - prevTX;
-  const dy = ty - prevTY;
-  const isLargeJump = Math.abs(dx) > 15 || Math.abs(dy) > 15;
-  const overshootX = tx + dx * 0.08;
-  const overshootY = ty + dy * 0.08;
-
   // Cinematic Re-orientation Sequence
-  const cinematicSequence = sameContext 
-    ? (isLargeJump && renderMode === 'slideshow'
-        ? { 
-            scale: [prevTarget.zoomScale, scale, scale], 
-            x: [`${prevTX}%`, `${overshootX}%`, `${tx}%`], 
-            y: [`${prevTY}%`, `${overshootY}%`, `${ty}%`] 
-          }
-        : { scale, x: `${tx}%`, y: `${ty}%` }
-      )
-    : (renderMode === 'hybrid' 
-        ? { scale: 1, x: '0%', y: '0%', opacity: [0, 1, 1] } 
-        : {
-            scale: [1.6, 1.15, 1.45, scale], // Apple-style re-orientation
-            x: ['0%', '0%', '0%', `${tx}%`],
-            y: ['0%', '0%', '0%', `${ty}%`],
-            opacity: [0, 1, 1, 1]
-          }
-      );
-
-  const springTransition = {
-    type: 'spring' as const,
-    stiffness: 70, // Premium inertia
-    damping: 18,   // Smooth settling
-    mass: 1.1,     // Physically weighted
-    restDelta: 0.001
-  };
+  const cinematicSequence = CinematicMath.getCinematicSequence(
+    sameContext,
+    camera.isLargeJump,
+    renderMode,
+    camera
+  );
 
 
 
@@ -854,14 +807,8 @@ const VideoCanvas: React.FC = () => {
   const prevCoords = prevStep?.data?.coordinates;
   const currCoords = currentStep?.data?.coordinates;
 
-  const cursorStartX = prevCoords
-    ? (prevCoords.x / (prevCoords.viewportWidth || 1440)) * 100 : 50;
-  const cursorStartY = prevCoords
-    ? (prevCoords.y / (prevCoords.viewportHeight || 900)) * 100 : 50;
-  const cursorEndX = currCoords
-    ? (currCoords.x / (currCoords.viewportWidth || 1440)) * 100 : 50;
-  const cursorEndY = currCoords
-    ? (currCoords.y / (currCoords.viewportHeight || 900)) * 100 : 50;
+  const { x: cursorStartX, y: cursorStartY } = CinematicMath.getHotspotPercent(prevCoords);
+  const { x: cursorEndX, y: cursorEndY } = CinematicMath.getHotspotPercent(currCoords);
 
 
 
@@ -874,7 +821,7 @@ const VideoCanvas: React.FC = () => {
       <div
         ref={playerRef}
         className="relative w-full max-w-5xl rounded-img shadow-card-lifted overflow-hidden bg-[#12121a]"
-        style={{ maxHeight: 'calc(100vh - 280px)', aspectRatio: '16/9' }}
+        style={{ maxHeight: RenderConstants.PLAYER_MAX_HEIGHT, aspectRatio: RenderConstants.PLAYER_ASPECT_RATIO }}
       >
         {/* Vibrant Shimmering Background */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -898,14 +845,14 @@ const VideoCanvas: React.FC = () => {
           {/* Core pulsating glow */}
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_#5e5ce655_0%,_transparent_60%)] animate-pulse" />
           
-          <DotGrid className="opacity-30" glowRadius={500} />
+          <DotGrid className="opacity-30" glowRadius={RenderConstants.GLOW_RADIUS} />
         </div>
         {/* Screenshot with Hybrid Camera (Smart Context) */}
         <div className="absolute inset-0 overflow-hidden">
           <motion.div
             key={videoUrl ? 'cinematic-video' : (sameContext ? 'same' : currentStepIndex)}
             animate={cinematicSequence}
-            transition={springTransition}
+            transition={RenderConstants.CAMERA_SPRING}
             className="absolute inset-0 origin-center"
           >
             {videoUrl ? (
@@ -930,10 +877,10 @@ const VideoCanvas: React.FC = () => {
                 step={currentStep}
                 session={session}
                 showChrome={false}
-                aspect="16/9"
+                aspect={RenderConstants.PLAYER_ASPECT_RATIO}
                 rounded=""
                 mode="stage"
-                parallaxOffset={{ x: tx, y: ty }}
+                parallaxOffset={{ x: camera.tx, y: camera.ty }}
                 className="w-full h-full !shadow-none"
               />
             )}
@@ -1498,25 +1445,25 @@ async function handleSOPVideoExport() {
   // 1. Setup high-res compositor (DOM ATTACHED for Hardware Sync)
   const canvas = document.createElement('canvas');
   canvas.id = 'export-compositor';
-  canvas.width = 2880;
-  canvas.height = 1444;
+  canvas.width = RenderConstants.EXPORT_COMPOSITOR_WIDTH;
+  canvas.height = RenderConstants.EXPORT_COMPOSITOR_HEIGHT;
   
   // Enforce DOM Presence and Visibility for CaptureStream reliability
   canvas.style.position = 'fixed';
   canvas.style.left = '0';
   canvas.style.top = '0';
-  canvas.style.width = '288px'; // 15% visual scale
-  canvas.style.height = '162px';
+  canvas.style.width = RenderConstants.EXPORT_VISUAL_WIDTH; // 15% visual scale
+  canvas.style.height = RenderConstants.EXPORT_VISUAL_HEIGHT;
 
   // --- BACKGROUND CACHE (Performance Fix) ---
   const bgCache = document.createElement('canvas');
-  bgCache.width = 2880; bgCache.height = 1444;
+  bgCache.width = RenderConstants.EXPORT_COMPOSITOR_WIDTH; bgCache.height = RenderConstants.EXPORT_COMPOSITOR_HEIGHT;
   const bctx = bgCache.getContext('2d')!;
   bctx.fillStyle = '#11111a';
-  bctx.fillRect(0, 0, 2880, 1444);
+  bctx.fillRect(0, 0, RenderConstants.EXPORT_COMPOSITOR_WIDTH, RenderConstants.EXPORT_COMPOSITOR_HEIGHT);
   bctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
-  for (let gx = 0; gx < 2880; gx += 60) {
-    for (let gy = 0; gy < 1444; gy += 60) {
+  for (let gx = 0; gx < RenderConstants.EXPORT_COMPOSITOR_WIDTH; gx += RenderConstants.GRID_SPACING) {
+    for (let gy = 0; gy < RenderConstants.EXPORT_COMPOSITOR_HEIGHT; gy += RenderConstants.GRID_SPACING) {
       bctx.beginPath(); bctx.arc(gx, gy, 1.2, 0, Math.PI * 2); bctx.fill();
     }
   }
@@ -1551,7 +1498,7 @@ async function handleSOPVideoExport() {
   try {
 
     // --- AUTO CAPTURE MODE (Bypassing Throttling) ---
-    const stream = (canvas as any).captureStream(30);
+    const stream = (canvas as any).captureStream(RenderConstants.EXPORT_FPS);
     videoTrack = stream.getVideoTracks()[0];
     
     const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
@@ -1559,8 +1506,8 @@ async function handleSOPVideoExport() {
     
     const recorder = new MediaRecorder(stream, { 
       mimeType, 
-      videoBitsPerSecond: 25000000,
-      bitsPerSecond: 25000000 
+      videoBitsPerSecond: RenderConstants.EXPORT_VIDEO_BITRATE,
+      bitsPerSecond: RenderConstants.EXPORT_VIDEO_BITRATE 
     });
 
     // --- HELPER: PREVENT VISUAL SILENCE ---
@@ -1601,7 +1548,7 @@ async function handleSOPVideoExport() {
 
   console.log("🎬 [Export] Starting Recorder...");
   recorder.start(1000); // Small timeslices to prevent memory soak
-  const fps = 30;
+  const fps = RenderConstants.EXPORT_FPS;
 
   // --- HELPER: DETECT TAINTED CANVAS ---
   const validateCanvasIntegrity = () => {
