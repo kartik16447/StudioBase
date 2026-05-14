@@ -7,7 +7,7 @@ import {
   cn, Badge, Kbd, AIShimmer, AIButton, DotGrid, ScreenshotPlaceholder, Button 
 } from '../components/ui';
 import { 
-  StudioTopBar, SummaryCallout, StepCard, ChapterBreak 
+  StudioHeader, SidebarControls, SummaryCallout, StepCard, ChapterBreak 
 } from '../components/studio';
 import { 
   ScriptPanel, BrandPanel, ChaptersPanel, AIVoicePanel, MusicPanel, VisualsPanel, ZoomsPanel, ElementsPanel 
@@ -38,6 +38,9 @@ export const StudioPage: React.FC = () => {
   const navigate = useStudioStore(state => state.navigate);
   const setActiveTab = useStudioStore(state => state.setActiveTab);
   const togglePanel = useStudioStore(state => state.togglePanel);
+  const setActiveView = useStudioStore(state => state.setActiveView);
+  const renderMode = useStudioStore(state => state.renderMode);
+  const setRenderMode = useStudioStore(state => state.setRenderMode);
 
   const activeTabItem = STUDIO_TABS.find(t => t.id === activeTab) || STUDIO_TABS[0];
 
@@ -151,67 +154,22 @@ export const StudioPage: React.FC = () => {
 
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-      <StudioTopBar />
+      <StudioHeader 
+        activeView={activeView}
+        setActiveView={setActiveView}
+        renderMode={renderMode}
+        setRenderMode={setRenderMode}
+        onNavigateHome={() => navigate('home')}
+      />
       <div className="flex-1 flex min-h-0">
         
         {/* Left Panel */}
-        <AnimatePresence initial={false}>
-          {isPanelOpen && (
-            <motion.aside
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: RenderConstants.PANEL_WIDTH, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={RenderConstants.PANEL_SPRING}
-              className="shrink-0 border-r border-border bg-surface flex flex-col overflow-hidden"
-            >
-              <div className="px-3 pt-2 border-b border-border overflow-x-auto">
-                <div className="flex items-center gap-0 min-w-max">
-                  {STUDIO_TABS.map(t => {
-                    const active = activeTab === t.id;
-                    const isLocked = ['voice', 'music', 'visuals', 'elements'].includes(t.id);
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => setActiveTab(t.id)}
-                        className={cn(
-                          'relative inline-flex items-center gap-1.5 h-11 px-3 text-[12.5px] font-medium transition-colors',
-                          active ? 'text-text' : 'text-text-2 hover:text-text',
-                          isLocked && 'opacity-60',
-                        )}
-                      >
-                        <t.icon size={14} strokeWidth={1.9} />
-                        {t.label}
-                        {isLocked && <I.Lock size={10} className="text-text-3" />}
-                        {active && (
-                          <motion.span
-                            layoutId="tab-indicator"
-                            className="absolute -bottom-px left-2 right-2 h-[2px] rounded-full bg-primary"
-                            transition={{ type:'spring', stiffness:420, damping:34 }}
-                          />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-hidden relative">
-                <AnimatePresence mode="sync">
-                  <motion.div
-                    key={activeTabItem.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.18 }}
-                    className="absolute inset-0"
-                  >
-                    <activeTabItem.component />
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-            </motion.aside>
-          )}
-        </AnimatePresence>
+        <SidebarControls 
+          isPanelOpen={isPanelOpen}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          tabs={STUDIO_TABS}
+        />
 
         {/* Canvas */}
         <motion.section 
