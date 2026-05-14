@@ -1,6 +1,7 @@
 let mediaRecorder: MediaRecorder | null = null;
 let videoChunks: Blob[] = [];
 let capturedBlob: Blob | null = null;
+let lastDesktopFrame: Blob | null = null;
 
 // Singleton canvas for frame grabbing
 const captureCanvas = document.createElement('canvas');
@@ -19,7 +20,9 @@ const MAX_ANCHORS = 10;
 async function emitDesktopEvent(eventType: string, payload: any, includeScreenshot: boolean = false) {
   let blob: Blob | null = null;
   if (includeScreenshot) {
-    blob = await captureFrame();
+    // Use buffered frame if available (captured at the moment of exit), otherwise capture fresh
+    blob = lastDesktopFrame || await captureFrame();
+    lastDesktopFrame = null; // Consume the buffer to prevent memory leaks
   }
 
   chrome.runtime.sendMessage({
@@ -65,7 +68,14 @@ function handleFocusChange(isChromeFocused: boolean) {
   if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
 
   if (!isChromeFocused) {
-    // Focus Left Chrome -> Start 3s Debounce
+    // Immediate "Focus Lost" Probe
+    console.log("🧭 [Offscreen] Focus lost. Probing video stream for immediate anchor...");
+    emitDesktopEvent('desktop_focus_lost', {
+      timestamp: Date.now(),
+      context: 'desktop'
+    }, true);
+
+    // Focus Left Chrome -> Start 3s Debounce for stable Desktop session
     if (!activeDesktopSession && !debounceTimer) {
       console.log("🧭 [Offscreen] Focus lost. Starting 3s debounce...");
       debounceTimer = setTimeout(async () => {
@@ -78,7 +88,7 @@ function handleFocusChange(isChromeFocused: boolean) {
         await emitDesktopEvent('context_switch', {
           context: 'desktop',
           timestamp: desktopStartTime
-        });
+        }, true);
 
         // First Anchor
         await emitDesktopEvent('desktop_anchor', {
@@ -102,7 +112,7 @@ function handleFocusChange(isChromeFocused: boolean) {
       emitDesktopEvent('context_switch', {
         context: 'browser',
         timestamp: Date.now()
-      });
+      }, true);
     }
   }
 }
@@ -123,7 +133,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     uploadVideo(message.uploadUrl, message.token, sendResponse);
     return true;
   } else if (message.type === 'GET_FRAME') {
-    captureFrame().then((blob) => {
+    const processFrame = async (blob: Blob | null) => {
       if (blob) {
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -133,10 +143,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } else {
         sendResponse({ error: 'Failed to capture frame' });
       }
-    });
-    return true;
+    };
+
+    if (lastDesktopFrame) {
+      console.log("📸 [Offscreen] Serving buffered frame to Service Worker.");
+      processFrame(lastDesktopFrame);
+      lastDesktopFrame = null; // Consume
+    } else {
+      captureFrame().then(processFrame);
+    }
+    return true; 
   } else if (message.type === 'WINDOW_FOCUS_CHANGED') {
     handleFocusChange(message.isChromeFocused);
+  } else if (message.type === 'CAPTURE_CURRENT_FRAME_NOW') {
+    captureFrame().then(blob => {
+      lastDesktopFrame = blob;
+      console.log("📸 [Offscreen] Buffered frame for focus-lost event.");
+    });
   }
 });
 
@@ -183,32 +206,64 @@ async function startRecording(sessionId: string, sendResponse: (response: any) =
   }
 }
 
+async function captureCleanFrame(): Promise<Blob | null> {
+  // 1. Wait for 150ms to ensure the OS has finished the window transition repaint
+  await new Promise(r => setTimeout(r, 150));
+  
+  // 2. Snap the frame
+  const blob = await captureFrame(); 
+  
+  // 3. Validation: If the blob is too small (e.g., < 5KB), it's likely a black/blank frame
+  if (blob && blob.size < 5000) {
+    console.warn("⚠️ [Offscreen] Captured frame too small, likely black. Retrying once...");
+    await new Promise(r => setTimeout(r, 100));
+    return captureFrame();
+  }
+  return blob;
+}
+
 async function captureFrame(): Promise<Blob | null> {
   if (!mediaRecorder) return null;
   const stream = mediaRecorder.stream;
   const videoTrack = stream.getVideoTracks()[0];
   if (!videoTrack) return null;
 
+  // Use a temporary video element to probe the stream
   const v = document.createElement('video');
   v.srcObject = stream;
   v.muted = true;
-  await v.play();
-
-  captureCanvas.width = v.videoWidth;
-  captureCanvas.height = v.videoHeight;
   
-  if (captureCtx) {
-    captureCtx.drawImage(v, 0, 0);
-    v.srcObject = null;
-    v.remove();
-    
-    return new Promise((resolve) => {
-      captureCanvas.toBlob((blob) => {
-        resolve(blob);
-      }, 'image/jpeg', 0.85);
-    });
-  }
-  return null;
+  return new Promise((resolve) => {
+    v.onloadedmetadata = () => {
+      v.play().then(() => {
+        captureCanvas.width = v.videoWidth;
+        captureCanvas.height = v.videoHeight;
+        
+        if (captureCtx) {
+          captureCtx.drawImage(v, 0, 0);
+          v.srcObject = null;
+          v.remove();
+          
+          captureCanvas.toBlob((blob) => {
+            resolve(blob);
+          }, 'image/jpeg', 0.85);
+        } else {
+          v.srcObject = null;
+          v.remove();
+          resolve(null);
+        }
+      });
+    };
+    v.onerror = () => {
+      v.remove();
+      resolve(null);
+    };
+    // Safety timeout
+    setTimeout(() => {
+      if (v.parentNode) v.remove();
+      resolve(null);
+    }, 1500);
+  });
 }
 
 function stopRecording(sendResponse: (response: any) => void) {

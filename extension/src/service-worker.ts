@@ -20,6 +20,26 @@ let state: AppState = { status: "idle" };
 let isOffscreenReady = false;
 const ENABLE_OFFSCREEN_CAPTURE = true;
 
+// ─── Event Queue & Deduplication ─────────────────────────────
+let eventQueue: Promise<any> = Promise.resolve();
+let lastEventLog: Record<string, number> = {};
+
+function queueEvent(task: () => Promise<void>, dedupeKey?: string) {
+  if (dedupeKey) {
+    const now = Date.now();
+    if (lastEventLog[dedupeKey] && now - lastEventLog[dedupeKey] < 500) {
+      console.log(`🚫 [ServiceWorker] Deduplicated rapid-fire event: ${dedupeKey}`);
+      return eventQueue;
+    }
+    lastEventLog[dedupeKey] = now;
+  }
+
+  eventQueue = eventQueue.then(task).catch(err => {
+    console.error("❌ [ServiceWorker] Event Queue Error:", err);
+  });
+  return eventQueue;
+}
+
 // ─── Initialization ──────────────────────────────────────────
 
 async function init() {
@@ -46,6 +66,41 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
   
   console.log(`🧭 [ServiceWorker] Focus changed. Chrome focused: ${isChromeFocused}`);
   
+  if (!isChromeFocused) {
+    // Snap-on-Exit: Grab the frame immediately and save an explicit anchor
+    queueEvent(async () => {
+      if (state.status !== "recording" || !state.sessionId) return;
+      
+      console.log("🧭 [ServiceWorker] Focus lost. Triggering explicit Desktop Anchor...");
+      // Trigger the offscreen buffer
+      await chrome.runtime.sendMessage({ type: 'CAPTURE_CURRENT_FRAME_NOW' }).catch(() => {});
+      
+      // Give offscreen a small window to complete the buffer
+      await new Promise(res => setTimeout(res, 400));
+
+      const response = await chrome.runtime.sendMessage({ type: 'GET_FRAME' }).catch(() => null);
+      if (response && response.base64data) {
+        const res = await fetch(response.base64data);
+        const blob = await res.blob();
+        
+        const session = await getSession(state.sessionId);
+        const stepIndex = session?.events?.length ?? 0;
+        
+        await saveScreenshot(state.sessionId, stepIndex, blob);
+        await appendEvent(state.sessionId, {
+          type: 'desktop_anchor',
+          timestamp: Date.now(),
+          selector: "",
+          data: { 
+            screenshotKey: `screenshots/${state.sessionId}/${stepIndex}.jpg`,
+            context: 'desktop'
+          },
+        });
+        console.log("✅ [ServiceWorker] Explicitly saved Desktop Anchor:", stepIndex);
+      }
+    }, 'focus_lost');
+  }
+  
   chrome.runtime.sendMessage({ 
     type: 'WINDOW_FOCUS_CHANGED', 
     isChromeFocused 
@@ -71,21 +126,30 @@ chrome.runtime.onMessage.addListener(
     if (msg.type === 'SAVE_DESKTOP_EVENT') {
       if (state.status === 'recording' && state.sessionId) {
         const { eventType, payload, blob } = msg;
-        console.log(`💾 [ServiceWorker] Saving desktop event: ${eventType}`);
         
-        // 1. Handle Screenshot if present
-        const handleCapture = async () => {
-          if (blob && state.sessionId) {
-            const session = await getSession(state.sessionId);
-            const stepIndex = (session?.events?.length ?? 0);
-            await saveScreenshot(state.sessionId, stepIndex, blob);
-            return `screenshots/${state.sessionId}/${stepIndex}.jpg`;
-          }
-          return null;
-        };
+        // Suppress redundant desktop_focus_lost in favor of explicit anchors
+        if (eventType === 'desktop_focus_lost') return false;
 
-        handleCapture().then(async (screenshotKey) => {
+        queueEvent(async () => {
           if (!state.sessionId) return;
+          console.log("📥 [SW Audit] Received Desktop Event from Offscreen:", {
+            eventType,
+            hasBlob: !!blob,
+            blobSize: blob?.size
+          });
+          
+          // 1. Handle Screenshot if present
+          const handleCapture = async () => {
+            if (blob && state.sessionId) {
+              const session = await getSession(state.sessionId);
+              const stepIndex = (session?.events?.length ?? 0);
+              await saveScreenshot(state.sessionId, stepIndex, blob);
+              return `screenshots/${state.sessionId}/${stepIndex}.jpg`;
+            }
+            return null;
+          };
+
+          const screenshotKey = await handleCapture();
           await appendEvent(state.sessionId, {
             type: eventType,
             timestamp: payload.timestamp || Date.now(),
@@ -96,7 +160,7 @@ chrome.runtime.onMessage.addListener(
               context: payload.context || 'desktop'
             },
           });
-        });
+        }, eventType);
       }
       return false;
     }

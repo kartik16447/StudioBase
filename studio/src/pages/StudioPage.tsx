@@ -1846,8 +1846,6 @@ async function handleSOPVideoExport() {
     }
 
     // --- CINEMATIC TARGET CALCULATION (Safe Math Edition) ---
-    const stepDuration = 2400; 
-    const stepFrames = (stepDuration / 1000) * fps;
     const startScale = currentScale || 1.0;
     const startX = currentX || 50;
     const startY = currentY || 50;
@@ -1872,8 +1870,16 @@ async function handleSOPVideoExport() {
       targetCenterX = Math.max(15, Math.min(85, (centerX / vw) * 100));
       targetCenterY = Math.max(15, Math.min(85, (centerY / vh) * 100));
     } else {
-       targetZoomScale = 1.0; 
+      // Vision Fallback: Subtle drift for native apps where metadata is missing
+      targetZoomScale = 1.15; 
+      targetCenterX = 50;
+      targetCenterY = 50;
     }
+
+    const jumpDist = Math.abs(targetCenterX - startX);
+    let stepDuration = Math.max(2, ((step as any).duration || 5)); 
+    if (jumpDist > 40) stepDuration *= 1.5; // Smooth out large context snaps
+    const stepFrames = Math.floor(stepDuration * fps);
 
     let masterFrame: VideoFrame | null = null;
 
@@ -1959,10 +1965,21 @@ async function handleSOPVideoExport() {
           if (sw > aw) sw = aw;
           if (sh > ah) sh = ah;
 
-          // 3. Coordinate Translation & Rasterization (Soft Floating Math)
-          // We now use Destination Math to prevent black out-of-bounds stripes.
-          const dw = canvas.width * fScale;
-          const dh = canvas.height * fScale;
+          // 3. Aspect-Aware Compositing (Prevent Squishing)
+          const sourceAspect = aw / ah;
+          const canvasAspect = canvas.width / canvas.height;
+
+          let baseW, baseH;
+          if (sourceAspect > canvasAspect) {
+              baseW = canvas.width;
+              baseH = canvas.width / sourceAspect;
+          } else {
+              baseH = canvas.height;
+              baseW = canvas.height * sourceAspect;
+          }
+
+          const dw = baseW * fScale;
+          const dh = baseH * fScale;
           
           // Position the video such that the target coordinate (fX/fY) is centered on the canvas
           const dx = (canvas.width / 2) - (fX * dw);
@@ -1970,19 +1987,20 @@ async function handleSOPVideoExport() {
         
           ctx.globalAlpha = 1.0;
         
-          // --- IMAGEBITMAP BRIDGE (Sanitized Floating Math + Soft Corners) ---
+          // --- IMAGEBITMAP BRIDGE (Aspect-Aware + Soft Corners) ---
           const bitmap = await createImageBitmap(safeFrame as any);
           ctx.save();
           // Create the "Floating" clipping path to remove sharp boundaries
           ctx.beginPath();
           if (typeof (ctx as any).roundRect === 'function') {
-            (ctx as any).roundRect(dx, dy, dw, dh, 48 * fScale); 
+            (ctx as any).roundRect(dx, dy, dw, dh, 40 * fScale); 
           } else {
             ctx.rect(dx, dy, dw, dh);
           }
           ctx.clip();
           
-          ctx.drawImage(bitmap, 0, 0, aw, ah, dx, dy, dw, dh);
+          // Edge Overscan: Inset 2px to hide 1px capture artifacts
+          ctx.drawImage(bitmap, 2, 2, aw - 4, ah - 4, dx, dy, dw, dh);
           ctx.restore();
           bitmap.close();
         }
