@@ -454,52 +454,48 @@ const SOPCanvas: React.FC = () => {
               {useStudioStore.getState().isExporting ? 'Recording...' : 'Cinematic Export'}
             </Button>
             
-            {session.videoKey && (
-              <Button
-                variant="ghost"
-                size="md"
-                icon={I.Download}
-                onClick={() => {
-                  const videoUrl = session.videoKey ? session.assets?.[session.videoKey] : null;
-                  if (videoUrl) {
-                    const a = document.createElement('a');
-                    a.href = videoUrl;
-                    a.download = `${session.aiOutputs?.title || 'recording'}.webm`;
-                    a.target = "_blank";
-                    a.click();
-                  }
-                }}
-              >
-                Download Raw
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="md"
+              icon={I.Download}
+              onClick={() => {
+                const videoUrl = session.videoKey ? session.assets?.[session.videoKey] : null;
+                if (videoUrl) {
+                  const a = document.createElement('a');
+                  a.href = videoUrl;
+                  a.download = `${session.aiOutputs?.title || 'recording'}.webm`;
+                  a.target = "_blank";
+                  a.click();
+                }
+              }}
+            >
+              Download Raw
+            </Button>
 
             <Button variant="primary" size="md" icon={I.Share2}>Publish & share</Button>
           </div>
 
-          {session.videoKey && (
-            <div className="mt-8 pt-8 border-t border-border">
-              <div className="flex items-center justify-center gap-3">
-                <div className="flex -space-x-2">
-                  <div className="w-8 h-8 rounded-full border-2 border-surface bg-primary/10 flex items-center justify-center text-primary">
-                    <I.Video size={14} />
-                  </div>
+          <div className="mt-8 pt-8 border-t border-border">
+            <div className="flex items-center justify-center gap-3">
+              <div className="flex -space-x-2">
+                <div className="w-8 h-8 rounded-full border-2 border-surface bg-primary/10 flex items-center justify-center text-primary">
+                  <I.Video size={14} />
                 </div>
-                <div className="text-left">
-                  <p className="text-[13px] font-semibold text-text">Full screen recording available</p>
-                  <p className="text-[12px] text-text-3">Watch the real-time video of this session</p>
-                </div>
-                <Button 
-                  variant="primary" 
-                  size="sm" 
-                  className="ml-4" 
-                  onClick={() => useStudioStore.getState().setActiveView('video')}
-                >
-                  Switch to Video SOP
-                </Button>
               </div>
+              <div className="text-left">
+                <p className="text-[13px] font-semibold text-text">Full screen recording available</p>
+                <p className="text-[12px] text-text-3">Watch the real-time video of this session</p>
+              </div>
+              <Button 
+                variant="primary" 
+                size="sm" 
+                className="ml-4" 
+                onClick={() => useStudioStore.getState().setActiveView('video')}
+              >
+                Switch to Video SOP
+              </Button>
             </div>
-          )}
+          </div>
 
           <AnimatePresence>
             {showEmbed && (
@@ -1294,25 +1290,23 @@ const VideoCanvas: React.FC = () => {
             {isExporting ? 'Exporting...' : 'Cinematic Export'}
           </Button>
 
-          {session?.videoKey && (
-            <Button
-              variant="ghost"
-              size="md"
-              icon={I.Download}
-              onClick={() => {
-                const videoUrl = session.videoKey ? session.assets?.[session.videoKey] : null;
-                if (videoUrl) {
-                  const a = document.createElement('a');
-                  a.href = videoUrl;
-                  a.download = `${session.aiOutputs?.title || 'recording'}.webm`;
-                  a.target = "_blank";
-                  a.click();
-                }
-              }}
-            >
-              Download Raw
-            </Button>
-          )}
+          <Button
+            variant="ghost"
+            size="md"
+            icon={I.Download}
+            onClick={() => {
+              const videoUrl = session.videoKey ? session.assets?.[session.videoKey] : null;
+              if (videoUrl) {
+                const a = document.createElement('a');
+                a.href = videoUrl;
+                a.download = `${session.aiOutputs?.title || 'recording'}.webm`;
+                a.target = "_blank";
+                a.click();
+              }
+            }}
+          >
+            Download Raw
+          </Button>
         </div>
       </div>
     </div>

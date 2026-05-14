@@ -74,7 +74,7 @@ export const useStudioStore = create<StudioState>((set) => ({
   session: null,
   activeTab: 'script',
   isPanelOpen: true,
-  activeView: 'sop',
+  activeView: 'video',
   activeTool: 'cursor',
   isToolbarVisible: true,
   focusedStepId: null,
