@@ -4,10 +4,10 @@ import { cn, Button, Avatar } from '../ui';
 import { I } from '../icons';
 
 export interface StudioHeaderProps {
-  activeView: string;
-  setActiveView: (view: string) => void;
-  renderMode: string;
-  setRenderMode: (mode: string) => void;
+  activeView: 'sop' | 'video' | 'demo';
+  setActiveView: (view: 'sop' | 'video' | 'demo') => void;
+  renderMode: 'hybrid' | 'slideshow';
+  setRenderMode: (mode: 'hybrid' | 'slideshow') => void;
   onNavigateHome: () => void;
 }
 
