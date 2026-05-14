@@ -1849,6 +1849,8 @@ async function handleSOPVideoExport() {
       targetScale = isFinite(calcScale) ? Math.min(2.5, calcScale) : 1.1;
     }
 
+    let masterFrame: VideoFrame | null = null;
+
     for (let f = 0; f < totalFrames; f++) {
       const progress = f / totalFrames;
       const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
@@ -1857,42 +1859,57 @@ async function handleSOPVideoExport() {
       const fY = currentY + (targetY - currentY) * ease;
 
       // --- DETERMINISTIC FRAME CAPTURE ---
-      let frame: VideoFrame | null = null;
       if (hasTimestamp && extractor) {
         const absTargetMs = (step.timestamp || 0) + (progress * duration);
         const relTargetMs = toRelativeMs(absTargetMs);
         try {
-          frame = await extractor.getFrame(relTargetMs);
+          const newFrame = await extractor.getFrame(relTargetMs);
+          if (newFrame) {
+            // Fix the Master Frame Leak: Explicit Handover
+            if (masterFrame) masterFrame.close();
+            masterFrame = newFrame;
+          }
         } catch (e) {
           console.error(`❌ [Export] Frame extraction failed at rel ${relTargetMs}ms:`, e);
         }
       }
-      const currentAsset = frame || asset;
+      const currentAsset = masterFrame || asset;
 
       if (!currentAsset) {
-        frame?.close();
         continue;
+      }
+
+      // 1. Memory Safety: Clone the frame to stop destroying the master asset.
+      // We wrap in a try/catch in case the source frame was already disposed by the player/extractor.
+      let safeFrame: any = null;
+      if (currentAsset && typeof (currentAsset as any).clone === 'function') {
+        try {
+          safeFrame = (currentAsset as any).clone();
+        } catch (e) {
+          // If the frame was somehow already closed, ignore and let it draw black for 1ms
+        }
+      } else {
+        safeFrame = currentAsset; // Fallback for standard images/bitmaps
       }
 
       try {
         ctx.save();
-        // Enforce solid background to prevent bitrate collapse
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
         
-        ctx.fillStyle = '#FF00FF'; // Magenta Canary (Truth Validation)
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (safeFrame) {
+          // Only fill background if we have a new frame to draw, otherwise freeze
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        const aw = (currentAsset as any).displayWidth || (currentAsset as any).width || 2880;
-        const ah = (currentAsset as any).displayHeight || (currentAsset as any).height || 1444;
+          const aw = (safeFrame as any)?.displayWidth || (safeFrame as any)?.width || 2880;
+          const ah = (safeFrame as any)?.displayHeight || (safeFrame as any)?.height || 1444;
         const sw = aw / fScale; const sh = ah / fScale;
         const sx = (aw * fX) - (sw / 2); const sy = (ah * fY) - (sh / 2);
         
-        ctx.globalAlpha = progress < 0.2 ? progress * 5 : 1.0;
+        ctx.globalAlpha = 1.0;
         
         // --- IMAGEBITMAP BRIDGE (Sanitized Math) ---
-        // Safely create the bitmap using the frame's internal dimensions
-        const bitmap = await createImageBitmap(currentAsset as any);
+        // Safely create the bitmap using the cloned frame's internal dimensions
+        const bitmap = await createImageBitmap(safeFrame as any);
         
         // Final barrier against NaN/0 to prevent Canvas API silent abortion
         const safeSw = Math.max(1, sw || bitmap.width);
@@ -1902,6 +1919,7 @@ async function handleSOPVideoExport() {
 
         ctx.drawImage(bitmap, safeSx, safeSy, safeSw, safeSh, 0, 0, canvas.width, canvas.height);
         bitmap.close();
+        }
         
         // --- DETERMINISTIC PAINT YIELD ---
         await new Promise(res => setTimeout(res, 0));
@@ -1910,7 +1928,11 @@ async function handleSOPVideoExport() {
       } catch (err) {
         console.error("❌ [Export] Render tick error:", err);
       } finally {
-        if (frame) frame.close(); // Dispose clone immediately
+        // ONLY close the clone we made for this specific tick.
+        // DO NOT close currentAsset or frame here! The player/extractor manages that.
+        if (safeFrame && typeof (safeFrame as any).close === 'function') {
+          (safeFrame as any).close();
+        }
         ctx.restore();
       }
 
@@ -1966,6 +1988,10 @@ async function handleSOPVideoExport() {
       if ((videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
       framesRequested++; framesDrawn++;
       await new Promise(res => setTimeout(res, 33)); 
+    }
+    if (masterFrame) {
+      masterFrame.close();
+      masterFrame = null;
     }
     currentX = targetX;
     currentY = targetY;
