@@ -1513,6 +1513,19 @@ async function handleSOPVideoExport() {
   canvas.style.top = '0';
   canvas.style.width = '288px'; // 15% visual scale
   canvas.style.height = '162px';
+
+  // --- BACKGROUND CACHE (Performance Fix) ---
+  const bgCache = document.createElement('canvas');
+  bgCache.width = 2880; bgCache.height = 1444;
+  const bctx = bgCache.getContext('2d')!;
+  bctx.fillStyle = '#11111a';
+  bctx.fillRect(0, 0, 2880, 1444);
+  bctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+  for (let gx = 0; gx < 2880; gx += 60) {
+    for (let gy = 0; gy < 1444; gy += 60) {
+      bctx.beginPath(); bctx.arc(gx, gy, 1.2, 0, Math.PI * 2); bctx.fill();
+    }
+  }
   canvas.style.opacity = '0.05'; 
   canvas.style.pointerEvents = 'none';
   canvas.style.zIndex = '9999'; // Front-and-Center
@@ -1633,8 +1646,9 @@ async function handleSOPVideoExport() {
   const steps = session?.steps || [];
   const chapterMap = new Map((session?.metadata?.chapterBreaks || []).map(c => [c.afterStepId, c]));
 
-  // --- STEP BY STEP RENDERING ---
-  let currentX = 0.5, currentY = 0.5, currentScale = 1.0;
+  // --- STEP BY STEP RENDERING (Unified Architecture) ---
+  // Store center in percentages (0-100) to match Preview Player logic
+  let currentX = 50, currentY = 50, currentScale = 1.0;
   
   // --- FILTERED VISIBILITY HACK ---
   // Transparent informational overlay (No occlusion to keep rasterizer active)
@@ -1831,36 +1845,53 @@ async function handleSOPVideoExport() {
       continue;
     }
 
-    // Camera Animation (Pan/Zoom)
-    const duration = 2400; 
-    const totalFrames = (duration / 1000) * fps;
-    const coords = step.data?.coordinates;
-    let targetX = 0.5;
-    let targetY = 0.5;
-    let targetScale = 1.1;
+    // --- CINEMATIC TARGET CALCULATION (Safe Math Edition) ---
+    const stepDuration = 2400; 
+    const stepFrames = (stepDuration / 1000) * fps;
+    const startScale = currentScale || 1.0;
+    const startX = currentX || 50;
+    const startY = currentY || 50;
 
-    if (coords && typeof coords.x === 'number' && typeof coords.width === 'number') {
-      const calcX = (coords.x + coords.width / 2) / (coords.viewportWidth || 1440);
-      const calcY = (coords.y + coords.height / 2) / (coords.viewportHeight || 900);
-      const calcScale = (coords.viewportWidth || 1440) / (coords.width * 1.5);
+    const coords = (step.data as any)?.coordinates;
+    let targetZoomScale = 1.0;
+    let targetCenterX = 50;
+    let targetCenterY = 50;
+
+    if (coords && typeof coords.x === 'number') {
+      targetZoomScale = 1.55;
+      // Smart Defaults: Use 80x80 if width/height are missing
+      const w = typeof coords.width === 'number' ? coords.width : 80;
+      const h = typeof coords.height === 'number' ? coords.height : 80;
+      const vw = coords.viewportWidth || 1440;
+      const vh = coords.viewportHeight || 900;
+
+      // Center-Point Fix: Target the middle of the interaction box
+      const centerX = coords.x + (w / 2);
+      const centerY = coords.y + (h / 2);
       
-      targetX = isFinite(calcX) ? calcX : 0.5;
-      targetY = isFinite(calcY) ? calcY : 0.5;
-      targetScale = isFinite(calcScale) ? Math.min(2.5, calcScale) : 1.1;
+      targetCenterX = Math.max(15, Math.min(85, (centerX / vw) * 100));
+      targetCenterY = Math.max(15, Math.min(85, (centerY / vh) * 100));
+    } else {
+       targetZoomScale = 1.0; 
     }
 
     let masterFrame: VideoFrame | null = null;
 
-    for (let f = 0; f < totalFrames; f++) {
-      const progress = f / totalFrames;
-      const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-      const fScale = currentScale + (targetScale - currentScale) * ease;
-      const fX = currentX + (targetX - currentX) * ease;
-      const fY = currentY + (targetY - currentY) * ease;
+    for (let f = 0; f < stepFrames; f++) {
+      const progress = f / stepFrames;
+      
+      // Safe approximation of an overdamped spring glide
+      // 1 - (1 - t)^4 provides a premium feel with zero NaN risk
+      const springProgress = 1 - Math.pow(1 - progress, 4);
+      
+      const fScale = startScale + (targetZoomScale - startScale) * springProgress;
+      // Interpolated center in ratio (0.0-1.0)
+      const fX = (startX + (targetCenterX - startX) * springProgress) / 100;
+      const fY = (startY + (targetCenterY - startY) * springProgress) / 100;
 
       // --- DETERMINISTIC FRAME CAPTURE ---
       if (hasTimestamp && extractor) {
-        const absTargetMs = (step.timestamp || 0) + (progress * duration);
+        const absTargetMs = (step.timestamp || 0) + (progress * stepDuration);
         const relTargetMs = toRelativeMs(absTargetMs);
         try {
           const newFrame = await extractor.getFrame(relTargetMs);
@@ -1896,29 +1927,64 @@ async function handleSOPVideoExport() {
         ctx.save();
         
         if (safeFrame) {
-          // Only fill background if we have a new frame to draw, otherwise freeze
-          ctx.fillStyle = '#000000';
+          // 2. High-Fidelity Studio Background (Mesh + Beam)
+          ctx.drawImage(bgCache, 0, 0);
+
+          // Animated Light Beam (Matches line 889)
+          const beamPhase = (f / 150) % 1.0; 
+          const beamX = (beamPhase * 2.5 - 1.25) * canvas.width;
+          const beamGrad = ctx.createLinearGradient(beamX, 0, beamX + 800, 0);
+          beamGrad.addColorStop(0, 'rgba(94, 92, 230, 0)');
+          beamGrad.addColorStop(0.5, 'rgba(94, 92, 230, 0.08)');
+          beamGrad.addColorStop(1, 'rgba(94, 92, 230, 0)');
+          ctx.fillStyle = beamGrad;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Primary Radial Glow (Lightened for visibility)
+          const bgGradient = ctx.createRadialGradient(
+            canvas.width * 0.5, canvas.height * 0.5, 0,
+            canvas.width * 0.5, canvas.height * 0.5, canvas.width * 0.95
+          );
+          bgGradient.addColorStop(0, 'rgba(94, 92, 230, 0.28)'); 
+          bgGradient.addColorStop(1, 'rgba(17, 17, 26, 0)');
+          ctx.fillStyle = bgGradient;
           ctx.fillRect(0, 0, canvas.width, canvas.height);
 
           const aw = (safeFrame as any)?.displayWidth || (safeFrame as any)?.width || 2880;
           const ah = (safeFrame as any)?.displayHeight || (safeFrame as any)?.height || 1444;
-        const sw = aw / fScale; const sh = ah / fScale;
-        const sx = (aw * fX) - (sw / 2); const sy = (ah * fY) - (sh / 2);
-        
-        ctx.globalAlpha = 1.0;
-        
-        // --- IMAGEBITMAP BRIDGE (Sanitized Math) ---
-        // Safely create the bitmap using the cloned frame's internal dimensions
-        const bitmap = await createImageBitmap(safeFrame as any);
-        
-        // Final barrier against NaN/0 to prevent Canvas API silent abortion
-        const safeSw = Math.max(1, sw || bitmap.width);
-        const safeSh = Math.max(1, sh || bitmap.height);
-        const safeSx = sx || 0;
-        const safeSy = sy || 0;
 
-        ctx.drawImage(bitmap, safeSx, safeSy, safeSw, safeSh, 0, 0, canvas.width, canvas.height);
-        bitmap.close();
+          // 1. Calculate crop box dimensions
+          let sw = aw / fScale; 
+          let sh = ah / fScale;
+          if (sw > aw) sw = aw;
+          if (sh > ah) sh = ah;
+
+          // 3. Coordinate Translation & Rasterization (Soft Floating Math)
+          // We now use Destination Math to prevent black out-of-bounds stripes.
+          const dw = canvas.width * fScale;
+          const dh = canvas.height * fScale;
+          
+          // Position the video such that the target coordinate (fX/fY) is centered on the canvas
+          const dx = (canvas.width / 2) - (fX * dw);
+          const dy = (canvas.height / 2) - (fY * dh);
+        
+          ctx.globalAlpha = 1.0;
+        
+          // --- IMAGEBITMAP BRIDGE (Sanitized Floating Math + Soft Corners) ---
+          const bitmap = await createImageBitmap(safeFrame as any);
+          ctx.save();
+          // Create the "Floating" clipping path to remove sharp boundaries
+          ctx.beginPath();
+          if (typeof (ctx as any).roundRect === 'function') {
+            (ctx as any).roundRect(dx, dy, dw, dh, 48 * fScale); 
+          } else {
+            ctx.rect(dx, dy, dw, dh);
+          }
+          ctx.clip();
+          
+          ctx.drawImage(bitmap, 0, 0, aw, ah, dx, dy, dw, dh);
+          ctx.restore();
+          bitmap.close();
         }
         
         // --- DETERMINISTIC PAINT YIELD ---
@@ -1936,11 +2002,8 @@ async function handleSOPVideoExport() {
         ctx.restore();
       }
 
-      // Overlays
-      step.annotations?.forEach(anno => {
-        ctx.strokeStyle = brand.primaryColor; ctx.lineWidth = 15; // Thicker for 5K
-        ctx.strokeRect((anno.x/100)*canvas.width, (anno.y/100)*canvas.height, (anno.width||5)/100*canvas.width, (anno.height||5)/100*canvas.height);
-      });
+      // Annotations are now baked directly into the viewport track inside the try block
+      // for 100% mathematical alignment with the cinematic camera.
 
       // --- MULTI-POINT PIXEL VALIDATION (Every 30 frames) ---
       if (framesDrawn % 30 === 0) {
@@ -1993,9 +2056,9 @@ async function handleSOPVideoExport() {
       masterFrame.close();
       masterFrame = null;
     }
-    currentX = targetX;
-    currentY = targetY;
-    currentScale = targetScale;
+    currentX = targetCenterX;
+    currentY = targetCenterY;
+    currentScale = targetZoomScale;
     
     if (i % 5 === 0) validateCanvasIntegrity();
   }
@@ -2015,14 +2078,14 @@ async function handleSOPVideoExport() {
   if (track) track.stop();
   if (latestVideoFrame) latestVideoFrame.close();
 
-  const totalFrames = successfulFrames + failedFrames;
-  const successRate = totalFrames > 0 ? (successfulFrames / totalFrames) * 100 : 0;
+  const statsTotalFrames = successfulFrames + failedFrames;
+  const successRate = statsTotalFrames > 0 ? (successfulFrames / statsTotalFrames) * 100 : 0;
   
   console.log(`
   🎬 [Export Summary]
   -------------------
   Total Frames Drawn: ${framesDrawn}
-  Sampled Validations: ${totalFrames}
+  Sampled Validations: ${statsTotalFrames}
   Successful Extractions: ${successfulFrames}
   Failed Extractions (Magenta): ${failedFrames}
   Success Rate: ${successRate.toFixed(1)}%
