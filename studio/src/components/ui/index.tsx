@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { Step, SessionEnvelope } from '../../../../shared/types/session';
 
@@ -357,6 +357,27 @@ export const ScreenshotPlaceholder: React.FC<{
     ? session.assets[step.screenshotKey] 
     : null;
 
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!realUrl || !canvasRef.current) return;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = realUrl;
+    img.onload = () => {
+      [canvasRef.current, bgCanvasRef.current].forEach(canvas => {
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+      });
+      setIsLoaded(true);
+    };
+  }, [realUrl]);
+
   // Explicitly reset load state when step changes to prevent ghosting
   React.useEffect(() => {
     if (isLoaded) {
@@ -364,11 +385,6 @@ export const ScreenshotPlaceholder: React.FC<{
       setIsLoaded(false);
     }
   }, [step?.id]);
-
-  const handleLoad = () => {
-    console.log(`🖼️ [ScreenshotPlaceholder] Loaded: ${step?.id}`);
-    setIsLoaded(true);
-  };
 
   // Render Blueprint (Native Proportions)
   if (mode === 'blueprint') {
@@ -378,14 +394,12 @@ export const ScreenshotPlaceholder: React.FC<{
         style={{ aspectRatio: adaptiveRatio, boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
       >
         {realUrl ? (
-          <img 
-            src={realUrl} 
+          <canvas 
+            ref={canvasRef}
             className={cn(
               "w-full h-full object-contain transition-opacity duration-200",
               isLoaded ? "opacity-100" : "opacity-0"
             )}
-            onLoad={handleLoad}
-            alt="Step screenshot" 
           />
         ) : (
           <SkeletonPlaceholder tintSoft={tintSoft} tint={tint} />
@@ -396,37 +410,36 @@ export const ScreenshotPlaceholder: React.FC<{
 
   // Render Stage (Cinematic 16:9 with Layers)
   return (
-    <div
+    <div 
       className={cn(rounded, 'relative overflow-hidden bg-black', className)}
       style={{ aspectRatio: aspect }}
     >
       {/* LAYER 1: Ambient Backdrop (Blurred & Parallax) */}
-      {realUrl && (
-        <div 
-          className={cn(
-            "absolute inset-0 pointer-events-none will-change-transform transition-opacity duration-300",
-            isLoaded ? "opacity-80" : "opacity-0"
-          )}
-          style={{
-            transform: `scale(1.25) translate(${parallaxOffset.x * 0.35}%, ${parallaxOffset.y * 0.35}%)`,
-            filter: 'blur(36px) brightness(0.6) saturate(0.9)',
-          }}
-        >
-          <img src={realUrl} className="w-full h-full object-cover" alt="" />
-        </div>
-      )}
+      <div 
+        className={cn(
+          "absolute inset-0 pointer-events-none will-change-transform transition-opacity duration-300",
+          isLoaded ? "opacity-80" : "opacity-0"
+        )}
+        style={{
+          transform: `scale(1.25) translate(${parallaxOffset.x * 0.35}%, ${parallaxOffset.y * 0.35}%)`,
+          filter: 'blur(36px) brightness(0.6) saturate(0.9)',
+        }}
+      >
+        <canvas 
+          ref={bgCanvasRef} 
+          className="w-full h-full object-cover" 
+        />
+      </div>
 
       {/* LAYER 2: Sharp Foreground */}
       <div className="absolute inset-0 flex items-center justify-center">
         {realUrl ? (
-          <img 
-            src={realUrl} 
-            onLoad={handleLoad}
+          <canvas 
+            ref={canvasRef}
             className={cn(
               "max-w-full max-h-full object-contain shadow-2xl transition-all duration-300",
               isLoaded ? "opacity-100 scale-100" : "opacity-0 scale-95"
             )}
-            alt="Step screenshot" 
           />
         ) : (
           <SkeletonPlaceholder tintSoft={tintSoft} tint={tint} />

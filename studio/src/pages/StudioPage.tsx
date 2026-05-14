@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { WebMFrameExtractor } from '../utils/WebMFrameExtractor';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../store/useStudioStore';
 import { I } from '../components/icons';
@@ -285,48 +286,12 @@ const SOPCanvas: React.FC = () => {
   }, [session, focusedStepId, setFocusStep, setStepIndex, triggerScroll]);
 
 
-  const [isExportingVideo, setIsExportingVideo] = React.useState(false);
+
   const sopVideoRef = React.useRef<HTMLDivElement>(null);
   const [showEmbed, setShowEmbed] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
 
-  const handleSOPVideoExport = async () => {
-    if (!sopVideoRef.current || isExportingVideo) return;
-    const canCapture = !!(sopVideoRef.current as any).captureStream ||
-                       !!(sopVideoRef.current as any).mozCaptureStream;
-    if (!canCapture) { alert('Export requires Chrome.'); return; }
-    setIsExportingVideo(true);
 
-    const stream = (sopVideoRef.current as any).captureStream
-      ? (sopVideoRef.current as any).captureStream(30)
-      : (sopVideoRef.current as any).mozCaptureStream(30);
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-      ? 'video/webm;codecs=vp9' : 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType });
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${session?.aiOutputs?.title || 'studiobase-sop'}.webm`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setIsExportingVideo(false);
-    };
-
-    recorder.start();
-    const stepEls = Array.from(
-      sopVideoRef.current.querySelectorAll('article')
-    ) as HTMLElement[];
-    for (const el of stepEls) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await new Promise<void>(res => setTimeout(res, 1800));
-    }
-    await new Promise<void>(res => setTimeout(res, 600));
-    recorder.stop();
-  };
 
   if (!session) return null;
 
@@ -477,12 +442,38 @@ const SOPCanvas: React.FC = () => {
             <Button
               variant="ghost"
               size="md"
-              icon={isExportingVideo ? I.Loader : I.Video}
-              onClick={handleSOPVideoExport}
-              disabled={isExportingVideo}
+              icon={useStudioStore.getState().isExporting ? I.Loader : I.Video}
+              onClick={() => {
+                useStudioStore.getState().setActiveView('video');
+                setTimeout(() => {
+                  useStudioStore.getState().triggerExport();
+                }, 300); // Give it time to mount and find the canvas
+              }}
+              disabled={useStudioStore.getState().isExporting}
             >
-              {isExportingVideo ? 'Recording...' : 'Export as Video (.webm)'}
+              {useStudioStore.getState().isExporting ? 'Recording...' : 'Cinematic Export'}
             </Button>
+            
+            {session.videoKey && (
+              <Button
+                variant="ghost"
+                size="md"
+                icon={I.Download}
+                onClick={() => {
+                  const videoUrl = session.videoKey ? session.assets?.[session.videoKey] : null;
+                  if (videoUrl) {
+                    const a = document.createElement('a');
+                    a.href = videoUrl;
+                    a.download = `${session.aiOutputs?.title || 'recording'}.webm`;
+                    a.target = "_blank";
+                    a.click();
+                  }
+                }}
+              >
+                Download Raw
+              </Button>
+            )}
+
             <Button variant="primary" size="md" icon={I.Share2}>Publish & share</Button>
           </div>
 
@@ -557,13 +548,14 @@ const VideoCanvas: React.FC = () => {
     playbackRate,
     setPlaying,
     setStepIndex,
-    brand
+    brand,
+    isExporting,
+    exportTrigger
   } = useStudioStore();
 
   const [audio] = useState(new Audio());
   const [isEnded, setIsEnded] = useState(false);
   const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
-  const [isExporting, setIsExporting] = useState(false);
   const [showIntroSlide, setShowIntroSlide] = React.useState(false);
   const [introVisible, setIntroVisible] = React.useState(false);
   const [showOutroSlide, setShowOutroSlide] = React.useState(false);
@@ -573,6 +565,13 @@ const VideoCanvas: React.FC = () => {
   const ghostIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const playerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Listen for global export trigger
+  useEffect(() => {
+    if (exportTrigger > 0 && !isExporting && useStudioStore.getState().activeView === 'video') {
+      handleSOPVideoExport();
+    }
+  }, [exportTrigger]);
 
   const renderMode = useStudioStore(state => state.renderMode);
   const rawVideoUrl = session?.videoKey ? (session.assets?.[session.videoKey] ?? null) : null;
@@ -612,8 +611,10 @@ const VideoCanvas: React.FC = () => {
   const hasZoom = target.zoomScale > 1;
 
   useEffect(() => {
-    console.log(`🎬 [VideoCanvas] Step Transition: ${currentStepIndex} (${currentStep?.id})`);
-  }, [currentStepIndex, currentStep?.id]);
+    if (!isExporting) {
+      console.log(`🎬 [VideoCanvas] Step Transition: ${currentStepIndex} (${currentStep?.id})`);
+    }
+  }, [currentStepIndex, currentStep?.id, isExporting]);
 
   // Camera Math: translate(tx, ty) scale(scale)
   // Physical Correctness: Translate relative to the center, then scale
@@ -866,49 +867,8 @@ const VideoCanvas: React.FC = () => {
   const cursorEndY = currCoords
     ? (currCoords.y / (currCoords.viewportHeight || 900)) * 100 : 50;
 
-  // Export via MediaRecorder
-  async function handleExport() {
-    if (!playerRef.current || isExporting) return;
-    const canCapture = !!(playerRef.current as any).captureStream ||
-                       !!(playerRef.current as any).mozCaptureStream;
-    if (!canCapture) {
-      alert('Export requires Chrome.');
-      return;
-    }
-    setIsExporting(true);
-    setStepIndex(0);
 
-    await new Promise<void>(res => setTimeout(res, 300));
 
-    const stream = (playerRef.current as any).captureStream
-      ? (playerRef.current as any).captureStream(30)
-      : (playerRef.current as any).mozCaptureStream(30);
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-      ? 'video/webm;codecs=vp9' : 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType });
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${session?.aiOutputs?.title || 'studiobase-video'}.webm`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setIsExporting(false);
-    };
-
-    recorder.start();
-    setPlaying(true);
-
-    const poll = setInterval(() => {
-      if (!useStudioStore.getState().isPlaying) {
-        recorder.stop();
-        clearInterval(poll);
-      }
-    }, 500);
-  }
 
   if (!session) return null;
 
@@ -959,8 +919,13 @@ const VideoCanvas: React.FC = () => {
                 className="w-full h-full object-contain"
                 muted
                 playsInline
+                crossOrigin="anonymous"
                 preload="auto"
-                onSeeked={() => console.log(`🎬 [VideoCanvas] Seeked to: ${videoRef.current?.currentTime}s`)}
+                onSeeked={() => {
+                  if (!isExporting) {
+                    console.log(`🎬 [VideoCanvas] Seeked to: ${videoRef.current?.currentTime}s`);
+                  }
+                }}
                 onPlay={() => console.log('🎬 [VideoCanvas] Playback started')}
                 onPause={() => console.log('🎬 [VideoCanvas] Playback paused')}
               />
@@ -1275,6 +1240,27 @@ const VideoCanvas: React.FC = () => {
           </div>
         )}
       </div>
+      
+      {/* Export Progress Overlay */}
+      {isExporting && (
+        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xl flex flex-col items-center justify-center">
+          <div className="bg-surface p-10 rounded-card shadow-2xl flex flex-col items-center gap-5 text-center max-w-md border border-white/10">
+            <div className="relative">
+               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                 <I.Loader size={40} className="animate-spin" />
+               </div>
+               <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+            </div>
+            <div>
+              <h3 className="text-2xl font-bold text-text">Rendering Cinematic Video</h3>
+              <p className="text-[15px] text-text-2 mt-2 leading-relaxed">
+                We're generating your high-fidelity walkthrough with zooms and transitions. Please keep this tab active.
+              </p>
+            </div>
+            <AIShimmer isActive={true} className="w-full h-1.5 mt-4" children={null} />
+          </div>
+        </div>
+      )}
 
       {/* Caption */}
       <div className="mt-4 text-center max-w-2xl h-[72px] overflow-hidden flex flex-col justify-start">
@@ -1297,15 +1283,37 @@ const VideoCanvas: React.FC = () => {
 
       {/* Export Button */}
       <div className="mt-4">
-        <Button
-          variant="ghost"
-          size="md"
-          icon={isExporting ? I.Download : I.Download}
-          onClick={handleExport}
-          disabled={isExporting}
-        >
-          {isExporting ? 'Exporting...' : 'Export Video (.webm)'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="md"
+            icon={isExporting ? I.Download : I.Download}
+            onClick={() => useStudioStore.getState().triggerExport()}
+            disabled={isExporting}
+          >
+            {isExporting ? 'Exporting...' : 'Cinematic Export'}
+          </Button>
+
+          {session?.videoKey && (
+            <Button
+              variant="ghost"
+              size="md"
+              icon={I.Download}
+              onClick={() => {
+                const videoUrl = session.videoKey ? session.assets?.[session.videoKey] : null;
+                if (videoUrl) {
+                  const a = document.createElement('a');
+                  a.href = videoUrl;
+                  a.download = `${session.aiOutputs?.title || 'recording'}.webm`;
+                  a.target = "_blank";
+                  a.click();
+                }
+              }}
+            >
+              Download Raw
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1315,10 +1323,19 @@ const DemoCanvas: React.FC = () => {
   const session = useStudioStore(state => state.session);
   const setActiveView = useStudioStore(state => state.setActiveView);
   const brand = useStudioStore(state => state.brand);
+  const isExporting = useStudioStore(state => state.isExporting);
+  const exportTrigger = useStudioStore(state => state.exportTrigger);
+
   const [stepIndex, setStepIndex] = React.useState(0);
   const [showChapter, setShowChapter] = React.useState<string | null>(null);
-  const [isExporting, setIsExporting] = React.useState(false);
   const demoRef = React.useRef<HTMLDivElement>(null);
+
+  // Listen for global export trigger
+  useEffect(() => {
+    if (exportTrigger > 0 && !isExporting && useStudioStore.getState().activeView === 'demo') {
+      handleSOPVideoExport();
+    }
+  }, [exportTrigger]);
 
   const steps = session?.steps || [];
   const step = steps[stepIndex];
@@ -1343,48 +1360,6 @@ const DemoCanvas: React.FC = () => {
     setStepIndex(i => Math.max(0, i - 1));
   }, []);
 
-  const handleDemoExport = async () => {
-    if (!demoRef.current || isExporting) return;
-    const canCapture = !!(demoRef.current as any).captureStream ||
-                       !!(demoRef.current as any).mozCaptureStream;
-    if (!canCapture) { alert('Export requires Chrome.'); return; }
-    setIsExporting(true);
-    setStepIndex(0);
-    await new Promise<void>(res => setTimeout(res, 400));
-
-    const stream = (demoRef.current as any).captureStream
-      ? (demoRef.current as any).captureStream(30)
-      : (demoRef.current as any).mozCaptureStream(30);
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-      ? 'video/webm;codecs=vp9' : 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType });
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${session?.aiOutputs?.title || 'studiobase-demo'}.webm`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setIsExporting(false);
-    };
-    recorder.start();
-
-    const totalSteps = steps.length;
-    let current = 0;
-    const advanceAndRecord = () => {
-      if (current >= totalSteps - 1) {
-        setTimeout(() => recorder.stop(), 1500);
-        return;
-      }
-      current++;
-      setStepIndex(current);
-      setTimeout(advanceAndRecord, 2500);
-    };
-    setTimeout(advanceAndRecord, 2000);
-  };
 
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1482,7 +1457,7 @@ const DemoCanvas: React.FC = () => {
 
       {!isExporting ? (
         <button
-          onClick={(e) => { e.stopPropagation(); handleDemoExport(); }}
+          onClick={(e) => { e.stopPropagation(); useStudioStore.getState().triggerExport(); }}
           className="absolute bottom-16 right-4 z-20 h-8 px-3 rounded-pill
                      bg-black/60 text-white/80 text-[12px] font-semibold
                      hover:bg-black/80 transition-colors flex items-center gap-1.5"
@@ -1506,3 +1481,548 @@ const DemoCanvas: React.FC = () => {
     </div>
   );
 };
+
+/**
+ * MASTER CINEMATIC COMPOSITOR (STABILIZED v2)
+ * Renders the session frame-by-frame into a 1080p WebM
+ */
+async function handleSOPVideoExport() {
+  const store = useStudioStore.getState();
+  if (store.isExporting) return;
+
+  const session = store.session;
+  const brand = store.brand;
+  
+  // --- INSTRUMENTATION COUNTERS ---
+  let framesRequested = 0;
+  let framesDrawn = 0;
+  let successfulFrames = 0;
+  let failedFrames = 0;
+  
+  console.log("🎬 [Export] Phase 1: Initializing Deterministic Compositor");
+
+  // 1. Setup high-res compositor (DOM ATTACHED for Hardware Sync)
+  const canvas = document.createElement('canvas');
+  canvas.id = 'export-compositor';
+  canvas.width = 2880;
+  canvas.height = 1444;
+  
+  // Enforce DOM Presence and Visibility for CaptureStream reliability
+  canvas.style.position = 'fixed';
+  canvas.style.left = '0';
+  canvas.style.top = '0';
+  canvas.style.width = '288px'; // 15% visual scale
+  canvas.style.height = '162px';
+  canvas.style.opacity = '0.05'; 
+  canvas.style.pointerEvents = 'none';
+  canvas.style.zIndex = '9999'; // Front-and-Center
+  document.body.appendChild(canvas);
+
+  // Initialize with alpha: false to prevent encoder "Visual Silence" collapse
+  const ctx = canvas.getContext('2d', { 
+    willReadFrequently: true,
+    alpha: false 
+  });
+
+  if (!ctx) {
+    console.error("❌ [Export] Failed to get 2D context");
+    return;
+  }
+
+  store.setIsExporting(true);
+  store.setStepIndex(0);
+  store.setPlaying(false);
+
+  // --- RESOURCE LIFECYCLE ---
+  let extractor: WebMFrameExtractor | null = null;
+  let videoTrack: MediaStreamTrack | null = null;
+  let infoOverlay: HTMLDivElement | null = null;
+  let exportVideo: HTMLVideoElement | null = null;
+  const chunks: Blob[] = [];
+  let totalBytes = 0;
+
+  try {
+
+    // --- AUTO CAPTURE MODE (Bypassing Throttling) ---
+    const stream = (canvas as any).captureStream(30);
+    videoTrack = stream.getVideoTracks()[0];
+    
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9' : 'video/webm';
+    
+    const recorder = new MediaRecorder(stream, { 
+      mimeType, 
+      videoBitsPerSecond: 25000000,
+      bitsPerSecond: 25000000 
+    });
+
+    // --- HELPER: PREVENT VISUAL SILENCE ---
+    const injectJitter = () => {
+      if (!ctx) return;
+      ctx.save();
+      ctx.globalAlpha = 0.01;
+      ctx.fillStyle = `rgb(${Math.random()*255},${Math.random()*255},${Math.random()*255})`;
+      ctx.fillRect(1919, 1079, 1, 1);
+      ctx.restore();
+    };
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        chunks.push(e.data);
+        totalBytes += e.data.size;
+        console.log(`🎬 [Export] Chunk received: ${e.data.size} bytes (Total: ${chunks.length}, Cumulative: ${(totalBytes/1024/1024).toFixed(2)}MB)`);
+      }
+    };
+  
+  recorder.onstop = () => {
+    console.log(`🎬 [Export] Recorder stopped. State: ${recorder.state}`);
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    console.log(`🎬 [Export] Final Blob size: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+    
+    if (blob.size < 1000) {
+      console.error("❌ [Export] Output blob is too small. Likely black frames.");
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${session?.aiOutputs?.title || 'studiobase-cinematic'}.webm`;
+    a.click();
+    URL.revokeObjectURL(url);
+    store.setIsExporting(false);
+  };
+
+  console.log("🎬 [Export] Starting Recorder...");
+  recorder.start(1000); // Small timeslices to prevent memory soak
+  const fps = 30;
+
+  // --- HELPER: DETECT TAINTED CANVAS ---
+  const validateCanvasIntegrity = () => {
+    try {
+      canvas.toDataURL(); 
+      return true;
+    } catch (e) {
+      console.error("❌ [Export] CANVAS TAINTED! CORS failure detected.", e);
+      return false;
+    }
+  };
+
+  // --- INTRO SLIDE ---
+  if (brand.showIntro) {
+    console.log("🎬 [Export] Rendering Intro Slide...");
+    for (let f = 0; f < 90; f++) {
+      ctx.fillStyle = brand.primaryColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 120px Inter, system-ui, sans-serif';
+      ctx.fillText(session?.aiOutputs?.title || 'Recording', canvas.width/2, canvas.height/2 - 40);
+      ctx.font = '50px Inter, system-ui, sans-serif';
+      ctx.globalAlpha = 0.6;
+      ctx.fillText('A StudioBase walkthrough', canvas.width/2, canvas.height/2 + 40);
+      ctx.globalAlpha = 1.0;
+      
+      injectJitter();
+      await new Promise(res => setTimeout(res, 0)); // Compositor Yield
+      framesRequested++; framesDrawn++;
+      await new Promise(res => setTimeout(res, 16)); // Allow encoding yield
+    }
+    validateCanvasIntegrity();
+  }
+
+  const steps = session?.steps || [];
+  const chapterMap = new Map((session?.metadata?.chapterBreaks || []).map(c => [c.afterStepId, c]));
+
+  // --- STEP BY STEP RENDERING ---
+  let currentX = 0.5, currentY = 0.5, currentScale = 1.0;
+  
+  // --- FILTERED VISIBILITY HACK ---
+  // Transparent informational overlay (No occlusion to keep rasterizer active)
+  const infoOverlay = document.createElement('div');
+  Object.assign(infoOverlay.style, {
+    position: 'fixed',
+    left: '0px',
+    top: '20px',
+    width: '100vw',
+    textAlign: 'center',
+    zIndex: '10001',
+    color: '#fff',
+    pointerEvents: 'none',
+    fontFamily: 'Inter, system-ui, sans-serif',
+    textShadow: '0 2px 4px rgba(0,0,0,0.5)'
+  });
+  infoOverlay.innerHTML = `
+    <div style="font-size: 24px; font-weight: bold;">🎬 Rendering Cinematic Video...</div>
+    <div style="font-size: 14px; opacity: 0.8;">Bypassing compositor throttling. Please keep this tab active.</div>
+  `;
+  document.body.appendChild(infoOverlay);
+
+    // --- DEDICATED EXPORT VIDEO NODE ---
+    exportVideo = document.createElement('video');
+    exportVideo.crossOrigin = "anonymous";
+    const videoKey = (session as any)?.videoKey || 'screen-recording';
+    const videoUrl = session?.assets?.[videoKey] || session?.assets?.['video'] || '';
+    exportVideo.src = videoUrl;
+    exportVideo.muted = true;
+    exportVideo.playsInline = true;
+    
+    Object.assign(exportVideo.style, {
+      position: 'fixed',
+      left: '0px',
+      top: '0px',
+      width: '1920px',
+      height: '1080px',
+      objectFit: 'fill',
+      opacity: '1', 
+      zIndex: '10000', 
+      filter: 'brightness(0.2)',
+      pointerEvents: 'none',
+      willChange: 'transform'
+    });
+    document.body.appendChild(exportVideo);
+
+    console.log("🎬 [Export] Pre-flight check starting...");
+    extractor = new WebMFrameExtractor();
+    
+    if (videoUrl) {
+      try {
+        console.log("🔍 [Export] Initializing Deterministic Extractor...");
+        const response = await fetch(videoUrl);
+        const videoBlob = await response.blob();
+        await extractor.init(videoBlob);
+      } catch (e) {
+        console.error("❌ [Export] Extractor initialization failed:", e);
+      }
+    }
+
+    // --- TIMELINE NORMALIZATION ---
+    const sessionStartTime = (session as any)?.metadata?.startTime || (session as any)?.startTime || (steps.length > 0 ? steps[0].timestamp : 0);
+    const toRelativeMs = (absMs: number) => {
+      if (!extractor) return 0;
+      const maxDuration = extractor.getDuration();
+      const rel = absMs - sessionStartTime;
+      if (isNaN(rel)) return 0;
+      const clamped = Math.max(0, Math.min(rel, maxDuration));
+      
+      // Log anomalies
+      if (Math.abs(rel - clamped) > 1000000) {
+        console.warn(`🎬 [Timeline] Massive clamp detected: Absolute ${absMs}ms -> Relative ${clamped}ms`);
+      }
+      return clamped;
+    };
+
+  await new Promise(res => {
+    if (exportVideo) {
+      exportVideo.onloadedmetadata = () => {
+        if (exportVideo) {
+          console.log(`🎬 [Export] Metadata Ready. Size: ${exportVideo.videoWidth}x${exportVideo.videoHeight} | Duration: ${exportVideo.duration}s`);
+        }
+        res(null);
+      };
+    } else {
+      res(null);
+    }
+    setTimeout(res, 5000);
+  });
+
+  // --- WEBCODECS / TRACK PROCESSOR HACK ---
+  // On Mac Retina, the primary video is hardware-isolated. 
+  // MediaStreamTrackProcessor taps the stream before compositor optimizations apply.
+  const videoStream = (exportVideo as any).captureStream ? (exportVideo as any).captureStream() : null;
+  const track = videoStream?.getVideoTracks()[0];
+  let latestVideoFrame: any = null;
+  let reader: any = null;
+
+  if (track && (window as any).MediaStreamTrackProcessor) {
+    const processor = new (window as any).MediaStreamTrackProcessor({ track });
+    reader = processor.readable.getReader();
+    
+    // Non-blocking reader loop
+    (async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (latestVideoFrame) latestVideoFrame.close();
+          latestVideoFrame = value;
+        }
+      } catch (e) {
+        console.error("🎬 [Export] Frame reader failed:", e);
+      }
+    })();
+  } else {
+    console.warn("🎬 [Export] MediaStreamTrackProcessor not supported, falling back to direct.");
+  }
+
+  // --- HARD CORS / TAINT VALIDATION ---
+  try {
+    const testCanvas = document.createElement('canvas');
+    testCanvas.width = 1; testCanvas.height = 1;
+    const testCtx = testCanvas.getContext('2d');
+    if (testCtx) {
+      testCtx.drawImage(exportVideo, 0, 0, 1, 1);
+      testCanvas.toDataURL(); // Will throw if tainted
+      console.log("✅ [Export] CORS Validation Passed. Canvas is clean.");
+    }
+  } catch (e) {
+    console.error("❌ [Export] HARD ABORT: Canvas Tainted. CORS headers missing on R2.", e);
+    store.setIsExporting(false);
+    document.body.removeChild(exportVideo);
+    alert("Export Failed: Canvas Tainted. Please verify S3/R2 CORS headers.");
+    return;
+  }
+
+
+  for (let i = 0; i < steps.length; i++) {
+    store.setStepIndex(i);
+    const step = steps[i];
+    console.log(`🎬 [Export] Step ${i+1}/${steps.length}: ${step.id}`);
+
+    // Chapter Card Transition
+    const chapter = i > 0 ? chapterMap.get(steps[i-1].id) : null;
+    if (chapter) {
+      console.log(`🎬 [Export] Chapter Card: ${chapter.chapterTitle}`);
+      for (let f = 0; f < 60; f++) {
+        ctx.fillStyle = brand.primaryColor;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 60px Inter, system-ui, sans-serif';
+        ctx.globalAlpha = 0.6;
+        ctx.fillText('CHAPTER', canvas.width/2, canvas.height/2 - 60);
+        ctx.font = 'bold 120px Inter, system-ui, sans-serif';
+        ctx.globalAlpha = 1.0;
+        ctx.fillText(chapter.chapterTitle, canvas.width/2, canvas.height/2 + 40);
+        
+        injectJitter();
+        await new Promise(res => setTimeout(res, 0)); // Compositor Yield
+        framesRequested++; framesDrawn++;
+        await new Promise(res => setTimeout(res, 16));
+      }
+    }
+    
+    // Load Asset (Image or Video Bitmap)
+    const hasTimestamp = step.timestamp != null && step.timestamp > 0;
+    let asset: HTMLImageElement | ImageBitmap | HTMLVideoElement | null = null;
+
+    // Note: Frame extraction is now handled deterministically inside the tick loop
+
+    // --- ASSET PREPARATION ---
+    if (hasTimestamp) {
+      // Seek logic is already handled above
+    } else {
+      const imgUrl = step.screenshotKey ? session?.assets?.[step.screenshotKey] : null;
+      if (imgUrl) {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = imgUrl;
+        await new Promise(res => {
+          img.onload = res;
+          img.onerror = () => { console.error("❌ [Export] Failed to load img:", imgUrl); res(null); };
+        });
+        asset = img;
+      }
+    }
+
+    // --- STEP VALIDATION GUARD ---
+    // A step is valid if it has a screenshot asset OR a deterministic video timestamp
+    if (!asset && !hasTimestamp) {
+      console.warn(`⚠️ [Export] No asset or timestamp for step ${i}. Skipping.`);
+      continue;
+    }
+
+    // Camera Animation (Pan/Zoom)
+    const duration = 2400; 
+    const totalFrames = (duration / 1000) * fps;
+    const coords = step.data?.coordinates;
+    let targetX = 0.5;
+    let targetY = 0.5;
+    let targetScale = 1.1;
+
+    if (coords && typeof coords.x === 'number' && typeof coords.width === 'number') {
+      const calcX = (coords.x + coords.width / 2) / (coords.viewportWidth || 1440);
+      const calcY = (coords.y + coords.height / 2) / (coords.viewportHeight || 900);
+      const calcScale = (coords.viewportWidth || 1440) / (coords.width * 1.5);
+      
+      targetX = isFinite(calcX) ? calcX : 0.5;
+      targetY = isFinite(calcY) ? calcY : 0.5;
+      targetScale = isFinite(calcScale) ? Math.min(2.5, calcScale) : 1.1;
+    }
+
+    for (let f = 0; f < totalFrames; f++) {
+      const progress = f / totalFrames;
+      const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+      const fScale = currentScale + (targetScale - currentScale) * ease;
+      const fX = currentX + (targetX - currentX) * ease;
+      const fY = currentY + (targetY - currentY) * ease;
+
+      // --- DETERMINISTIC FRAME CAPTURE ---
+      let frame: VideoFrame | null = null;
+      if (hasTimestamp && extractor) {
+        const absTargetMs = (step.timestamp || 0) + (progress * duration);
+        const relTargetMs = toRelativeMs(absTargetMs);
+        try {
+          frame = await extractor.getFrame(relTargetMs);
+        } catch (e) {
+          console.error(`❌ [Export] Frame extraction failed at rel ${relTargetMs}ms:`, e);
+        }
+      }
+      const currentAsset = frame || asset;
+
+      if (!currentAsset) {
+        frame?.close();
+        continue;
+      }
+
+      try {
+        ctx.save();
+        // Enforce solid background to prevent bitrate collapse
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = '#FF00FF'; // Magenta Canary (Truth Validation)
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const aw = (currentAsset as any).displayWidth || (currentAsset as any).width || 2880;
+        const ah = (currentAsset as any).displayHeight || (currentAsset as any).height || 1444;
+        const sw = aw / fScale; const sh = ah / fScale;
+        const sx = (aw * fX) - (sw / 2); const sy = (ah * fY) - (sh / 2);
+        
+        ctx.globalAlpha = progress < 0.2 ? progress * 5 : 1.0;
+        
+        // --- IMAGEBITMAP BRIDGE (Sanitized Math) ---
+        // Safely create the bitmap using the frame's internal dimensions
+        const bitmap = await createImageBitmap(currentAsset as any);
+        
+        // Final barrier against NaN/0 to prevent Canvas API silent abortion
+        const safeSw = Math.max(1, sw || bitmap.width);
+        const safeSh = Math.max(1, sh || bitmap.height);
+        const safeSx = sx || 0;
+        const safeSy = sy || 0;
+
+        ctx.drawImage(bitmap, safeSx, safeSy, safeSw, safeSh, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+        
+        // --- DETERMINISTIC PAINT YIELD ---
+        await new Promise(res => setTimeout(res, 0));
+        
+        injectJitter();
+      } catch (err) {
+        console.error("❌ [Export] Render tick error:", err);
+      } finally {
+        if (frame) frame.close(); // Dispose clone immediately
+        ctx.restore();
+      }
+
+      // Overlays
+      step.annotations?.forEach(anno => {
+        ctx.strokeStyle = brand.primaryColor; ctx.lineWidth = 15; // Thicker for 5K
+        ctx.strokeRect((anno.x/100)*canvas.width, (anno.y/100)*canvas.height, (anno.width||5)/100*canvas.width, (anno.height||5)/100*canvas.height);
+      });
+
+      // --- MULTI-POINT PIXEL VALIDATION (Every 30 frames) ---
+      if (framesDrawn % 30 === 0) {
+        const x = Math.floor(canvas.width / 2);
+        const y = Math.floor(canvas.height / 2);
+        const sample = ctx.getImageData(x - 1, y - 1, 3, 3).data;
+        
+        let hasContent = false;
+        let lastSample = [0,0,0];
+        for (let p = 0; p < sample.length; p += 4) {
+          const r = sample[p], g = sample[p+1], b = sample[p+2];
+          const isMagenta = r === 255 && g === 0 && b === 255;
+          const isBlack = r === 0 && g === 0 && b === 0;
+          if (!isMagenta && !isBlack) {
+            hasContent = true;
+            lastSample = [r, g, b];
+            break;
+          }
+          if (p === 16) lastSample = [r, g, b]; // Capture center for logging
+        }
+
+        if (!hasContent) failedFrames++; else successfulFrames++;
+
+        const status = hasContent ? "✅ PROBE SUCCESS (VIDEO DATA DETECTED)" : "❌ PROBE FAILED (MAGENTA/BLACK)";
+        
+        console.log(`🎬 [Export Truth] Frame ${framesDrawn} | ${status}`);
+        console.log(`🎬 [Export Truth] Center Sample: [${lastSample[0]}, ${lastSample[1]}, ${lastSample[2]}]`);
+      }
+
+      // Ghost Typing
+      if (step.action === 'input' && step.inputValue && progress > 0.2) {
+        const typeLen = Math.floor((progress - 0.2) * 1.5 * step.inputValue.length);
+        const text = step.inputValue.slice(0, typeLen);
+        if (text) {
+           ctx.fillStyle = 'rgba(0,0,0,0.8)';
+           const rx = 1920/2 - 250, ry = 920, rw = 500, rh = 80, rad = 15;
+           ctx.beginPath(); ctx.moveTo(rx+rad,ry); ctx.lineTo(rx+rw-rad,ry); ctx.quadraticCurveTo(rx+rw,ry,rx+rw,ry+rad); ctx.lineTo(rx+rw,ry+rh-rad); ctx.quadraticCurveTo(rx+rw,ry+rh,rx+rw-rad,ry+rh); ctx.lineTo(rx+rad,ry+rh); ctx.quadraticCurveTo(rx,ry+rh,rx,ry+rh-rad); ctx.lineTo(rx,ry+rad); ctx.quadraticCurveTo(rx,ry,rx+rad,ry); ctx.closePath();
+           ctx.fill();
+           ctx.fillStyle = '#fff';
+           ctx.font = '32px ui-monospace, SFMono-Regular, Menlo, monospace'; ctx.textAlign = 'center';
+           ctx.fillText(text, 1920/2, 970);
+        }
+      }
+
+      if ((videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
+      framesRequested++; framesDrawn++;
+      await new Promise(res => setTimeout(res, 33)); 
+    }
+    currentX = targetX;
+    currentY = targetY;
+    currentScale = targetScale;
+    
+    if (i % 5 === 0) validateCanvasIntegrity();
+  }
+
+  console.log(`🎬 [Export] Loop Finished. Frames Drawn: ${framesDrawn}, Requested: ${framesRequested}`);
+  console.log(`🎬 [Export] Waiting for final chunks to flush...`);
+  
+  await new Promise(res => {
+    recorder.onstop = res;
+    recorder.stop();
+  });
+
+  // --- CLEANUP ---
+  document.body.removeChild(infoOverlay);
+  document.body.removeChild(exportVideo);
+  if (reader) reader.cancel();
+  if (track) track.stop();
+  if (latestVideoFrame) latestVideoFrame.close();
+
+  const totalFrames = successfulFrames + failedFrames;
+  const successRate = totalFrames > 0 ? (successfulFrames / totalFrames) * 100 : 0;
+  
+  console.log(`
+  🎬 [Export Summary]
+  -------------------
+  Total Frames Drawn: ${framesDrawn}
+  Sampled Validations: ${totalFrames}
+  Successful Extractions: ${successfulFrames}
+  Failed Extractions (Magenta): ${failedFrames}
+  Success Rate: ${successRate.toFixed(1)}%
+  Final Blob Size: ${(totalBytes/1024/1024).toFixed(2)}MB
+  -------------------
+  `);
+
+  } catch (err) {
+    console.error("❌ [Export] Fatal error:", err);
+  } finally {
+    if (extractor) await extractor.destroy();
+    store.setIsExporting(false);
+    
+    if (infoOverlay && document.body.contains(infoOverlay)) document.body.removeChild(infoOverlay);
+    if (exportVideo && document.body.contains(exportVideo)) document.body.removeChild(exportVideo);
+    if (videoTrack) videoTrack.stop();
+  }
+
+  // --- AUTO DOWNLOAD ---
+  const finalBlob = new Blob(chunks, { type: 'video/webm' });
+  const url = URL.createObjectURL(finalBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `StudioBase_Export_${new Date().getTime()}.webm`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}

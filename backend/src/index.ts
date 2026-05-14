@@ -47,6 +47,12 @@ export default {
       response = await deleteSession(request, env);
     } else if (pathname === '/upload/presign' && method === 'POST') {
       response = await presignUpload(request, env);
+    } else if (pathname === '/upload/multipart/init' && method === 'POST') {
+      response = await initMultipartUpload(request, env);
+    } else if (pathname === '/upload/multipart/presign-part' && method === 'POST') {
+      response = await presignPartUpload(request, env);
+    } else if (pathname === '/upload/multipart/complete' && method === 'POST') {
+      response = await completeMultipartUpload(request, env);
     } else if (pathname === '/upload/file' && method === 'PUT') {
       response = await handleFileUpload(request, env);
     } else if (pathname === '/assets/refresh' && method === 'POST') {
@@ -379,10 +385,60 @@ async function handleFileUpload(request: Request, env: Env) {
     const contentType = request.headers.get('Content-Type') || 'application/octet-stream';
     const body = await request.arrayBuffer();
 
+    const uploadId = url.searchParams.get('uploadId');
+    const partNumberStr = url.searchParams.get('partNumber');
+
+    if (uploadId && partNumberStr) {
+      const partNumber = parseInt(partNumberStr, 10);
+      const multipartUpload = env.R2.resumeMultipartUpload(key, uploadId);
+      const part = await multipartUpload.uploadPart(partNumber, body);
+      return Response.json({ success: true, key, etag: part.etag, partNumber });
+    }
+
     await env.R2.put(key, body, {
       httpMetadata: { contentType }
     });
 
+    return Response.json({ success: true, key });
+  } catch (e: any) { return jsonError(e.message); }
+}
+
+async function initMultipartUpload(request: Request, env: Env) {
+  let user: any;
+  try { user = await getUserFromToken(request, env); }
+  catch (e: any) { return jsonError(e.message, 'UNAUTHORIZED', 401); }
+
+  try {
+    const { key } = await request.json() as any;
+    if (!key) return jsonError('key required', 'VALIDATION_ERROR');
+
+    const multipartUpload = await env.R2.createMultipartUpload(key);
+    return Response.json({ uploadId: multipartUpload.uploadId, key });
+  } catch (e: any) { return jsonError(e.message); }
+}
+
+async function presignPartUpload(request: Request, env: Env) {
+  try {
+    const { key, uploadId, partNumber } = await request.json() as any;
+    if (!key || !uploadId || !partNumber) return jsonError('key, uploadId, and partNumber required', 'VALIDATION_ERROR');
+
+    const backendBase = new URL(request.url).origin;
+    const uploadUrl = `${backendBase}/upload/file?key=${encodeURIComponent(key)}&uploadId=${uploadId}&partNumber=${partNumber}`;
+    return Response.json({ uploadUrl });
+  } catch (e: any) { return jsonError(e.message); }
+}
+
+async function completeMultipartUpload(request: Request, env: Env) {
+  let user: any;
+  try { user = await getUserFromToken(request, env); }
+  catch (e: any) { return jsonError(e.message, 'UNAUTHORIZED', 401); }
+
+  try {
+    const { key, uploadId, parts } = await request.json() as any;
+    if (!key || !uploadId || !parts) return jsonError('key, uploadId, and parts[] required', 'VALIDATION_ERROR');
+
+    const multipartUpload = env.R2.resumeMultipartUpload(key, uploadId);
+    await multipartUpload.complete(parts);
     return Response.json({ success: true, key });
   } catch (e: any) { return jsonError(e.message); }
 }

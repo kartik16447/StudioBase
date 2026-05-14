@@ -107,9 +107,12 @@ function handleFocusChange(isChromeFocused: boolean) {
   }
 }
 
+let currentSessionId: string | null = null;
+let chunkIndex = 0;
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'START_VIDEO_RECORDING') {
-    startRecording(sendResponse);
+    startRecording(message.sessionId, sendResponse);
     return true; 
   } else if (message.type === 'STOP_VIDEO_RECORDING') {
     clearDesktopTimers();
@@ -120,9 +123,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     uploadVideo(message.uploadUrl, message.token, sendResponse);
     return true;
   } else if (message.type === 'GET_FRAME') {
-    captureFrame().then(blob => {
+    captureFrame().then((blob) => {
       if (blob) {
-        sendResponse({ blob });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          sendResponse({ base64data: reader.result });
+        };
+        reader.readAsDataURL(blob);
       } else {
         sendResponse({ error: 'Failed to capture frame' });
       }
@@ -133,8 +140,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-async function startRecording(sendResponse: (response: any) => void) {
+async function startRecording(sessionId: string, sendResponse: (response: any) => void) {
   try {
+    currentSessionId = sessionId;
+    chunkIndex = 0;
+
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: { frameRate: 30 } as any,
       audio: false
@@ -146,15 +156,25 @@ async function startRecording(sendResponse: (response: any) => void) {
 
     mediaRecorder = new MediaRecorder(stream, { mimeType });
     videoChunks = [];
-    capturedBlob = null;
 
     mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        videoChunks.push(event.data);
+      if (event.data.size > 0 && currentSessionId) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          // Stream chunk immediately to IndexedDB via Service Worker
+          chrome.runtime.sendMessage({
+            type: 'SAVE_CHUNK',
+            sessionId: currentSessionId,
+            index: chunkIndex,
+            base64data: reader.result
+          });
+          chunkIndex++;
+        };
+        reader.readAsDataURL(event.data);
       }
     };
 
-    mediaRecorder.start();
+    mediaRecorder.start(5000); // 5-second time slices for durability
     chrome.runtime.sendMessage({ type: 'OFFSCREEN_READY' });
     sendResponse({ status: 'started' });
   } catch (error) {
@@ -198,51 +218,19 @@ function stopRecording(sendResponse: (response: any) => void) {
   }
 
   mediaRecorder.onstop = () => {
-    capturedBlob = new Blob(videoChunks, { type: 'video/webm' });
-    
     // Stop all tracks in the stream
     mediaRecorder?.stream.getTracks().forEach(track => track.stop());
     mediaRecorder = null;
     videoChunks = [];
 
-    sendResponse({ status: 'stopped', size: capturedBlob.size });
+    sendResponse({ status: 'stopped', finalChunkIndex: chunkIndex });
+    currentSessionId = null;
   };
 
   mediaRecorder.stop();
 }
 
 async function uploadVideo(uploadUrl: string, token: string, sendResponse: (response: any) => void) {
-  if (!capturedBlob) {
-    sendResponse({ error: 'no_blob' });
-    return;
-  }
-
-  // Heartbeat to keep service worker alive during potentially long upload
-  const heartbeatInterval = setInterval(() => {
-    chrome.runtime.sendMessage({ type: 'UPLOAD_HEARTBEAT' }).catch(() => {});
-  }, 10000);
-
-  try {
-    const response = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: { 
-        'Content-Type': 'video/webm',
-        'Authorization': `Bearer ${token}`
-      },
-      body: capturedBlob
-    });
-
-    clearInterval(heartbeatInterval);
-
-    if (response.ok) {
-      sendResponse({ status: 'uploaded' });
-      capturedBlob = null; // Clear memory
-    } else {
-      const text = await response.text();
-      sendResponse({ error: `Upload failed: ${response.status} ${text}` });
-    }
-  } catch (err: any) {
-    clearInterval(heartbeatInterval);
-    sendResponse({ error: err.message });
-  }
+  // Logic will be replaced in the next step to read from IndexedDB
+  sendResponse({ error: 'Multipart uploader implementation pending' });
 }

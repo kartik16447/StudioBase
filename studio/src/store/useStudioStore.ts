@@ -38,6 +38,8 @@ interface StudioState {
   scrollTrigger: number;
   sessionError: string | null;
   renderMode: 'hybrid' | 'slideshow';
+  isExporting: boolean;
+  exportTrigger: number;
 
   brand: BrandState;
   setBrand: (updates: Partial<BrandState>) => void;
@@ -62,6 +64,8 @@ interface StudioState {
   deleteStep: (stepId: string) => void;
   triggerScroll: () => void;
   setRenderMode: (mode: 'hybrid' | 'slideshow') => void;
+  setIsExporting: (exporting: boolean) => void;
+  triggerExport: () => void;
   fetchSession: (sessionId: string) => Promise<void>;
 }
 
@@ -84,6 +88,8 @@ export const useStudioStore = create<StudioState>((set) => ({
   scrollTrigger: 0,
   sessionError: null,
   renderMode: 'hybrid',
+  isExporting: false,
+  exportTrigger: 0,
 
   brand: {
     primaryColor: '#5E5CE6',
@@ -349,6 +355,8 @@ export const useStudioStore = create<StudioState>((set) => ({
   }),
   triggerScroll: () => set((state) => ({ scrollTrigger: state.scrollTrigger + 1 })),
   setRenderMode: (mode) => set({ renderMode: mode }),
+  setIsExporting: (exporting) => set({ isExporting: exporting }),
+  triggerExport: () => set((state) => ({ exportTrigger: state.exportTrigger + 1 })),
 }));
 
 // Listen for token updates from the extension content script

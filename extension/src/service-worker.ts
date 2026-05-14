@@ -1,4 +1,4 @@
-import { AppState, CaptureTarget, WorkerMessage, BackendUser } from "./types";
+import { AppState, CaptureTarget, WorkerMessage, BackendUser, StorageSchema } from "./types";
 import { sbLog } from "./logger";
 import { BACKEND_URL } from "../../shared/constants";
 import {
@@ -8,6 +8,8 @@ import {
   appendEvent,
   abortSession,
   saveScreenshot,
+  saveChunk,
+  getChunks,
 } from "./background/session-manager";
 import { uploadSession } from "./background/r2-uploader";
 
@@ -22,8 +24,9 @@ const ENABLE_OFFSCREEN_CAPTURE = true;
 
 async function init() {
   try {
-    const stored = await chrome.storage.local.get(["sb_state"]);
-    if (stored.sb_state) state = stored.sb_state as AppState;
+    const result = await chrome.storage.local.get(["sb_state"]);
+    const stored = result as StorageSchema;
+    if (stored.sb_state) state = stored.sb_state;
 
     sbLog("STATE_REHYDRATED", { status: state.status });
   } catch (err) {
@@ -150,6 +153,16 @@ chrome.runtime.onMessage.addListener(
         // This keeps the service worker alive during long offscreen uploads
         chrome.storage.local.get(['sb_state']).catch(() => {});
         break;
+      case 'SAVE_CHUNK':
+        if (msg.sessionId && msg.base64data) {
+          fetch(msg.base64data).then(res => res.blob()).then(blob => {
+            console.log(`💾 [ServiceWorker] Chunk received: ${blob.size} bytes`);
+            saveChunk(msg.sessionId, msg.index, blob).catch(err => {
+              console.error("💾 [ServiceWorker] Failed to save video chunk:", err);
+            });
+          });
+        }
+        break;
     }
     return false; // channel closed — no async response needed
   },
@@ -170,11 +183,12 @@ async function captureCurrentStep(sessionId: string, stepIndex: number) {
       
       const response = await Promise.race([responsePromise, timeoutPromise]) as any;
       
-      if (response && response.blob) {
-        blob = response.blob;
+      if (response && response.base64data) {
+        const res = await fetch(response.base64data);
+        blob = await res.blob();
         captureSource = 'offscreen';
       } else {
-        console.warn("📸 [ServiceWorker] Offscreen capture returned no blob, falling back...");
+        console.log("📸 [ServiceWorker] Offscreen capture returned no base64data, falling back...");
       }
     } catch (err) {
       console.error("📸 [ServiceWorker] Offscreen capture failed:", err);
@@ -207,7 +221,8 @@ async function captureCurrentStep(sessionId: string, stepIndex: number) {
 chrome.runtime.onMessageExternal.addListener(
   (msg: any, _sender, sendResponse) => {
     if (msg.type === "GET_AUTH_TOKEN") {
-      chrome.storage.local.get(["sb_user"]).then((stored) => {
+      chrome.storage.local.get(["sb_user"]).then((result) => {
+        const stored = result as StorageSchema;
         sendResponse({ 
           token: stored.sb_user?.accessToken || null,
           workspaceId: stored.sb_user?.workspaceId || null,
@@ -265,7 +280,7 @@ async function startRecording(target: CaptureTarget) {
           justification: 'Screen recording for StudioBase session'
         });
       }
-      chrome.runtime.sendMessage({ type: 'START_VIDEO_RECORDING' }).catch(() => {});
+      chrome.runtime.sendMessage({ type: 'START_VIDEO_RECORDING', sessionId }).catch(() => {});
     }
 
     sbLog("RECORDING_STARTED", { sessionId, target });

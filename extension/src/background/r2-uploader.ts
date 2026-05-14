@@ -1,6 +1,6 @@
 import { BACKEND_URL } from "../../../shared/constants";
 import { BackendUser } from "../types";
-import { getScreenshots, Session } from "./session-manager";
+import { getScreenshots, getChunks, Session } from "./session-manager";
 import { sbLog } from "../logger";
 
 /**
@@ -117,39 +117,90 @@ export async function uploadSession(
 
   let videoKey: string | null = null;
   if (includeVideo) {
-    videoKey = `videos/${activeSessionId}/screen-recording.webm`;
-    
-    // 1. Get presigned URL from backend
-    const presignRes = await fetch(`${BACKEND_URL}/upload/presign`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: activeSessionId,
-        files: [{ key: videoKey, contentType: 'video/webm' }]
-      })
-    });
-    
-    if (presignRes.ok) {
-      const presignData = await presignRes.json();
-      const uploadUrl = presignData.files?.[0]?.uploadUrl;
-      
-      if (uploadUrl) {
-        // 2. Delegate the upload to offscreen script to avoid Base64 overhead
-        // We await this message, and offscreen will send heartbeats to keep SW alive
-        const uploadResult = await chrome.runtime.sendMessage({ 
-          type: 'UPLOAD_VIDEO', 
-          uploadUrl, 
-          token 
-        });
-        
-        if (uploadResult?.error) {
-          console.warn("[StudioBase] Offscreen video upload failed:", uploadResult.error);
-          videoKey = null; // Don't include it in final envelope if upload failed
-        }
-      } else {
+    try {
+      videoKey = `videos/${activeSessionId}/screen-recording.webm`;
+      console.log("📤 [Uploader] Starting multipart video upload for:", videoKey);
+
+      // 1. Initialize Multipart Upload
+      const initRes = await fetch(`${BACKEND_URL}/upload/multipart/init`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: videoKey })
+      });
+      if (!initRes.ok) throw new Error("Multipart init failed");
+      const { uploadId } = await initRes.json() as any;
+
+      // 2. Fetch and Re-slice chunks to meet S3/R2 5MB minimum part size
+      const dbChunks = await getChunks(session.sessionId);
+      if (dbChunks.length === 0) {
+        console.warn("📤 [Uploader] No video chunks found in IndexedDB.");
         videoKey = null;
+      } else {
+        // Stitch into a single blob and slice into 5MB parts
+        const fullVideoBlob = new Blob(dbChunks.map(c => c.blob), { type: 'video/webm' });
+        const PART_SIZE = 5 * 1024 * 1024; 
+        const slicedParts: Blob[] = [];
+        for (let i = 0; i < fullVideoBlob.size; i += PART_SIZE) {
+          slicedParts.push(fullVideoBlob.slice(i, i + PART_SIZE));
+        }
+
+        const parts: { partNumber: number; etag: string }[] = [];
+        
+        // 3. Upload each 5MB part
+        for (let i = 0; i < slicedParts.length; i++) {
+          const partBlob = slicedParts[i];
+          const partNumber = i + 1;
+          
+          if (onProgress) {
+            const uploadProgress = 50 + Math.floor((i / slicedParts.length) * 35);
+            onProgress(uploadProgress);
+          }
+
+          // Get presigned URL for this part
+          const partRes = await fetch(`${BACKEND_URL}/upload/multipart/presign-part`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: videoKey, uploadId, partNumber })
+          });
+          if (!partRes.ok) throw new Error(`Presign failed for part ${partNumber}`);
+          const { uploadUrl } = await partRes.json() as any;
+
+          // Upload the binary part
+          const putRes = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'video/webm', 'Authorization': `Bearer ${token}` },
+            body: partBlob
+          });
+          if (!putRes.ok) throw new Error(`Upload failed for part ${partNumber}`);
+          
+          // 1. Parse the JSON response from your Cloudflare Worker
+          const responseData = await putRes.json() as any;
+          console.log(`🔍 [Uploader] Part ${partNumber} Worker Response:`, responseData);
+
+          // 2. Grab the ETag from the JSON body
+          let etag = responseData.etag;
+
+          if (!etag) {
+            throw new Error("FATAL: ETag is missing from the Worker's JSON response.");
+          }
+
+          // 3. Strip quotes (just in case) and push to the array
+          etag = etag.replace(/"/g, ''); 
+          parts.push({ partNumber, etag });
+        }
+
+        // 4. Complete Multipart Upload
+        const completeRes = await fetch(`${BACKEND_URL}/upload/multipart/complete`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: videoKey, uploadId, parts })
+        });
+        if (!completeRes.ok) throw new Error("Multipart completion failed");
+        
+        console.log("📤 [Uploader] Multipart upload finalized successfully.");
       }
-    } else {
+    } catch (err) {
+      console.error("📤 [Uploader] Multipart video upload failed:", err);
       videoKey = null;
     }
   }
