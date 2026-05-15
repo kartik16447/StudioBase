@@ -6,7 +6,8 @@ import {
   cn, Button, DotGrid, FieldShell, Kbd, SessionCardSkeleton, Card 
 } from '../components/ui';
 import { SessionCard } from '../components/studio';
-import { BACKEND_URL } from '../../../shared/constants/index';
+import { apiClient } from '../lib/apiClient';
+import { sessionManager } from '../lib/auth/sessionManager';
 import type { SessionEnvelope } from '../../../shared/types/session';
 
 interface BackendSession {
@@ -30,46 +31,48 @@ export const HomePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionEnvelope[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
+    // 1. Initial Session Resolution
     const urlParams = new URLSearchParams(window.location.search);
-    const storageToken = localStorage.getItem('sb_token') || sessionStorage.getItem('sb_token');
     const urlToken = urlParams.get('token');
-    const t = storageToken || urlToken;
     
-    const wid = urlParams.get('workspaceId') || localStorage.getItem('sb_workspaceId') || sessionStorage.getItem('sb_workspaceId');
-
-    if (t) {
-      sessionStorage.setItem('sb_token', t);
-      localStorage.setItem('sb_token', t);
-      setToken(t);
-    }
-    if (wid) {
-      sessionStorage.setItem('sb_workspaceId', wid);
-      localStorage.setItem('sb_workspaceId', wid);
-    }
-
-    if (!t || !wid) {
-      setLoading(false);
-      return;
+    if (urlToken) {
+      console.log('🔑 [HomePage] Detected Google token in URL, exchanging for internal JWT...');
+      sessionManager.loginWithGoogle(urlToken).then(() => {
+        // Remove token from URL to keep it clean
+        window.history.replaceState({}, '', window.location.pathname);
+        fetchSessions();
+      }).catch(() => {
+        setError("Failed to authenticate. Please try again.");
+        setLoading(false);
+      });
+    } else {
+      fetchSessions();
     }
 
-    const fetchSessions = async () => {
+    async function fetchSessions() {
+      if (!sessionManager.isAuthenticated()) {
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
-        const res = await fetch(`${BACKEND_URL}/sessions?workspaceId=${wid}`, {
-          headers: {
-            'Authorization': `Bearer ${t}`
-          }
-        });
-        
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || 'Failed to fetch sessions');
+        setError(null);
+
+        // 1. Ensure we have a valid workspace context
+        const workspaces = await sessionManager.syncWorkspaces();
+        const workspaceId = sessionManager.getWorkspaceId();
+
+        if (!workspaceId || !workspaces || workspaces.length === 0) {
+          setError("No workspaces found. Please create or join a workspace to continue.");
+          setLoading(false);
+          return;
         }
         
-        const data = await res.json();
+        const data = await apiClient.get<any>('/sessions');
+
         // Map backend records to UI SessionEnvelope format
         const mapped: SessionEnvelope[] = data.sessions.map((s: BackendSession) => ({
           sessionId: s.id,
@@ -99,17 +102,11 @@ export const HomePage: React.FC = () => {
       } finally {
         setLoading(false);
       }
-    };
-
-    fetchSessions();
+    }
 
     const handleSync = () => {
       console.log('🔑 [HomePage] SB_TOKEN_UPDATED event received, re-fetching...');
-      const newToken = localStorage.getItem('sb_token') || sessionStorage.getItem('sb_token');
-      if (newToken) {
-        setToken(newToken);
-        fetchSessions();
-      }
+      fetchSessions();
     };
 
     window.addEventListener('SB_TOKEN_UPDATED', handleSync);
@@ -127,10 +124,10 @@ export const HomePage: React.FC = () => {
 
   const openSession = (s: SessionEnvelope) => {
     setSession(s);
-    navigate('studio');
+    navigate('studio', { sessionId: s.sessionId });
   };
 
-  if (!token && !loading) {
+  if (!sessionManager.isAuthenticated() && !loading) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
         <div className="w-16 h-16 rounded-full bg-surface-2 flex items-center justify-center text-text-3 mb-4">
@@ -231,34 +228,20 @@ export const HomePage: React.FC = () => {
                   onClick={() => openSession(s)}
                   onDelete={async () => {
                     try {
-                      const res = await fetch(`${BACKEND_URL}/sessions/${s.sessionId}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${token}` }
-                      });
-                      if (res.ok) {
-                        setSessions(prev => prev.filter(x => x.sessionId !== s.sessionId));
-                      }
+                      await apiClient.delete(`/sessions/${s.sessionId}`);
+                      setSessions(prev => prev.filter(x => x.sessionId !== s.sessionId));
                     } catch (err) {
                       console.error('[onDelete] failed:', err);
                     }
                   }}
                   onRename={async (newTitle) => {
                     try {
-                      const res = await fetch(`${BACKEND_URL}/sessions/${s.sessionId}`, {
-                        method: 'PATCH',
-                        headers: { 
-                          'Authorization': `Bearer ${token}`,
-                          'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ title: newTitle })
-                      });
-                      if (res.ok) {
-                        setSessions(prev => prev.map(x => 
-                          x.sessionId === s.sessionId 
-                            ? { ...x, aiOutputs: { ...x.aiOutputs, title: newTitle }, capturedTitle: newTitle }
-                            : x
-                        ));
-                      }
+                      await apiClient.patch(`/sessions/${s.sessionId}`, { title: newTitle });
+                      setSessions(prev => prev.map(x => 
+                        x.sessionId === s.sessionId 
+                          ? { ...x, aiOutputs: { ...x.aiOutputs, title: newTitle }, capturedTitle: newTitle }
+                          : x
+                      ));
                     } catch (err) {
                       console.error('[onRename] failed:', err);
                     }

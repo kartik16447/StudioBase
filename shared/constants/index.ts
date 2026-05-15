@@ -26,9 +26,17 @@ export const DEFAULT_DWELL_MS = 2500; // fallback dwell if no voiceover
 export const ASSET_URL_TTL_SECONDS = 3600; // 1 hour
 
 export const PLAYER_BASE_URL = "https://player.studiobase.app";
-export const BACKEND_URL =
-  "https://studiobase-backend.karthik-upadhyay98.workers.dev";
-export const DEV_MODE = true; // Toggle for local studio testing
-export const STUDIO_URL = DEV_MODE
-  ? "http://localhost:5173"
-  : "http://studiobase-studio.pages.dev";
+
+// Set this to false to test against the live production backend
+export const DEV_MODE = false; 
+
+export const BACKEND_URL = DEV_MODE
+  ? "http://localhost:8787/v1"
+  : "https://studiobase-backend.karthik-upadhyay98.workers.dev/v1";
+
+export const V1_API_URL = BACKEND_URL;
+
+// Studio URL depends on whether we are in local dev or production
+export const STUDIO_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? `http://${window.location.host}`
+  : "https://studio.studiobase.app";

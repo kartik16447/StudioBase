@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { SessionEnvelope, Step } from '../../../shared/types/session';
-import { BACKEND_URL } from '../../../shared/constants';
+import { apiClient } from '../lib/apiClient';
 
 export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team';
 
@@ -104,7 +104,31 @@ export const useStudioStore = create<StudioState>((set) => ({
     brand: { ...state.brand, ...updates },
   })),
 
-  navigate: (name, params = {}) => set({ route: { name, params } }),
+  navigate: (name, params = {}) => set((state) => {
+    // 1. Sync Browser URL
+    const search = new URLSearchParams(window.location.search);
+    
+    // If we're navigating home, clear session-specific params
+    if (name === 'home') {
+      search.delete('session');
+    } else if (params.sessionId) {
+      search.set('session', params.sessionId);
+    }
+
+    if (params.workspaceId) {
+      search.set('workspaceId', params.workspaceId);
+    }
+    
+    const searchStr = search.toString();
+    const newUrl = window.location.pathname + (searchStr ? '?' + searchStr : '');
+    
+    // Only push if different from current state to avoid loops
+    if (state.route.name !== name || state.route.params.sessionId !== params.sessionId) {
+      window.history.pushState({ name, params }, '', newUrl);
+    }
+
+    return { route: { name, params } };
+  }),
   setSession: (session) => {
     set({ session });
     if (session && session.steps.length > 0) {
@@ -115,48 +139,9 @@ export const useStudioStore = create<StudioState>((set) => ({
     try {
       set({ sessionError: null });
 
-      // Get token from URL or storage (extension syncs to both)
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlToken = urlParams.get('token');
-      const storageToken = localStorage.getItem('sb_token') || sessionStorage.getItem('sb_token');
+      console.log(`[fetchSession] Fetching session ${sessionId} via apiClient...`);
+      const data = await apiClient.get<any>(`/sessions/${sessionId}`);
       
-      // Source of truth: Storage (synced by extension) > URL (may be stale)
-      let token = storageToken || urlToken;
-
-      if (urlToken && urlToken !== storageToken && !storageToken) {
-        console.log('🔑 [fetchSession] No storage token found, using URL token...');
-        sessionStorage.setItem('sb_token', urlToken);
-        localStorage.setItem('sb_token', urlToken);
-        token = urlToken;
-      }
-
-      const wid = urlParams.get('workspaceId') || sessionStorage.getItem('sb_workspaceId') || localStorage.getItem('sb_workspaceId');
-      if (wid) {
-        sessionStorage.setItem('sb_workspaceId', wid);
-        localStorage.setItem('sb_workspaceId', wid);
-      }
-
-      const displayToken = token ? `${token.substring(0, 10)}...${token.substring(token.length - 5)}` : 'MISSING';
-      console.log('[fetchSession] Using token:', displayToken);
-      console.log('[fetchSession] Fetching session from backend:', `${BACKEND_URL}/sessions/${sessionId}`);
-      const res = await fetch(`${BACKEND_URL}/sessions/${sessionId}`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-      });
-
-      if (!res.ok) {
-        const errBody = await res.text().catch(() => '');
-        console.error('[fetchSession] Backend error:', res.status, errBody);
-        if (res.status === 401) {
-          sessionStorage.removeItem('sb_token');
-          localStorage.removeItem('sb_token');
-          throw new Error('Session Expired: Please close this tab and re-open the session from your Extension library.');
-        }
-        if (res.status === 404) throw new Error('Session not found — it may still be uploading. Try again in a moment.');
-        throw new Error(`Failed to fetch session (${res.status}): ${errBody}`);
-      }
-
-      const data = await res.json();
-      console.log('[fetchSession] Initial backend response (data):', data);
       if (!data) throw new Error('Empty response from server');
 
       // Start with the raw backend data as our sessionData
@@ -167,21 +152,13 @@ export const useStudioStore = create<StudioState>((set) => ({
 
       if (data.sessionJsonUrl) {
         console.log('[fetchSession] Fetching full JSON from R2:', data.sessionJsonUrl);
-        const jsonRes = await fetch(data.sessionJsonUrl);
-        if (jsonRes.ok) {
-          const jsonContent = await jsonRes.json();
-          console.log('[fetchSession] Received R2 JSON content:', jsonContent);
-          if (jsonContent) {
-            sessionData = { ...sessionData, ...jsonContent };
-          }
-        } else {
-          console.error('[fetchSession] R2 fetch failed:', jsonRes.status);
+        const jsonContent = await apiClient.get<any>(data.sessionJsonUrl);
+        if (jsonContent) {
+          sessionData = { ...sessionData, ...jsonContent };
         }
       }
 
       // ─── Normalization ───
-      // If the session has raw events but NO processed steps, we map them here.
-      // If it already has steps, we respect the backend's enriched data.
       const rawEvents = (sessionData as any).events;
       if (Array.isArray(rawEvents) && (!sessionData.steps || sessionData.steps.length === 0)) {
         const rawTitle = sessionData.aiOutputs?.title || (data as any).title || sessionData.capturedUrl || 'Untitled Session';
@@ -194,7 +171,7 @@ export const useStudioStore = create<StudioState>((set) => ({
         for (const evt of rawEvents) {
           if (evt.type === 'context_switch') {
             currentContext = evt.data?.context || 'browser';
-            continue; // Meta-event, skip step creation
+            continue;
           }
 
           const isDesktop = evt.type === 'desktop_anchor' || currentContext === 'desktop';
@@ -244,7 +221,7 @@ export const useStudioStore = create<StudioState>((set) => ({
         };
       }
 
-      // Final safety checks for required SessionEnvelope fields
+      // Final safety checks
       if (!sessionData.steps) {
         const terminalFailures: Record<string, string> = {
           credit_exhausted: 'Not enough credits to process this session.',
@@ -267,30 +244,28 @@ export const useStudioStore = create<StudioState>((set) => ({
         sessionData.metadata.chapterBreaks = [];
       }
 
-      // Final field normalization (Backend DB uses r2VideoKey, Extension uses videoKey)
       if (!sessionData.videoKey && (sessionData as any).r2VideoKey) {
         sessionData.videoKey = (sessionData as any).r2VideoKey;
       }
 
-      // Build assets map from step screenshot/voiceover keys
+      // Build assets map
       if (!sessionData.assets || Object.keys(sessionData.assets).length === 0) {
         const assets: Record<string, string> = {};
         for (const step of sessionData.steps || []) {
           if (step.screenshotKey) {
-            assets[step.screenshotKey] = `${BACKEND_URL}/assets/${step.screenshotKey}`;
+            assets[step.screenshotKey] = apiClient.getUrl(`/assets/${step.screenshotKey}`);
           }
           if (step.voiceoverKey) {
-            assets[step.voiceoverKey] = `${BACKEND_URL}/assets/${step.voiceoverKey}`;
+            assets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`);
           }
         }
         if (sessionData.videoKey) {
-          assets[sessionData.videoKey] = `${BACKEND_URL}/assets/${sessionData.videoKey}`;
+          assets[sessionData.videoKey] = apiClient.getUrl(`/assets/${sessionData.videoKey}`);
         }
         sessionData.assets = assets;
       }
 
       if (sessionData.brand) {
-        console.log('[fetchSession] Merging brand config:', sessionData.brand);
         set((state) => ({
           brand: {
             ...state.brand,
@@ -304,7 +279,6 @@ export const useStudioStore = create<StudioState>((set) => ({
         }));
       }
 
-      console.log('[fetchSession] Final normalized sessionData:', sessionData);
       set({ session: sessionData });
       if (sessionData.steps?.length > 0) {
         set({ focusedStepId: sessionData.steps[0].id, focusedStepIndex: 0 });
@@ -343,7 +317,6 @@ export const useStudioStore = create<StudioState>((set) => ({
   deleteStep: (stepId) => set((state) => {
     if (!state.session) return state;
     const newSteps = state.session.steps.filter(s => s.id !== stepId);
-    // Re-sequence steps after deletion
     const sequencedSteps = newSteps.map((s, i) => ({ ...s, sequence: i + 1 }));
     return { 
       session: { 
@@ -358,20 +331,3 @@ export const useStudioStore = create<StudioState>((set) => ({
   setIsExporting: (exporting) => set({ isExporting: exporting }),
   triggerExport: () => set((state) => ({ exportTrigger: state.exportTrigger + 1 })),
 }));
-
-// Listen for token updates from the extension content script
-if (typeof window !== 'undefined') {
-  window.addEventListener('SB_TOKEN_UPDATED', () => {
-    const state = useStudioStore.getState();
-    const params = new URLSearchParams(window.location.search);
-    const sessionId = params.get('session');
-    
-    console.log('🔑 [useStudioStore] SB_TOKEN_UPDATED event received');
-    
-    // If we have an error or no session, try fetching again with the new token
-    if (sessionId && (state.sessionError || !state.session)) {
-      console.log('🔑 [useStudioStore] Re-fetching session with new token...');
-      state.fetchSession(sessionId);
-    }
-  });
-}

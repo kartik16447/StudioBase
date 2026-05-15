@@ -25,7 +25,7 @@
 		{
 			"binding": "R2",
 			"bucket_name": "studiobase-assets",
-			"preview_bucket_name": "studiobase-assets-preview",
+			// "preview_bucket_name": "studiobase-assets-preview",
 		},
 	],
 	"queues": {
@@ -37,6 +37,18 @@
 		],
 	},
 	"triggers": {
-		"crons": ["0 0 * * *"],
+		"crons": ["0 0 * * *"]
 	},
+	"analytics_engine_datasets": [
+		{
+			"binding": "ANALYTICS",
+			"dataset": "analytics_event"
+		}
+	],
+	"vars": {
+		"ENVIRONMENT": "development",
+		"ADMIN_EMAIL": "admin@studiobase.app",
+		"ALLOWED_ORIGINS": "https://studio.studiobase.app,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
+		"ENCRYPTION_KEY": "REPLACE_ME_WITH_SECURE_KEY"
+	}
 }

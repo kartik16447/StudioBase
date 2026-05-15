@@ -5,7 +5,7 @@ import { I } from '../../../components/icons';
 import { Badge, AIShimmer, AIButton, DotGrid, Button } from '../../../components/ui';
 import { SummaryCallout, StepCard, ChapterBreak } from '../../../components/studio';
 import { RenderConstants } from '../../../modules/render-engine/RenderConstants';
-import { BACKEND_URL } from '../../../../../shared/constants';
+import { apiClient } from '../../../lib/apiClient';
 import type { Step, ChapterBreak as IChapterBreak } from '../../../../../shared/types/session';
 
 export const SOPCanvas: React.FC = () => {
@@ -48,13 +48,9 @@ export const SOPCanvas: React.FC = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [session, focusedStepId, setFocusStep, setStepIndex, triggerScroll]);
 
-
-
   const sopVideoRef = React.useRef<HTMLDivElement>(null);
   const [showEmbed, setShowEmbed] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
-
-
 
   if (!session) return null;
 
@@ -113,17 +109,11 @@ export const SOPCanvas: React.FC = () => {
             icon={I.Sparkles}
             onClick={async () => {
               if (!session) return;
-              const sessionId = session.sessionId;
-              const token = sessionStorage.getItem('sb_token');
               setIsProcessing(true);
               try {
-                await fetch(`${BACKEND_URL}/pipeline/trigger`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                  },
-                  body: JSON.stringify({ sessionId, requestedOutputs: { sop: true, demo: true } }),
+                await apiClient.post('/pipeline/trigger', { 
+                  sessionId: session.sessionId, 
+                  requestedOutputs: { sop: true, demo: true } 
                 });
               } finally {
                 setIsProcessing(false);
@@ -210,7 +200,7 @@ export const SOPCanvas: React.FC = () => {
                 useStudioStore.getState().setActiveView('video');
                 setTimeout(() => {
                   useStudioStore.getState().triggerExport();
-                }, 300); // Give it time to mount and find the canvas
+                }, 300);
               }}
               disabled={useStudioStore.getState().isExporting}
             >

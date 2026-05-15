@@ -66,7 +66,7 @@ export async function uploadSession(
     const key = `screenshots/${activeSessionId}/${stepIndex}.jpg`;
 
     // Request a presigned URL for the screenshot
-    const presignRes = await fetch(`${BACKEND_URL}/upload/presign`, {
+    const presignRes = await fetch(`${BACKEND_URL}/assets/upload/presign`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -122,7 +122,7 @@ export async function uploadSession(
       console.log("📤 [Uploader] Starting multipart video upload for:", videoKey);
 
       // 1. Initialize Multipart Upload
-      const initRes = await fetch(`${BACKEND_URL}/upload/multipart/init`, {
+      const initRes = await fetch(`${BACKEND_URL}/assets/upload/multipart/init`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: videoKey })
@@ -157,7 +157,7 @@ export async function uploadSession(
           }
 
           // Get presigned URL for this part
-          const partRes = await fetch(`${BACKEND_URL}/upload/multipart/presign-part`, {
+          const partRes = await fetch(`${BACKEND_URL}/assets/upload/multipart/presign-part`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ key: videoKey, uploadId, partNumber })
@@ -190,7 +190,7 @@ export async function uploadSession(
         }
 
         // 4. Complete Multipart Upload
-        const completeRes = await fetch(`${BACKEND_URL}/upload/multipart/complete`, {
+        const completeRes = await fetch(`${BACKEND_URL}/assets/upload/multipart/complete`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ key: videoKey, uploadId, parts })
@@ -214,7 +214,7 @@ export async function uploadSession(
 
   // 5. Upload the final session JSON
   const jsonKey = `sessions/${activeSessionId}/session.json`;
-  const jsonPresignRes = await fetch(`${BACKEND_URL}/upload/presign`, {
+  const jsonPresignRes = await fetch(`${BACKEND_URL}/assets/upload/presign`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,

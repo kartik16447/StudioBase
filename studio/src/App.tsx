@@ -7,6 +7,7 @@ import { StudioPage } from './pages/StudioPage';
 import { BrandKitPage } from './pages/BrandKitPage';
 import { SharePage } from './pages/SharePage';
 import { CommandPalette, KeyboardHintPill } from './components/CommandPalette';
+import { sessionManager } from './lib/auth/sessionManager';
 
 function App() {
   const route = useStudioStore(state => state.route);
@@ -18,10 +19,48 @@ function App() {
 
   // Only navigate to studio if session param exists
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('session')) {
-      navigate('studio');
-    }
+    const syncRouteFromUrl = async () => {
+      const params = new URLSearchParams(window.location.search);
+      
+      // Auto-sync credentials from URL to localStorage
+      const token = params.get('token');
+      if (token) {
+        console.log('🔑 [App] Detected Google token in URL, exchanging...');
+        try {
+          await sessionManager.loginWithGoogle(token);
+          // Only remove token, keep session and workspaceId
+          const cleanParams = new URLSearchParams(window.location.search);
+          cleanParams.delete('token');
+          const searchStr = cleanParams.toString();
+          const newUrl = window.location.pathname + (searchStr ? '?' + searchStr : '');
+          window.history.replaceState({}, '', newUrl);
+        } catch (err) {
+          console.error('❌ [App] Auth exchange failed:', err);
+        }
+      }
+      
+      // 2. Sync Workspaces from Backend (Ground Truth)
+      if (sessionManager.isAuthenticated()) {
+        await sessionManager.syncWorkspaces();
+      }
+
+      const workspaceId = params.get('workspaceId') || sessionManager.getWorkspaceId();
+      if (workspaceId) sessionManager.setWorkspaceId(workspaceId);
+
+      const sessionId = params.get('session');
+      if (sessionId) {
+        navigate('studio', { sessionId, workspaceId: sessionManager.getWorkspaceId() });
+      } else {
+        if (route.name === 'studio') navigate('home');
+      }
+    };
+
+    // Initial sync
+    syncRouteFromUrl();
+
+    // Listen for back/forward browser buttons
+    window.addEventListener('popstate', syncRouteFromUrl);
+    return () => window.removeEventListener('popstate', syncRouteFromUrl);
   }, []);
 
   // Keyboard shortcuts

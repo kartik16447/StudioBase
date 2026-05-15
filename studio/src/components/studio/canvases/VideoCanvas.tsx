@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence, useSpring } from 'framer-motion';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../../components/icons';
-import { cn, Button, AIShimmer } from '../../../components/ui';
+import { cn, Button } from '../../../components/ui';
 import { RenderConstants } from '../../../modules/render-engine/RenderConstants';
-import { BACKEND_URL } from '../../../../../shared/constants';
+import { apiClient } from '../../../lib/apiClient';
 import { WorkerExtractor } from '../../../services/WorkerExtractor';
 import { CanvasRenderer } from '../../../modules/render-engine/CanvasRenderer';
 
@@ -706,7 +706,7 @@ export const VideoCanvas: React.FC = () => {
     }
 
     if (currentStep?.voiceoverKey) {
-      const url = `${BACKEND_URL}/assets/${currentStep.voiceoverKey}`;
+      const url = apiClient.getUrl(`/assets/${currentStep.voiceoverKey}`);
       if (audio.src !== url) {
         audio.src = url;
       }
@@ -801,187 +801,158 @@ export const VideoCanvas: React.FC = () => {
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [currentStep, prevStep, brand, isPlaying]);
+  }, [currentStepIndex, isPlaying, brand, renderMode, steps]);
 
   if (!session) return null;
 
   return (
-    <div className="flex-1 h-full studio-gradient flex flex-col items-center justify-start py-16 px-8 min-h-0 scroll-y">
-      {/* Player */}
-      <div
-        ref={playerRef}
-        className="relative w-full max-w-5xl rounded-img shadow-card-lifted overflow-hidden bg-[#12121a]"
-        style={{ maxHeight: RenderConstants.PLAYER_MAX_HEIGHT, aspectRatio: RenderConstants.PLAYER_ASPECT_RATIO }}
-      >
-        {/* 🎬 UNIFIED CANVAS PLAYER 🎬 */}
-        <canvas 
-          ref={canvasRef} 
-          className="w-full h-full object-contain"
-        />
-
-        {/* Hidden Driver Video */}
-        <video
+    <div ref={playerRef} className="flex-1 min-h-0 bg-surface flex flex-col relative group">
+      {/* DETERMINISTIC HIDDEN VIDEO FOR RENDERER TAPPING */}
+      {videoUrl && (
+        <video 
           ref={videoRef}
-          src={videoUrl || undefined}
-          style={{ opacity: 0, position: 'absolute', pointerEvents: 'none' }}
-          muted
-          playsInline
+          src={videoUrl}
           crossOrigin="anonymous"
-          preload="auto"
+          className="hidden"
+          playsInline
+          muted
         />
-
-        {/* Player Controls Overlay */}
-        <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300">
-          <div className="p-6 flex items-center gap-4">
-            <button
-              onClick={() => setPlaying(!isPlaying)}
-              className="w-12 h-12 rounded-full glass-dark flex items-center justify-center text-white hover:scale-105 transition active:scale-95"
-            >
-              {isPlaying ? <I.Pause size={20} fill="currentColor" /> : <I.Play size={20} fill="currentColor" className="translate-x-0.5" />}
-            </button>
-
-            <div className="flex-1 flex flex-col gap-1.5">
-              <div className="h-1.5 rounded-full bg-white/20 relative" style={{ overflow: 'visible' }}>
-                <motion.div
-                  className="absolute inset-y-0 left-0 bg-primary rounded-full"
-                  animate={{ width: `${((currentStepIndex + 1) / steps.length) * 100}%` }}
-                />
-                {(session?.metadata?.chapterBreaks || []).map(c => {
-                  const stepIdx = steps.findIndex(s => s.id === c.afterStepId);
-                  if (stepIdx < 0) return null;
-                  const pct = ((stepIdx + 1) / steps.length) * 100;
-                  return (
-                    <div
-                      key={c.afterStepId}
-                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
-                      style={{ left: `${pct}%` }}
-                      title={c.chapterTitle}
-                    >
-                      <div className="w-2.5 h-2.5 rounded-full bg-white border-2 shadow-sm"
-                           style={{ borderColor: brand.primaryColor }} />
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex justify-between text-[11px] font-bold text-white/80 tracking-wider">
-                <span>STEP {currentStepIndex + 1} OF {steps.length}</span>
-                <span>{currentStep?.pageTitle || 'Dashboard'}</span>
-              </div>
-            </div>
-
-            {/* Prev / Next */}
-            <div className="flex items-center gap-2 glass-dark rounded-pill px-3 h-10">
-              <button onClick={() => setStepIndex(Math.max(0, currentStepIndex - 1))} className="text-white/80 hover:text-white">
-                <I.ChevronLeft size={18} />
-              </button>
-              <button onClick={() => setStepIndex(Math.min(steps.length - 1, currentStepIndex + 1))} className="text-white/80 hover:text-white">
-                <I.ChevronRight size={18} />
-              </button>
-            </div>
-
-            {/* Speed Selector */}
-            <div className="flex items-center gap-1 glass-dark rounded-pill px-3 h-10">
-              {[0.5, 1, 1.5, 2].map(speed => (
-                <button
-                  key={speed}
-                  onClick={() => useStudioStore.getState().setPlaybackRate(speed)}
-                  className={cn(
-                    'text-[11px] font-bold px-2 py-1 rounded transition',
-                    playbackRate === speed ? 'text-white' : 'text-white/50 hover:text-white/80'
-                  )}
-                >
-                  {speed}×
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Play Overlay (Initial) */}
-        {!isPlaying && currentStepIndex === 0 && !isEnded && (
-          <div className="absolute inset-0 bg-black/10 backdrop-blur-[2px] flex items-center justify-center">
-            <button
-              onClick={() => setPlaying(true)}
-              className="w-24 h-24 rounded-full glass shadow-card-lifted flex items-center justify-center text-text hover:scale-110 transition active:scale-95 group"
-            >
-              <div className="w-20 h-20 rounded-full border-2 border-primary/20 flex items-center justify-center group-hover:border-primary/40 transition">
-                <I.Play size={32} fill="currentColor" className="translate-x-1" />
-              </div>
-            </button>
-          </div>
-        )}
-      </div>
-      
-      {/* Export Progress Overlay */}
-      {isExporting && (
-        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-xl flex flex-col items-center justify-center">
-          <div className="bg-surface p-10 rounded-card shadow-2xl flex flex-col items-center gap-5 text-center max-w-md border border-white/10">
-            <div className="relative">
-               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                 <I.Loader size={40} className="animate-spin" />
-               </div>
-               <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-            </div>
-            <div>
-              <h3 className="text-2xl font-bold text-text">Rendering Cinematic Video</h3>
-              <p className="text-[15px] text-text-2 mt-2 leading-relaxed">
-                We're generating your high-fidelity walkthrough with zooms and transitions. Please keep this tab active.
-              </p>
-            </div>
-            <AIShimmer isActive={true} className="w-full h-1.5 mt-4" children={null} />
-          </div>
-        </div>
       )}
 
-      {/* Caption */}
-      <div className="mt-4 text-center max-w-2xl h-[72px] overflow-hidden flex flex-col justify-start">
-        <h3 className="text-[20px] font-semibold text-text leading-snug line-clamp-1">
-          {session.aiOutputs.title}
-        </h3>
-        <AnimatePresence mode="wait">
-          <motion.p
-            key={currentStepIndex}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            className="text-[14px] text-text-2 mt-1 leading-relaxed line-clamp-2"
-          >
-            {currentStep?.textOverride || currentStep?.generatedText || 'Watch this smart walkthrough generated by StudioBase AI.'}
-          </motion.p>
-        </AnimatePresence>
+      {/* COMPOSITOR CANVAS (The Visible Soul) */}
+      <div className="flex-1 relative flex items-center justify-center p-8 overflow-hidden">
+        <div className="relative shadow-2xl rounded-sm overflow-hidden bg-black aspect-video max-h-full">
+          <canvas 
+            ref={canvasRef}
+            className="w-full h-full block"
+            style={{ 
+              imageRendering: 'crisp-edges' 
+            }}
+          />
+          
+          {/* Overlay for ended state */}
+          <AnimatePresence>
+            {isEnded && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="absolute inset-0 z-20 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-center p-10"
+              >
+                <div className="w-16 h-16 rounded-full bg-primary/20 text-primary flex items-center justify-center mb-6">
+                  <I.CheckCircle size={32} strokeWidth={2.5} />
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">End of Walkthrough</h2>
+                <p className="text-white/70 max-w-[320px] mb-8">You've reached the end of the step-by-step guide.</p>
+                <div className="flex gap-3">
+                  <Button variant="primary" size="md" icon={I.RotateCcw} onClick={() => {
+                    setStepIndex(0);
+                    setIsEnded(false);
+                    setPlaying(true);
+                  }}>Watch again</Button>
+                  <Button variant="ghost" size="md" className="!text-white border-white/20" onClick={() => setIsEnded(false)}>Stay on last step</Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Rendering Overlay */}
+          <AnimatePresence>
+            {isExporting && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="absolute inset-0 z-30 bg-black/80 flex flex-col items-center justify-center text-center p-10"
+              >
+                <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-6" />
+                <h2 className="text-xl font-bold text-white mb-2">🎬 Rendering Cinematic Video</h2>
+                <p className="text-white/60 max-w-[320px]">Recording 60FPS high-definition frames off-screen. Please do not close this tab.</p>
+                <div className="mt-8 px-4 py-2 bg-white/10 rounded-pill text-[12px] font-mono text-white/80">
+                  EXPORT_MODE: HARDWARE_ACCELERATED
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
-      {/* Export Button */}
-      <div className="mt-4">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="md"
-            icon={isExporting ? I.Download : I.Download}
-            onClick={() => useStudioStore.getState().triggerExport()}
-            disabled={isExporting}
-          >
-            {isExporting ? 'Exporting...' : 'Cinematic Export'}
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="md"
-            icon={I.Download}
+      {/* CONTROLS */}
+      <div className="h-20 border-t border-border bg-bg flex items-center px-6 gap-6 relative z-10">
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" icon={I.SkipBack} onClick={() => setStepIndex(Math.max(0, currentStepIndex - 1))} />
+          <Button 
+            variant="primary" 
+            size="md" 
+            className="w-10 h-10 !p-0 rounded-full" 
+            icon={isPlaying ? I.Pause : I.Play} 
             onClick={() => {
-              const videoUrl = session.videoKey ? session.assets?.[session.videoKey] : null;
-              if (videoUrl) {
-                const a = document.createElement('a');
-                a.href = videoUrl;
-                a.download = `${session.aiOutputs?.title || 'recording'}.webm`;
-                a.target = "_blank";
-                a.click();
+              if (isEnded) {
+                setStepIndex(0);
+                setIsEnded(false);
               }
-            }}
-          >
-            Download Raw
-          </Button>
+              setPlaying(!isPlaying);
+            }} 
+          />
+          <Button variant="ghost" size="sm" icon={I.SkipForward} onClick={() => setStepIndex(Math.min(steps.length - 1, currentStepIndex + 1))} />
+        </div>
+
+        <div className="flex-1 h-1.5 bg-surface-2 rounded-pill relative group/progress cursor-pointer overflow-hidden">
+          <div 
+            className="absolute inset-y-0 left-0 bg-primary transition-all duration-300" 
+            style={{ width: `${((currentStepIndex + 1) / steps.length) * 100}%` }}
+          />
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="text-[13px] font-medium text-text-2 tabular-nums">
+            Step {currentStepIndex + 1} of {steps.length}
+          </div>
+          <div className="h-4 w-px bg-border" />
+          <div className="flex items-center bg-surface-2 rounded-sm p-0.5">
+            {[1, 1.5, 2].map(speed => (
+              <button 
+                key={speed}
+                onClick={() => useStudioStore.getState().setPlaybackRate(speed)}
+                className={cn(
+                  "px-2.5 h-7 rounded-sm text-[11px] font-bold transition-all",
+                  playbackRate === speed ? "bg-white shadow-sm text-primary" : "text-text-3 hover:text-text-2"
+                )}
+              >
+                {speed}x
+              </button>
+            ))}
+          </div>
+          <div className="h-4 w-px bg-border" />
+          
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              icon={I.Download} 
+              className="text-text-2 hover:text-primary"
+              onClick={() => {
+                if (rawVideoUrl) {
+                  const a = document.createElement('a');
+                  a.href = rawVideoUrl;
+                  a.download = `raw-capture-${session.sessionId}.webm`;
+                  a.click();
+                }
+              }}
+            >
+              Raw
+            </Button>
+            <Button 
+              variant="primary" 
+              size="sm" 
+              icon={I.Video} 
+              disabled={isExporting}
+              onClick={() => handleSOPVideoExport()}
+            >
+              {isExporting ? 'Exporting...' : 'Export Cinematic'}
+            </Button>
+          </div>
+
+          <div className="h-4 w-px bg-border" />
+          <Button variant="ghost" size="sm" icon={I.Maximize} />
         </div>
       </div>
     </div>

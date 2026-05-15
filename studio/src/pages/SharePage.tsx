@@ -3,7 +3,7 @@ import { useStudioStore } from '../store/useStudioStore';
 import { I } from '../components/icons';
 import { SummaryCallout, StepCard, ChapterBreak, ShareHeader } from '../components/studio';
 import { Avatar, StepCardSkeleton, Button } from '../components/ui';
-import { BACKEND_URL } from '../../../shared/constants/index';
+import { apiClient } from '../lib/apiClient';
 
 export const SharePage: React.FC = () => {
   const session = useStudioStore(state => state.session);
@@ -25,12 +25,7 @@ export const SharePage: React.FC = () => {
       try {
         setLoading(true);
         // Step 1: Fetch session metadata from backend
-        const res = await fetch(`${BACKEND_URL}/sessions/${shareToken}`);
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || 'Failed to fetch session metadata');
-        }
-        const meta = await res.json();
+        const meta = await apiClient.get<any>(`/sessions/${shareToken}`);
 
         if (meta.status !== 'ready' || !meta.sessionJsonUrl) {
           setError(`Session is still ${meta.status}. Please try again later.`);
@@ -39,10 +34,7 @@ export const SharePage: React.FC = () => {
         }
 
         // Step 2: Fetch actual session JSON from R2
-        const jsonRes = await fetch(meta.sessionJsonUrl);
-        if (!jsonRes.ok) throw new Error('Failed to fetch session data from storage');
-        
-        const sessionData = await jsonRes.json();
+        const sessionData = await apiClient.get<any>(meta.sessionJsonUrl);
         setSession(sessionData);
       } catch (err: any) {
         setError(err.message || 'An unexpected error occurred');

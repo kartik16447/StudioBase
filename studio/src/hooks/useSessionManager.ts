@@ -7,30 +7,30 @@ export function useSessionManager() {
   const fetchSession = useStudioStore(state => state.fetchSession);
   const brand = useStudioStore(state => state.brand);
 
-  // Theme Management
+  // 1. Theme Management
   useEffect(() => {
     ThemeService.applyBrand(brand);
   }, [brand?.primaryColor, brand?.font]);
 
-  // Initial Fetch
+  // 2. Initial Fetch
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get('session');
-    console.log('[StudioPage] Initial mount, sessionId:', sessionId);
+
     if (sessionId) {
+      console.log('[SessionManager] Initializing session:', sessionId);
       fetchSession(sessionId);
     }
   }, [fetchSession]);
 
-  // Background Asset Refresh (Keep signed URLs alive)
+  // 3. Background Asset Refresh (Keep signed URLs alive)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get('session');
     if (!sessionId) return;
     
-    // Refresh tokens every 15 minutes
     const interval = setInterval(() => {
-      console.log('🔄 [StudioPage] Refreshing assets...');
+      console.log('🔄 [SessionManager] Refreshing assets...');
       fetchSession(sessionId);
     }, RenderConstants.ASSET_REFRESH_INTERVAL);
 
