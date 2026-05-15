@@ -22,20 +22,52 @@ interface TTSResponse {
   }>;
 }
 
+import { AuditService } from "./services/AuditService";
+
 interface PipelineMessage {
   sessionId: string;
+  userId: string;
   r2JsonKey: string;
   workspaceId: string;
+  requestedOutputs?: {
+    sop?: boolean;
+    demo?: boolean;
+    video?: boolean;
+  };
 }
 
 export default {
   async queue(batch: MessageBatch<PipelineMessage>, env: Env): Promise<void> {
+    const audit = new AuditService(env);
     for (const msg of batch.messages) {
+      const job = msg.body;
       try {
-        await processSession(msg.body, env);
+        await audit.record({
+          eventName: 'pipeline.started',
+          userId: job.userId,
+          sessionId: job.sessionId,
+          properties: { ...job.requestedOutputs }
+        });
+
+        const startTime = Date.now();
+        await processSession(job, env);
+
+        await audit.record({
+          eventName: 'pipeline.completed',
+          userId: job.userId,
+          sessionId: job.sessionId,
+          properties: { durationMs: Date.now() - startTime }
+        });
+
         msg.ack();
-      } catch (err) {
+      } catch (err: any) {
         console.error("Pipeline error:", err);
+        await audit.record({
+          eventName: 'pipeline.failed',
+          userId: job.userId,
+          sessionId: job.sessionId,
+          properties: { error: err.message }
+        });
         msg.retry();
       }
     }

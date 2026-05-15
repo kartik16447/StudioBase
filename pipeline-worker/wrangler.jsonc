@@ -45,4 +45,10 @@
       "database_id": "a22b148a-c590-4050-991a-7dfd162a5d08",
     },
   ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "analytics_event"
+    }
+  ]
 }

@@ -101,16 +101,18 @@ export default {
   },
 
   async scheduled(_event: any, env: Env, ctx: any) {
+    console.log('[SCHEDULED] Running maintenance...');
     ctx.waitUntil(runMaintenance(env));
   },
 
   async queue(batch: MessageBatch, env: Env) {
+    const processor = new PipelineProcessor(env);
     for (const message of batch.messages) {
       try {
-        await runPipeline(message.body as any, env);
+        await processor.process(message.body as any);
         message.ack();
       } catch (err: any) {
-        console.error('[PIPELINE] Failed:', err.message);
+        console.error('[QUEUE] Failed:', err.message);
         message.retry();
       }
     }
