@@ -75,11 +75,6 @@ export class WebMFrameExtractor {
           const bitmap = await createImageBitmap(frame);
           if (bitmap.width === 0 || bitmap.height === 0) {
             console.error(`🔍 [Extractor] Raster Check FAILED: 0x0 frame emitted.`);
-          } else {
-            // Only log periodically to avoid console flood
-            if (frame.timestamp % 1000000 === 0) {
-               console.log(`🔍 [Extractor] Raster Check: ${bitmap.width}x${bitmap.height} pixels available.`);
-            }
           }
           bitmap.close();
         } catch (e) {
@@ -132,7 +127,6 @@ export class WebMFrameExtractor {
     const needsRestart = targetIndex < this.lastRequestedIndex || targetIndex > this.lastFedIndex + 100;
     
     if (needsRestart) {
-      console.log(`🎬 [Extractor] GOP Restart: Req ${targetIndex}, Frontier ${this.lastFedIndex}`);
       await this.restartAtKeyframe(targetIndex);
     }
 
@@ -169,7 +163,6 @@ export class WebMFrameExtractor {
     const end = Math.min(allFrames.length - 1, targetIndex + pressureAmount);
 
     if (start <= end) {
-      const feedCount = end - start + 1;
       for (let i = start; i <= end; i++) {
         if (this.decoder.decodeQueueSize > 12) {
           await new Promise(r => setTimeout(r, 10));
@@ -180,13 +173,12 @@ export class WebMFrameExtractor {
 
         // --- DIAGNOSTIC PAYLOAD AUDIT ---
         // Log first few frames and periodically to verify payload integrity
+        // Silencing high-frequency audit logs
+        /*
         if (i <= 5 || i === targetIndex || i % 100 === 0) {
-          const rawData = new Uint8Array(this.videoBuffer!, entry.offset, Math.min(entry.size, 16));
-          const hex = Array.from(rawData).map(b => b.toString(16).padStart(2, '0')).join(' ');
-          const startsWithA3 = rawData[0] === 0xA3;
-          const startsWithA1 = rawData[0] === 0xA1;
-          console.log(`🔍 [Audit] Frame ${i} | Offset: ${entry.offset} | Size: ${entry.size} | Hex: ${hex} | EBML Marker: ${startsWithA3 ? 'A3' : startsWithA1 ? 'A1' : 'None'}`);
+          ...
         }
+        */
 
         const chunk = new EncodedVideoChunk({
           type: entry.isKeyframe ? 'key' : 'delta',
@@ -208,7 +200,7 @@ export class WebMFrameExtractor {
         }
       }
       
-      console.log(`🎬 [Extractor] Pressure Burst: Fed ${feedCount} chunks (Frontier: ${this.lastFedIndex}, Target: ${targetIndex})`);
+      // Pressure Burst logged only on error
     }
 
     this.lastRequestedIndex = targetIndex;
@@ -216,7 +208,7 @@ export class WebMFrameExtractor {
   }
 
   private handleOutput(frame: VideoFrame) {
-    console.log(`🎬 [Extractor] Output: Frame emitted @ ${frame.timestamp / 1000}ms`);
+    // Silencing high-frequency output logs
     const index = this.findFrameIndexByTimestamp(frame.timestamp / 1000);
 
     if (index === -1) {

@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { motion, AnimatePresence, useSpring } from 'framer-motion';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../../components/icons';
-import { cn, DotGrid, ScreenshotPlaceholder, Button, AIShimmer } from '../../../components/ui';
+import { cn, Button, AIShimmer } from '../../../components/ui';
 import { RenderConstants } from '../../../modules/render-engine/RenderConstants';
-import { CinematicMath } from '../../../modules/render-engine/CinematicMath';
 import { BACKEND_URL } from '../../../../../shared/constants';
-import { WebMFrameExtractor } from '../../../utils/WebMFrameExtractor';
+import { WorkerExtractor } from '../../../services/WorkerExtractor';
+import { CanvasRenderer } from '../../../modules/render-engine/CanvasRenderer';
 
 /**
  * MASTER CINEMATIC COMPOSITOR (STABILIZED v2)
@@ -73,7 +73,7 @@ export async function handleSOPVideoExport() {
   store.setPlaying(false);
 
   // --- RESOURCE LIFECYCLE ---
-  let extractor: WebMFrameExtractor | null = null;
+  let extractor: WorkerExtractor | null = null;
   let videoTrack: MediaStreamTrack | null = null;
   let infoOverlay: HTMLDivElement | null = null;
   let exportVideo: HTMLVideoElement | null = null;
@@ -174,7 +174,7 @@ export async function handleSOPVideoExport() {
 
   // --- STEP BY STEP RENDERING (Unified Architecture) ---
   // Store center in percentages (0-100) to match Preview Player logic
-  let currentX = 50, currentY = 50, currentScale = 1.0;
+  let currentX = 50;
   
   // --- FILTERED VISIBILITY HACK ---
   // Transparent informational overlay (No occlusion to keep rasterizer active)
@@ -222,14 +222,13 @@ export async function handleSOPVideoExport() {
     document.body.appendChild(exportVideo);
 
     console.log("🎬 [Export] Pre-flight check starting...");
-    extractor = new WebMFrameExtractor();
+    const renderer = new CanvasRenderer();
+    extractor = new WorkerExtractor();
     
     if (videoUrl) {
       try {
-        console.log("🔍 [Export] Initializing Deterministic Extractor...");
-        const response = await fetch(videoUrl);
-        const videoBlob = await response.blob();
-        await extractor.init(videoBlob);
+        console.log("🔍 [Export] Initializing Deterministic Extractor (OFF-THREAD)...");
+        await extractor.init(videoUrl);
       } catch (e) {
         console.error("❌ [Export] Extractor initialization failed:", e);
       }
@@ -313,10 +312,13 @@ export async function handleSOPVideoExport() {
   }
 
 
+  let absoluteLastLoggedMs = -1;
+
   for (let i = 0; i < steps.length; i++) {
     store.setStepIndex(i);
     const step = steps[i];
-    console.log(`🎬 [Export] Step ${i+1}/${steps.length}: ${step.id}`);
+    const prevStep = i > 0 ? steps[i-1] : null;
+    // console.log(`🎬 [Export] Step ${i+1}/${steps.length}: ${step.id}`);
 
     // Chapter Card Transition
     const chapter = i > 0 ? chapterMap.get(steps[i-1].id) : null;
@@ -372,34 +374,23 @@ export async function handleSOPVideoExport() {
     }
 
     // --- CINEMATIC TARGET CALCULATION (Safe Math Edition) ---
-    const startScale = currentScale || 1.0;
     const startX = currentX || 50;
-    const startY = currentY || 50;
 
     const coords = (step.data as any)?.coordinates;
-    let targetZoomScale = 1.0;
     let targetCenterX = 50;
-    let targetCenterY = 50;
 
     if (coords && typeof coords.x === 'number') {
-      targetZoomScale = 1.55;
       // Smart Defaults: Use 80x80 if width/height are missing
       const w = typeof coords.width === 'number' ? coords.width : 80;
-      const h = typeof coords.height === 'number' ? coords.height : 80;
       const vw = coords.viewportWidth || 1440;
-      const vh = coords.viewportHeight || 900;
 
       // Center-Point Fix: Target the middle of the interaction box
       const centerX = coords.x + (w / 2);
-      const centerY = coords.y + (h / 2);
       
       targetCenterX = Math.max(15, Math.min(85, (centerX / vw) * 100));
-      targetCenterY = Math.max(15, Math.min(85, (centerY / vh) * 100));
     } else {
       // Vision Fallback: Subtle drift for native apps where metadata is missing
-      targetZoomScale = 1.15; 
       targetCenterX = 50;
-      targetCenterY = 50;
     }
 
     const jumpDist = Math.abs(targetCenterX - startX);
@@ -407,202 +398,98 @@ export async function handleSOPVideoExport() {
     if (jumpDist > 40) stepDuration *= 1.5; // Smooth out large context snaps
     const stepFrames = Math.floor(stepDuration * fps);
 
-    let masterFrame: VideoFrame | null = null;
+    let masterFrame: ImageBitmap | null = null;
 
     for (let f = 0; f < stepFrames; f++) {
-      const progress = f / stepFrames;
-      
+      // The step might last 5 seconds, but the camera should finish moving in 1.2s
+      const ANIMATION_DURATION_SEC = 1.2; 
+      const currentFrameTimeSec = f / fps;
+      const cameraProgress = Math.min(1.0, currentFrameTimeSec / ANIMATION_DURATION_SEC);
+
       // Safe approximation of an overdamped spring glide
-      // 1 - (1 - t)^4 provides a premium feel with zero NaN risk
-      const springProgress = 1 - Math.pow(1 - progress, 4);
-      
-      const fScale = startScale + (targetZoomScale - startScale) * springProgress;
-      // Interpolated center in ratio (0.0-1.0)
-      const fX = (startX + (targetCenterX - startX) * springProgress) / 100;
-      const fY = (startY + (targetCenterY - startY) * springProgress) / 100;
+      const springProgress = 1 - Math.pow(1 - cameraProgress, 4);
 
-      // --- DETERMINISTIC FRAME CAPTURE ---
+      // Overall step progress (used for frame extraction timing)
+      const progress = f / stepFrames;
+
+      // --- DETERMINISTIC FRAME CAPTURE (STRICT FORWARD LATCH) ---
       if (hasTimestamp && extractor) {
-        const absTargetMs = (step.timestamp || 0) + (progress * stepDuration);
-        const relTargetMs = toRelativeMs(absTargetMs);
-        try {
-          const newFrame = await extractor.getFrame(relTargetMs);
-          if (newFrame) {
-            // Fix the Master Frame Leak: Explicit Handover
-            if (masterFrame) masterFrame.close();
-            masterFrame = newFrame;
+        const calculatedMs = (step.timestamp || 0) + (progress * stepDuration * 1000);
+        
+        // Never let the playhead move backward, even by a microsecond
+        const safeTargetMs = Math.max(absoluteLastLoggedMs + 1, Math.floor(calculatedMs));
+        const relTargetMs = toRelativeMs(safeTargetMs);
+
+        // Optimization: If the playhead has moved less than 12ms, reuse the previous frame
+        // to prevent expensive GOP restarts and redundant seeks.
+        if (masterFrame && (safeTargetMs - absoluteLastLoggedMs) < 12 && absoluteLastLoggedMs !== -1) {
+          // Skip extraction, reuse masterFrame
+        } else {
+          try {
+            const newFrame = await extractor.getFrame(relTargetMs);
+            if (newFrame) {
+              if (masterFrame) masterFrame.close();
+              masterFrame = newFrame;
+              absoluteLastLoggedMs = safeTargetMs;
+            }
+          } catch (e) {
+            // Silently handle extraction failures to prevent log flood
           }
-        } catch (e) {
-          console.error(`❌ [Export] Frame extraction failed at rel ${relTargetMs}ms:`, e);
         }
       }
+      
       const currentAsset = masterFrame || asset;
-
-      if (!currentAsset) {
-        continue;
-      }
-
-      // 1. Memory Safety: Clone the frame to stop destroying the master asset.
-      // We wrap in a try/catch in case the source frame was already disposed by the player/extractor.
-      let safeFrame: any = null;
-      if (currentAsset && typeof (currentAsset as any).clone === 'function') {
-        try {
-          safeFrame = (currentAsset as any).clone();
-        } catch (e) {
-          // If the frame was somehow already closed, ignore and let it draw black for 1ms
-        }
-      } else {
-        safeFrame = currentAsset; // Fallback for standard images/bitmaps
-      }
+      if (!currentAsset) continue;
 
       try {
-        ctx.save();
+        await renderer.render({
+          ctx,
+          dimensions: { width: canvas.width, height: canvas.height },
+          masterFrame: currentAsset,
+          step: step, 
+          prevStep: prevStep, 
+          progress: springProgress, 
+          theme: {
+            primaryColor: brand.primaryColor,
+            logoUrl: brand.logoUrl ?? undefined,
+            watermark: brand.watermark ?? undefined
+          }, 
+          renderMode: 'hybrid' 
+        });
         
-        if (safeFrame) {
-          // 2. High-Fidelity Studio Background (Mesh + Beam)
-          ctx.drawImage(bgCache, 0, 0);
-
-          // Animated Light Beam (Matches line 889)
-          const beamPhase = (f / 150) % 1.0; 
-          const beamX = (beamPhase * 2.5 - 1.25) * canvas.width;
-          const beamGrad = ctx.createLinearGradient(beamX, 0, beamX + 800, 0);
-          beamGrad.addColorStop(0, 'rgba(94, 92, 230, 0)');
-          beamGrad.addColorStop(0.5, 'rgba(94, 92, 230, 0.08)');
-          beamGrad.addColorStop(1, 'rgba(94, 92, 230, 0)');
-          ctx.fillStyle = beamGrad;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-          // Primary Radial Glow (Lightened for visibility)
-          const bgGradient = ctx.createRadialGradient(
-            canvas.width * 0.5, canvas.height * 0.5, 0,
-            canvas.width * 0.5, canvas.height * 0.5, canvas.width * 0.95
-          );
-          bgGradient.addColorStop(0, 'rgba(94, 92, 230, 0.28)'); 
-          bgGradient.addColorStop(1, 'rgba(17, 17, 26, 0)');
-          ctx.fillStyle = bgGradient;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-          const aw = (safeFrame as any)?.displayWidth || (safeFrame as any)?.width || 2880;
-          const ah = (safeFrame as any)?.displayHeight || (safeFrame as any)?.height || 1444;
-
-          // 1. Calculate crop box dimensions
-          let sw = aw / fScale; 
-          let sh = ah / fScale;
-          if (sw > aw) sw = aw;
-          if (sh > ah) sh = ah;
-
-          // 3. Aspect-Aware Compositing (Prevent Squishing)
-          const sourceAspect = aw / ah;
-          const canvasAspect = canvas.width / canvas.height;
-
-          let baseW, baseH;
-          if (sourceAspect > canvasAspect) {
-              baseW = canvas.width;
-              baseH = canvas.width / sourceAspect;
-          } else {
-              baseH = canvas.height;
-              baseW = canvas.height * sourceAspect;
-          }
-
-          const dw = baseW * fScale;
-          const dh = baseH * fScale;
-          
-          // Position the video such that the target coordinate (fX/fY) is centered on the canvas
-          const dx = (canvas.width / 2) - (fX * dw);
-          const dy = (canvas.height / 2) - (fY * dh);
-        
-          ctx.globalAlpha = 1.0;
-        
-          // --- IMAGEBITMAP BRIDGE (Aspect-Aware + Soft Corners) ---
-          const bitmap = await createImageBitmap(safeFrame as any);
-          ctx.save();
-          // Create the "Floating" clipping path to remove sharp boundaries
-          ctx.beginPath();
-          if (typeof (ctx as any).roundRect === 'function') {
-            (ctx as any).roundRect(dx, dy, dw, dh, 40 * fScale); 
-          } else {
-            ctx.rect(dx, dy, dw, dh);
-          }
-          ctx.clip();
-          
-          // Edge Overscan: Inset 2px to hide 1px capture artifacts
-          ctx.drawImage(bitmap, 2, 2, aw - 4, ah - 4, dx, dy, dw, dh);
-          ctx.restore();
-          bitmap.close();
+        // --- SYNCHRONIZED 60FPS HEARTBEAT ---
+        // 1. Force the recorder to capture the CURRENT state of the canvas
+        if (videoTrack && (videoTrack as any).requestFrame) {
+          (videoTrack as any).requestFrame();
         }
         
-        // --- DETERMINISTIC PAINT YIELD ---
-        await new Promise(res => setTimeout(res, 0));
+        // 2. Yield to the compositor to ensure the frame is flushed to the stream
+        await new Promise(res => requestAnimationFrame(() => res(null)));
+        
+        // --- SELECTIVE PROGRESS LOGGING (Noise Reduction) ---
+        const totalFrames = steps.length * stepFrames;
+        const currentTotalFrame = (i * stepFrames) + f;
+        const progressPct = (currentTotalFrame / totalFrames) * 100;
+        
+        if (Math.floor(progressPct) % 25 === 0 && f === 0) {
+          console.log(`🎬 [Export Progress] ${Math.round(progressPct)}% Complete`);
+        }
         
         injectJitter();
       } catch (err) {
         console.error("❌ [Export] Render tick error:", err);
       } finally {
-        // ONLY close the clone we made for this specific tick.
-        // DO NOT close currentAsset or frame here! The player/extractor manages that.
-        if (safeFrame && typeof (safeFrame as any).close === 'function') {
-          (safeFrame as any).close();
-        }
         ctx.restore();
       }
-
-      // Annotations are now baked directly into the viewport track inside the try block
-      // for 100% mathematical alignment with the cinematic camera.
-
-      // --- MULTI-POINT PIXEL VALIDATION (Every 30 frames) ---
-      if (framesDrawn % 30 === 0) {
-        const x = Math.floor(canvas.width / 2);
-        const y = Math.floor(canvas.height / 2);
-        const sample = ctx.getImageData(x - 1, y - 1, 3, 3).data;
-        
-        let hasContent = false;
-        let lastSample = [0,0,0];
-        for (let p = 0; p < sample.length; p += 4) {
-          const r = sample[p], g = sample[p+1], b = sample[p+2];
-          const isMagenta = r === 255 && g === 0 && b === 255;
-          const isBlack = r === 0 && g === 0 && b === 0;
-          if (!isMagenta && !isBlack) {
-            hasContent = true;
-            lastSample = [r, g, b];
-            break;
-          }
-          if (p === 16) lastSample = [r, g, b]; // Capture center for logging
-        }
-
-        if (!hasContent) failedFrames++; else successfulFrames++;
-
-        const status = hasContent ? "✅ PROBE SUCCESS (VIDEO DATA DETECTED)" : "❌ PROBE FAILED (MAGENTA/BLACK)";
-        
-        console.log(`🎬 [Export Truth] Frame ${framesDrawn} | ${status}`);
-        console.log(`🎬 [Export Truth] Center Sample: [${lastSample[0]}, ${lastSample[1]}, ${lastSample[2]}]`);
-      }
-
-      // Ghost Typing
-      if (step.action === 'input' && step.inputValue && progress > 0.2) {
-        const typeLen = Math.floor((progress - 0.2) * 1.5 * step.inputValue.length);
-        const text = step.inputValue.slice(0, typeLen);
-        if (text) {
-           ctx.fillStyle = 'rgba(0,0,0,0.8)';
-           const rx = 1920/2 - 250, ry = 920, rw = 500, rh = 80, rad = 15;
-           ctx.beginPath(); ctx.moveTo(rx+rad,ry); ctx.lineTo(rx+rw-rad,ry); ctx.quadraticCurveTo(rx+rw,ry,rx+rw,ry+rad); ctx.lineTo(rx+rw,ry+rh-rad); ctx.quadraticCurveTo(rx+rw,ry+rh,rx+rw-rad,ry+rh); ctx.lineTo(rx+rad,ry+rh); ctx.quadraticCurveTo(rx,ry+rh,rx,ry+rh-rad); ctx.lineTo(rx,ry+rad); ctx.quadraticCurveTo(rx,ry,rx+rad,ry); ctx.closePath();
-           ctx.fill();
-           ctx.fillStyle = '#fff';
-           ctx.font = '32px ui-monospace, SFMono-Regular, Menlo, monospace'; ctx.textAlign = 'center';
-           ctx.fillText(text, 1920/2, 970);
-        }
-      }
-
-      if ((videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
-      framesRequested++; framesDrawn++;
-      await new Promise(res => setTimeout(res, 33)); 
+      
+      framesRequested++; 
+      framesDrawn++;
     }
     if (masterFrame) {
       masterFrame.close();
       masterFrame = null;
     }
     currentX = targetCenterX;
-    currentY = targetCenterY;
-    currentScale = targetZoomScale;
     
     if (i % 5 === 0) validateCanvasIntegrity();
   }
@@ -675,16 +562,18 @@ export const VideoCanvas: React.FC = () => {
 
   const [audio] = useState(new Audio());
   const [isEnded, setIsEnded] = useState(false);
-  const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
-  const [showIntroSlide, setShowIntroSlide] = React.useState(false);
-  const [introVisible, setIntroVisible] = React.useState(false);
-  const [showOutroSlide, setShowOutroSlide] = React.useState(false);
-  const [outroVisible, setOutroVisible] = React.useState(false);
-  const [ghostText, setGhostText] = React.useState('');
-  const [ghostVisible, setGhostVisible] = React.useState(false);
   const ghostIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const playerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const renderer = useMemo(() => new CanvasRenderer(), []);
+  const stepStartTimeRef = useRef<number>(0);
+  
+  // GOLDEN SOUL: Physics-based progress spring for hardware-synced smoothness
+  const progressSpring = useSpring(0, { stiffness: 120, damping: 24, restDelta: 0.001 });
+  
+  // SLIDE CACHE: Preload screenshots for slideshow mode
+  const slideImageRef = useRef<HTMLImageElement | null>(null);
 
   // Listen for global export trigger
   useEffect(() => {
@@ -699,38 +588,38 @@ export const VideoCanvas: React.FC = () => {
 
   const steps = session?.steps || [];
   const currentStep = steps[currentStepIndex];
-  const chapterMap = new Map(
-    (session?.metadata?.chapterBreaks || []).map(c => [c.afterStepId, c])
-  );
-
-  const isSameContext = (s1: any, s2: any) => {
-    if (!s1 || !s2) return false;
-    return s1.url === s2.url || s1.pageTitle === s2.pageTitle;
-  };
-
   const prevStep = steps[currentStepIndex - 1];
-  const sameContext = isSameContext(prevStep, currentStep);
-
-  // Normalization & Target Calculation
-  const prevTarget = CinematicMath.getTarget(prevStep, renderMode);
-  const target = CinematicMath.getTarget(currentStep, renderMode);
-  const hasZoom = target.zoomScale > 1;
-
-  const camera = CinematicMath.calculateCamera(target, prevTarget, isPlaying);
 
   useEffect(() => {
     if (!isExporting) {
       console.log(`🎬 [VideoCanvas] Step Transition: ${currentStepIndex} (${currentStep?.id})`);
+      
+      // GOLDEN SOUL: Reset and Trigger the physics spring for 100% parity with Framer Motion feel
+      progressSpring.set(0);
+      setTimeout(() => progressSpring.set(1), 0);
+      
+      // LATCH: Record both the video playhead and the wall-clock time for the hybrid timer
+      if (videoRef.current) {
+        stepStartTimeRef.current = videoRef.current.currentTime * 1000;
+      }
+      (window as any).uiStepChangeTime = performance.now();
     }
-  }, [currentStepIndex, currentStep?.id, isExporting]);
+  }, [currentStepIndex, currentStep?.id, isExporting, progressSpring]);
 
-  // Cinematic Re-orientation Sequence
-  const cinematicSequence = CinematicMath.getCinematicSequence(
-    sameContext,
-    camera.isLargeJump,
-    renderMode,
-    camera
-  );
+  // --- SLIDE PRELOADER ---
+  useEffect(() => {
+    if (renderMode === 'slideshow' && currentStep?.screenshotKey) {
+      const url = session?.assets?.[currentStep.screenshotKey];
+      if (url) {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.src = url;
+        img.onload = () => {
+          slideImageRef.current = img;
+        };
+      }
+    }
+  }, [currentStep?.id, renderMode, session?.assets]);
 
 
 
@@ -739,18 +628,14 @@ export const VideoCanvas: React.FC = () => {
       clearInterval(ghostIntervalRef.current);
       ghostIntervalRef.current = null;
     }
-    setGhostText('');
-    setGhostVisible(false);
 
     if (!isPlaying) return;
     const value = currentStep?.inputValue;
     if (!value || currentStep?.action !== 'input') return;
 
-    setGhostVisible(true);
     let i = 0;
     ghostIntervalRef.current = setInterval(() => {
       i++;
-      setGhostText(value.slice(0, i));
       if (i >= value.length) {
         if (ghostIntervalRef.current) clearInterval(ghostIntervalRef.current);
         ghostIntervalRef.current = null;
@@ -811,130 +696,112 @@ export const VideoCanvas: React.FC = () => {
     videoRef.current.playbackRate = playbackRate;
   }, [playbackRate, videoUrl]);
 
-  const advanceStep = React.useCallback(() => {
-    const chapter = chapterMap.get(currentStep?.id);
-    if (chapter) {
-      setShowChapterCard(chapter.chapterTitle);
-      setTimeout(() => {
-        setShowChapterCard(null);
-        setTimeout(() => {
-          if (currentStepIndex < steps.length - 1) {
-            setStepIndex(currentStepIndex + 1);
-          } else {
-            if (brand.showOutro) {
-              setShowOutroSlide(true);
-              setOutroVisible(true);
-              setTimeout(() => {
-                setOutroVisible(false);
-                setTimeout(() => {
-                  setShowOutroSlide(false);
-                  setPlaying(false);
-                  setShowIntroSlide(false);
-                  setIsEnded(true);
-                }, 400);
-              }, 3000);
-            } else {
-              setPlaying(false);
-              setShowIntroSlide(false);
-              setIsEnded(true);
-            }
-          }
-        }, 300);
-      }, 2000);
-      return;
-    }
 
-    // Smart Context Advance: No zoom-out if context is same
-    const nextStep = steps[currentStepIndex + 1];
-    const willStayInContext = isSameContext(currentStep, nextStep);
 
-    if (hasZoom && !willStayInContext) {
-      setTimeout(() => {
-        if (currentStepIndex < steps.length - 1) {
-          setStepIndex(currentStepIndex + 1);
-        } else {
-          if (brand.showOutro) {
-            setShowOutroSlide(true);
-            setOutroVisible(true);
-            setTimeout(() => {
-              setOutroVisible(false);
-              setTimeout(() => {
-                setShowOutroSlide(false);
-                setPlaying(false);
-                setShowIntroSlide(false);
-                setIsEnded(true);
-              }, 400);
-            }, 3000);
-          } else {
-            setPlaying(false);
-            setShowIntroSlide(false);
-            setIsEnded(true);
-          }
-        }
-      }, 400);
-    } else {
-      if (currentStepIndex < steps.length - 1) {
-        setStepIndex(currentStepIndex + 1);
-      } else {
-        if (brand.showOutro) {
-          setShowOutroSlide(true);
-          setOutroVisible(true);
-          setTimeout(() => {
-            setOutroVisible(false);
-            setTimeout(() => {
-              setShowOutroSlide(false);
-              setPlaying(false);
-              setShowIntroSlide(false);
-              setIsEnded(true);
-            }, 400);
-          }, 3000);
-        } else {
-          setPlaying(false);
-          setShowIntroSlide(false);
-          setIsEnded(true);
-        }
-      }
-    }
-  }, [currentStepIndex, steps.length, hasZoom, currentStep, chapterMap, setStepIndex, setPlaying, brand.showOutro]);
-
-  // Voiceover playback
+  // Voiceover playback (Audio only, no longer controls step advancement)
   useEffect(() => {
     if (!isPlaying) {
       audio.pause();
       return;
     }
 
-    let timer: ReturnType<typeof setTimeout>;
-
-    if (!currentStep?.voiceoverKey) {
-      timer = setTimeout(() => advanceStep(), 3000);
-    } else {
+    if (currentStep?.voiceoverKey) {
       const url = `${BACKEND_URL}/assets/${currentStep.voiceoverKey}`;
       if (audio.src !== url) {
         audio.src = url;
       }
       audio.playbackRate = playbackRate;
       audio.play().catch(console.error);
-
-      const handleEnded = () => advanceStep();
-      audio.addEventListener('ended', handleEnded);
-      return () => {
-        audio.removeEventListener('ended', handleEnded);
-      };
+    } else {
+      audio.pause();
     }
+  }, [currentStepIndex, isPlaying, playbackRate, currentStep?.voiceoverKey]);
 
-    return () => { if (timer) clearTimeout(timer); };
-  }, [currentStepIndex, isPlaying, playbackRate, steps.length, currentStep?.voiceoverKey, advanceStep]);
+  // --- UNIFIED PREVIEW LOOP (rAF) ---
+  useEffect(() => {
+    let rafId: number;
+    
+    const tick = () => {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      if (!canvas || !video || !currentStep) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
 
-  // Synthetic cursor positions
-  const prevCoords = prevStep?.data?.coordinates;
-  const currCoords = currentStep?.data?.coordinates;
+      // 1. Internal Resolution Handling (2880x1440 standard)
+      const internalW = 2880;
+      const internalH = 1444;
+      
+      if (canvas.width !== internalW || canvas.height !== internalH) {
+        canvas.width = internalW;
+        canvas.height = internalH;
+      }
 
-  const { x: cursorStartX, y: cursorStartY } = CinematicMath.getHotspotPercent(prevCoords);
-  const { x: cursorEndX, y: cursorEndY } = CinematicMath.getHotspotPercent(currCoords);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
 
+      // 2. Smooth Cinematic Progress & Latched Step Transition
+      const videoMs = video.currentTime * 1000;
+      const wallClockElapsed = performance.now() - ((window as any).uiStepChangeTime || performance.now());
 
+      // --- PLAYHEAD LATCH: Advance Step Index based on Video Time (Hybrid Mode) ---
+      const nextStep = steps[currentStepIndex + 1];
+      if (renderMode === 'hybrid' && isPlaying && nextStep && videoMs >= (nextStep.timestamp || 0)) {
+        if (currentStepIndex < steps.length - 1) {
+          setStepIndex(currentStepIndex + 1);
+        }
+      }
 
+      // --- SLIDES AUTO-ADVANCE: 3-second wall-clock latch ---
+      if (renderMode === 'slideshow' && isPlaying && wallClockElapsed >= 3000) {
+        if (currentStepIndex < steps.length - 1) {
+          setStepIndex(currentStepIndex + 1);
+        } else {
+          setPlaying(false);
+          setIsEnded(true);
+        }
+      }
+
+      // --- PLAYHEAD LATCH: Handle End of Session ---
+      if (isPlaying && !nextStep && video.ended) {
+        setPlaying(false);
+        setIsEnded(true);
+      }
+      
+      // GOLDEN SOUL: Read the physics-synced spring value
+      const springProgress = progressSpring.get();
+
+      // 3. Cinematic Draw Sequence (RETINA SCALED)
+      ctx.clearRect(0, 0, internalW, internalH);
+      ctx.save();
+      
+      renderer.render({
+        ctx,
+        dimensions: { width: internalW, height: internalH },
+        masterFrame: renderMode === 'hybrid' ? video : (slideImageRef.current || video), 
+        step: currentStep,
+        prevStep: prevStep,
+        progress: springProgress,
+        theme: {
+          primaryColor: brand.primaryColor,
+          logoUrl: brand.logoUrl ?? undefined,
+          watermark: brand.watermark ?? undefined
+        },
+        renderMode: renderMode || 'hybrid'
+      });
+
+      ctx.restore();
+
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [currentStep, prevStep, brand, isPlaying]);
 
   if (!session) return null;
 
@@ -946,276 +813,28 @@ export const VideoCanvas: React.FC = () => {
         className="relative w-full max-w-5xl rounded-img shadow-card-lifted overflow-hidden bg-[#12121a]"
         style={{ maxHeight: RenderConstants.PLAYER_MAX_HEIGHT, aspectRatio: RenderConstants.PLAYER_ASPECT_RATIO }}
       >
-        {/* Vibrant Shimmering Background */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          {/* Base Mesh */}
-          <div className="absolute inset-0 bg-[radial-gradient(at_0%_0%,_#5e5ce644_0px,_transparent_50%),radial-gradient(at_100%_100%,_#af52de44_0px,_transparent_50%)]" />
-          
-          {/* High-visibility moving light beam */}
-          <motion.div 
-            animate={{ 
-              x: ['-100%', '150%'],
-              opacity: [0, 0.4, 0]
-            }}
-            transition={{ 
-              duration: 5, 
-              repeat: Infinity, 
-              ease: "linear" 
-            }}
-            className="absolute inset-y-0 w-[500px] bg-gradient-to-r from-transparent via-primary/30 to-transparent blur-[100px] -skew-x-12"
-          />
+        {/* 🎬 UNIFIED CANVAS PLAYER 🎬 */}
+        <canvas 
+          ref={canvasRef} 
+          className="w-full h-full object-contain"
+        />
 
-          {/* Core pulsating glow */}
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_#5e5ce655_0%,_transparent_60%)] animate-pulse" />
-          
-          <DotGrid className="opacity-30" glowRadius={RenderConstants.GLOW_RADIUS} />
-        </div>
-        {/* Screenshot with Hybrid Camera (Smart Context) */}
-        <div className="absolute inset-0 overflow-hidden">
-          <motion.div
-            key={videoUrl ? 'cinematic-video' : (sameContext ? 'same' : currentStepIndex)}
-            animate={cinematicSequence}
-            transition={RenderConstants.CAMERA_SPRING}
-            className="absolute inset-0 origin-center"
-          >
-            {videoUrl ? (
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                className="w-full h-full object-contain"
-                muted
-                playsInline
-                crossOrigin="anonymous"
-                preload="auto"
-                onSeeked={() => {
-                  if (!isExporting) {
-                    console.log(`🎬 [VideoCanvas] Seeked to: ${videoRef.current?.currentTime}s`);
-                  }
-                }}
-                onPlay={() => console.log('🎬 [VideoCanvas] Playback started')}
-                onPause={() => console.log('🎬 [VideoCanvas] Playback paused')}
-              />
-            ) : (
-              <ScreenshotPlaceholder
-                step={currentStep}
-                session={session}
-                showChrome={false}
-                aspect={RenderConstants.PLAYER_ASPECT_RATIO}
-                rounded=""
-                mode="stage"
-                parallaxOffset={{ x: camera.tx, y: camera.ty }}
-                className="w-full h-full !shadow-none"
-              />
-            )}
-          </motion.div>
-        </div>
-
-        {/* Annotation Overlay */}
-        <div className="absolute inset-0 pointer-events-none">
-          <AnimatePresence>
-            {currentStep?.annotations?.map(anno => (
-              <motion.div
-                key={anno.id}
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                className="absolute"
-                style={{
-                  left: `${anno.x}%`, top: `${anno.y}%`,
-                  width: anno.width ? `${anno.width}%` : undefined,
-                  height: anno.height ? `${anno.height}%` : undefined,
-                }}
-              >
-                {anno.shape === 'box' && (
-                  <div className="border-4 border-primary rounded-md w-full h-full shadow-[0_0_20px_rgba(94,92,230,0.4)]" />
-                )}
-                {anno.shape === 'arrow' && (
-                  <div className="relative">
-                    <I.ArrowUpRight size={32} className="text-primary drop-shadow-lg" />
-                    {anno.text && (
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2 py-1 bg-primary text-white text-xs font-bold rounded shadow-lg whitespace-nowrap">
-                        {anno.text}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {anno.shape === 'blur' && (
-                  <div
-                    className="absolute pointer-events-none w-full h-full"
-                    style={{
-                      backdropFilter: 'blur(12px)',
-                      background: 'rgba(0,0,0,0.3)',
-                    }}
-                  />
-                )}
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-
-        {/* Synthetic Cursor (Disabled because screenshots/video already have real cursor) */}
-        {false && isPlaying && !videoUrl && currentStep?.data?.coordinates && (
-          <motion.div
-            className="absolute pointer-events-none z-20"
-            initial={{ left: `${cursorStartX}%`, top: `${cursorStartY}%` }}
-            animate={{ left: `${cursorEndX}%`, top: `${cursorEndY}%` }}
-            transition={{ duration: 0.4, ease: 'easeInOut', delay: 0.1 }}
-            style={{ transform: 'translate(-4px, -4px)' }}
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-              <path d="M4 2L20 12L12 13L8 22L4 2Z" fill="white" stroke="black" strokeWidth="1.5" strokeLinejoin="round"/>
-            </svg>
-            <AnimatePresence>
-              {isPlaying && (
-                <>
-                  <motion.div
-                    key={`ripple-1-${currentStepIndex}`}
-                    className="absolute rounded-full border-2 border-primary"
-                    style={{ width: 32, height: 32, top: -12, left: -12 }}
-                    initial={{ scale: 0, opacity: 0.75 }}
-                    animate={{ scale: 2.2, opacity: 0 }}
-                    transition={{ duration: 0.6, ease: 'easeOut' }}
-                  />
-                  <motion.div
-                    key={`ripple-2-${currentStepIndex}`}
-                    className="absolute rounded-full border border-primary"
-                    style={{ width: 32, height: 32, top: -12, left: -12 }}
-                    initial={{ scale: 0, opacity: 0.5 }}
-                    animate={{ scale: 2.8, opacity: 0 }}
-                    transition={{ duration: 0.6, ease: 'easeOut', delay: 0.12 }}
-                  />
-                </>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        )}
-
-        {/* Ghost Typing */}
-        <AnimatePresence>
-          {ghostVisible && ghostText && (
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
-            >
-              <div className="bg-black/75 backdrop-blur-sm text-white px-4 py-2 rounded-lg
-                              text-[15px] font-mono shadow-card-lifted flex items-center gap-2
-                              max-w-[460px] overflow-hidden">
-                <I.Type size={13} className="opacity-60 shrink-0" />
-                <span className="truncate">{ghostText}</span>
-                <span className="w-px h-4 bg-white/80 animate-pulse shrink-0" />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Intro Slide */}
-        <AnimatePresence>
-          {showIntroSlide && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: introVisible ? 1 : 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.4 }}
-              className="absolute inset-0 z-30 flex flex-col items-center justify-center text-white text-center px-10"
-              style={{
-                background: `linear-gradient(135deg, ${brand.primaryColor}f0, ${brand.primaryColor})`
-              }}
-            >
-              {brand.logoUrl ? (
-                <img src={brand.logoUrl} className="h-14 object-contain mb-6 drop-shadow-lg" />
-              ) : (
-                <div className="text-5xl font-bold mb-4 tracking-tight drop-shadow-lg">
-                  {session?.aiOutputs?.title}
-                </div>
-              )}
-              <p className="text-white/70 text-[15px] font-medium tracking-wide uppercase">
-                A StudioBase walkthrough
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Outro Slide */}
-        <AnimatePresence>
-          {showOutroSlide && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: outroVisible ? 1 : 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.4 }}
-              className="absolute inset-0 z-30 flex flex-col items-center justify-center text-white text-center px-10"
-              style={{
-                background: `linear-gradient(135deg, ${brand.primaryColor}f0, ${brand.primaryColor})`
-              }}
-            >
-              {brand.logoUrl && (
-                <img src={brand.logoUrl} className="h-12 object-contain mb-6 drop-shadow-lg" />
-              )}
-              <div className="text-4xl font-bold mb-3 tracking-tight drop-shadow-lg">
-                {session?.aiOutputs?.title}
-              </div>
-              {brand.watermark && (
-                <p className="text-white/70 text-[15px] font-medium">{brand.watermark}</p>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Chapter Title Card */}
-        <AnimatePresence>
-          {showChapterCard && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 flex items-center justify-center z-30"
-              style={{ background: `linear-gradient(135deg, ${brand.primaryColor}e6, ${brand.primaryColor})` }}
-            >
-              <div className="text-center text-white">
-                <p className="text-sm font-semibold opacity-70 uppercase tracking-widest mb-3">Chapter</p>
-                <h2 className="text-3xl font-bold">{showChapterCard}</h2>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Watermark */}
-        {brand.watermark && (
-          <div
-            className="absolute bottom-3 right-4 z-10 pointer-events-none"
-            style={{ opacity: 0.55 }}
-          >
-            {brand.logoUrl
-              ? <img src={brand.logoUrl} className="h-5 object-contain" />
-              : <span className="text-white text-[11px] font-semibold tracking-wide">
-                  {brand.watermark}
-                </span>
-            }
-          </div>
-        )}
+        {/* Hidden Driver Video */}
+        <video
+          ref={videoRef}
+          src={videoUrl || undefined}
+          style={{ opacity: 0, position: 'absolute', pointerEvents: 'none' }}
+          muted
+          playsInline
+          crossOrigin="anonymous"
+          preload="auto"
+        />
 
         {/* Player Controls Overlay */}
         <div className="absolute inset-0 flex flex-col justify-end bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300">
           <div className="p-6 flex items-center gap-4">
             <button
-              onClick={() => {
-                if (!isPlaying && currentStepIndex === 0 && brand.showIntro) {
-                  setShowIntroSlide(true);
-                  setIntroVisible(true);
-                  setTimeout(() => {
-                    setIntroVisible(false);
-                    setTimeout(() => {
-                      setShowIntroSlide(false);
-                      setPlaying(true);
-                    }, 400);
-                  }, 3000);
-                } else {
-                  setPlaying(!isPlaying);
-                }
-              }}
+              onClick={() => setPlaying(!isPlaying)}
               className="w-12 h-12 rounded-full glass-dark flex items-center justify-center text-white hover:scale-105 transition active:scale-95"
             >
               {isPlaying ? <I.Pause size={20} fill="currentColor" /> : <I.Play size={20} fill="currentColor" className="translate-x-0.5" />}
@@ -1282,21 +901,7 @@ export const VideoCanvas: React.FC = () => {
         {!isPlaying && currentStepIndex === 0 && !isEnded && (
           <div className="absolute inset-0 bg-black/10 backdrop-blur-[2px] flex items-center justify-center">
             <button
-              onClick={() => {
-                if (!isPlaying && currentStepIndex === 0 && brand.showIntro) {
-                  setShowIntroSlide(true);
-                  setIntroVisible(true);
-                  setTimeout(() => {
-                    setIntroVisible(false);
-                    setTimeout(() => {
-                      setShowIntroSlide(false);
-                      setPlaying(true);
-                    }, 400);
-                  }, 3000);
-                } else {
-                  setPlaying(!isPlaying);
-                }
-              }}
+              onClick={() => setPlaying(true)}
               className="w-24 h-24 rounded-full glass shadow-card-lifted flex items-center justify-center text-text hover:scale-110 transition active:scale-95 group"
             >
               <div className="w-20 h-20 rounded-full border-2 border-primary/20 flex items-center justify-center group-hover:border-primary/40 transition">

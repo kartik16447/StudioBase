@@ -258,7 +258,7 @@ export class WebMIndexer {
    */
   async validateSupport(): Promise<boolean> {
     if (!this.config) return false;
-    const support = await (window as any).VideoDecoder.isConfigSupported({
+    const support = await (self as any).VideoDecoder.isConfigSupported({
       codec: this.config.codec,
       hardwareAcceleration: "prefer-hardware",
       codedWidth: this.config.width,

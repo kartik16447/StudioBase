@@ -25,7 +25,7 @@ export const CinematicMath = {
     };
   },
 
-  getTarget(step: any, renderMode: string): CameraTarget {
+  getTarget(step: any, _renderMode: string): CameraTarget {
     const manual = step?.animationTarget;
     const coords = step?.data?.coordinates;
     const useAuto = !manual || manual.zoomScale <= 1;
@@ -39,7 +39,7 @@ export const CinematicMath = {
           15,
           Math.min(85, (coords.y / (coords.viewportHeight || 900)) * 100),
         ),
-        zoomScale: renderMode === "hybrid" ? 1 : 1.55,
+        zoomScale: 1.55,
       };
     }
     return manual || { centerX: 50, centerY: 50, zoomScale: 1 };

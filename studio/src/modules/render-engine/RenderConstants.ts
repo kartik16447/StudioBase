@@ -10,7 +10,7 @@ export const RenderConstants = {
   EXPORT_VISUAL_WIDTH: '288px',
   EXPORT_VISUAL_HEIGHT: '162px',
   EXPORT_VIDEO_BITRATE: 25000000,
-  EXPORT_FPS: 30,
+  EXPORT_FPS: 60,
   GRID_SPACING: 60,
   PANEL_SPRING: { type: 'spring' as const, stiffness: 280, damping: 36 },
   CAMERA_SPRING: { type: 'spring' as const, stiffness: 70, damping: 18, mass: 1.1, restDelta: 0.001 }
