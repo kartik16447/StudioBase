@@ -530,9 +530,11 @@ export async function handleSOPVideoExport() {
     if (videoTrack) videoTrack.stop();
   }
 
-  // --- AUTO DOWNLOAD ---
+  // --- AUTO DOWNLOAD & R2 UPLOAD ---
   const finalBlob = new Blob(chunks, { type: 'video/webm' });
   const url = URL.createObjectURL(finalBlob);
+  
+  // 1. Local Download Trigger
   const a = document.createElement('a');
   a.href = url;
   a.download = `StudioBase_Export_${new Date().getTime()}.webm`;
@@ -540,6 +542,41 @@ export async function handleSOPVideoExport() {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+  // 2. R2 Upload & Pipeline Update
+  if (infoOverlay) {
+    document.body.appendChild(infoOverlay); // Re-add if needed
+    infoOverlay.innerText = '☁️ Uploading Export to Cloud...';
+  }
+
+  try {
+    const exportKey = `videos/${sessionId}/export_${Date.now()}.webm`;
+    
+    // Upload Blob to R2
+    await apiClient.request(`/assets/file?key=${encodeURIComponent(exportKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'video/webm' },
+      body: finalBlob
+    });
+
+    // Patch session with the new export key
+    await apiClient.request(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ r2VideoKey: exportKey, r2ExportKey: exportKey })
+    });
+
+    if (infoOverlay) infoOverlay.innerText = '✅ Export Saved to Cloud';
+    setTimeout(() => {
+      if (infoOverlay && document.body.contains(infoOverlay)) document.body.removeChild(infoOverlay);
+    }, 2000);
+  } catch (uploadErr) {
+    console.error("❌ [Export] Cloud sync failed:", uploadErr);
+    if (infoOverlay) infoOverlay.innerText = '⚠️ Cloud Sync Failed (Local saved)';
+    setTimeout(() => {
+      if (infoOverlay && document.body.contains(infoOverlay)) document.body.removeChild(infoOverlay);
+    }, 3000);
+  }
 }
 
 export const VideoCanvas: React.FC = () => {

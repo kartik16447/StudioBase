@@ -15,6 +15,7 @@ export const UpdateSessionSchema = z.object({
   title: z.string().max(200).optional(),
   r2JsonKey: z.string().optional(),
   r2VideoKey: z.string().optional(),
+  r2ExportKey: z.string().optional(),
   storageBytes: z.number().int().min(0).optional(),
   stepCount: z.number().int().min(0).optional(),
   durationMs: z.number().int().min(0).optional(),

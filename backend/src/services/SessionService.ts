@@ -112,6 +112,7 @@ export class SessionService {
       title: data.title,
       r2JsonKey: data.r2JsonKey,
       r2VideoKey: data.r2VideoKey,
+      r2ExportKey: data.r2ExportKey,
       storageBytes: data.storageBytes,
       stepCount: data.stepCount,
       durationMs: data.durationMs,

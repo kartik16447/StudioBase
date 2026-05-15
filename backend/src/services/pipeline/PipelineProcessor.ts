@@ -34,12 +34,32 @@ export class PipelineProcessor {
 
       console.log(`[PIPELINE] Starting: ${sessionId}`);
 
-      // Placeholder for AI / Export logic (Phase 3)
-      // This will be expanded with actual frame extraction, TTS, etc.
+      // 1. Update session status to processing
+      await this.env.DB.prepare(
+        'UPDATE sessions SET status = ?, updatedAt = ? WHERE id = ?'
+      ).bind('processing', now, sessionId).run();
+
+      // 2. Parse payload and simulate backend generation work
+      if (job.r2JsonKey) {
+        const obj = await this.env.R2.get(job.r2JsonKey);
+        if (obj) {
+          const envelope: any = await obj.json();
+          // Simulate work (e.g., adding metadata)
+          envelope.metadata = envelope.metadata || {};
+          envelope.metadata.processedAt = Date.now();
+          envelope.metadata.outputs = job.requestedOutputs;
+          
+          // 3. Re-save the SessionEnvelope JSON to R2
+          await this.env.R2.put(job.r2JsonKey, JSON.stringify(envelope), {
+            httpMetadata: { contentType: 'application/json' }
+          });
+        }
+      }
       
+      // 4. On success, update session status to ready
       await this.env.DB.prepare(
         'UPDATE sessions SET status = ?, pipelinePath = ?, updatedAt = ? WHERE id = ?'
-      ).bind('ready', 'cloud', now, sessionId).run();
+      ).bind('ready', 'cloud', Date.now(), sessionId).run();
 
       await this.audit.record({
         eventName: 'pipeline.completed',
@@ -52,9 +72,10 @@ export class PipelineProcessor {
     } catch (err: any) {
       console.error(`[PIPELINE] Failed for ${sessionId}:`, err.message);
       
+      // 5. On error, catch the exception, update status to failed, and populate errorReason
       await this.env.DB.prepare(
-        'UPDATE sessions SET status = ?, updatedAt = ? WHERE id = ?'
-      ).bind('failed', Date.now(), sessionId).run();
+        'UPDATE sessions SET status = ?, errorReason = ?, updatedAt = ? WHERE id = ?'
+      ).bind('failed', err.message, Date.now(), sessionId).run();
 
       await this.audit.record({
         eventName: 'pipeline.failed',
