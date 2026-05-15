@@ -92,6 +92,13 @@ export class WebMFrameExtractor {
     console.log("🎬 [Extractor] Engine Initialized (SOFTWARE MODE). Waiting for first decode...");
   }
 
+  static async checkHardwareSupport(config: VideoDecoderConfig): Promise<VideoDecoderSupport> {
+    if (!(window as any).VideoDecoder) {
+      throw new Error("WebCodecs not supported");
+    }
+    return await VideoDecoder.isConfigSupported(config);
+  }
+
   getDuration(): number {
     if (!this.indexer) return 0;
     const frames = this.indexer.getFrames();

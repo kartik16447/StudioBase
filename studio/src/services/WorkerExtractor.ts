@@ -32,6 +32,11 @@ export class WorkerExtractor {
           this.pendingRequests.delete(requestId);
           break;
 
+        case 'SUPPORT_RESULT':
+          request.resolve(payload);
+          this.pendingRequests.delete(requestId);
+          break;
+
         case 'FRAME_SUCCESS':
           if (payload && payload.bitmap) {
             request.resolve(payload.bitmap);
@@ -83,5 +88,9 @@ export class WorkerExtractor {
     await this.sendRequest('DESTROY');
     this.worker.terminate();
     this.pendingRequests.clear();
+  }
+
+  async checkSupport(config: any): Promise<any> {
+    return this.sendRequest('CHECK_SUPPORT', { config });
   }
 }

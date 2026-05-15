@@ -8,6 +8,8 @@ import { apiClient } from '../../../lib/apiClient';
 import { WorkerExtractor } from '../../../services/WorkerExtractor';
 import { CanvasRenderer } from '../../../modules/render-engine/CanvasRenderer';
 
+import { TelemetryService } from '../../../services/TelemetryService';
+
 /**
  * MASTER CINEMATIC COMPOSITOR (STABILIZED v2)
  * Renders the session frame-by-frame into a 1080p WebM
@@ -18,14 +20,52 @@ export async function handleSOPVideoExport() {
 
   const session = store.session;
   const brand = store.brand;
+  const workspaceId = (session as any)?.workspaceId || 'default';
+  const sessionId = session?.sessionId || 'unknown';
   
-  // --- INSTRUMENTATION COUNTERS ---
+  store.setIsExporting(true);
+  store.setExportStatus('checking');
+  store.setExportError(null);
+  store.setExportProgress(0);
+
+  console.log("🎬 [Export] Phase 1: Environment Health Check");
+
+  // --- HEALTH CHECK: MEMORY & DECODER ---
+  if ((navigator as any).deviceMemory && (navigator as any).deviceMemory < 4) {
+    const error = "Low device memory detected (< 4GB). Export may fail.";
+    console.warn(`⚠️ [Export] ${error}`);
+    // We don't abort yet, but we log it
+    TelemetryService.record({ eventName: 'export.low_memory_warning', sessionId, workspaceId, properties: { memory: (navigator as any).deviceMemory } });
+  }
+
+  try {
+    const videoKey = (session as any)?.videoKey || 'screen-recording';
+    const videoUrl = session?.assets?.[videoKey] || session?.assets?.['video'] || '';
+
+    // Verify Asset Integrity
+    if (!videoUrl) throw new Error("Video asset URL missing. Cannot export.");
+    const assetCheck = await fetch(videoUrl, { method: 'HEAD' });
+    if (!assetCheck.ok) throw new Error(`Video asset not available (Status: ${assetCheck.status})`);
+
+    // Verify Decoder Support
+    if (!(window as any).VideoDecoder) {
+      throw new Error("WebCodecs (VideoDecoder) not supported in this browser.");
+    }
+  } catch (err: any) {
+    store.setExportStatus('failed');
+    store.setExportError(err.message);
+    store.setIsExporting(false);
+    TelemetryService.record({ eventName: 'export.health_check_failed', sessionId, workspaceId, properties: { error: err.message } });
+    return;
+  }
+
   let framesRequested = 0;
   let framesDrawn = 0;
   let successfulFrames = 0;
   let failedFrames = 0;
   
-  console.log("🎬 [Export] Phase 1: Initializing Deterministic Compositor");
+  console.log("🎬 [Export] Phase 2: Initializing Deterministic Compositor");
+  store.setExportStatus('exporting');
 
   // 1. Setup high-res compositor (DOM ATTACHED for Hardware Sync)
   const canvas = document.createElement('canvas');
@@ -37,52 +77,28 @@ export async function handleSOPVideoExport() {
   canvas.style.position = 'fixed';
   canvas.style.left = '0';
   canvas.style.top = '0';
-  canvas.style.width = RenderConstants.EXPORT_VISUAL_WIDTH; // 15% visual scale
+  canvas.style.width = RenderConstants.EXPORT_VISUAL_WIDTH; 
   canvas.style.height = RenderConstants.EXPORT_VISUAL_HEIGHT;
-
-  // --- BACKGROUND CACHE (Performance Fix) ---
-  const bgCache = document.createElement('canvas');
-  bgCache.width = RenderConstants.EXPORT_COMPOSITOR_WIDTH; bgCache.height = RenderConstants.EXPORT_COMPOSITOR_HEIGHT;
-  const bctx = bgCache.getContext('2d')!;
-  bctx.fillStyle = '#11111a';
-  bctx.fillRect(0, 0, RenderConstants.EXPORT_COMPOSITOR_WIDTH, RenderConstants.EXPORT_COMPOSITOR_HEIGHT);
-  bctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
-  for (let gx = 0; gx < RenderConstants.EXPORT_COMPOSITOR_WIDTH; gx += RenderConstants.GRID_SPACING) {
-    for (let gy = 0; gy < RenderConstants.EXPORT_COMPOSITOR_HEIGHT; gy += RenderConstants.GRID_SPACING) {
-      bctx.beginPath(); bctx.arc(gx, gy, 1.2, 0, Math.PI * 2); bctx.fill();
-    }
-  }
   canvas.style.opacity = '0.05'; 
   canvas.style.pointerEvents = 'none';
-  canvas.style.zIndex = '9999'; // Front-and-Center
+  canvas.style.zIndex = '9999';
   document.body.appendChild(canvas);
 
-  // Initialize with alpha: false to prevent encoder "Visual Silence" collapse
-  const ctx = canvas.getContext('2d', { 
-    willReadFrequently: true,
-    alpha: false 
-  });
-
+  const ctx = canvas.getContext('2d', { willReadFrequently: true, alpha: false });
   if (!ctx) {
-    console.error("❌ [Export] Failed to get 2D context");
+    store.setExportStatus('failed');
+    store.setExportError("Failed to get 2D context");
     return;
   }
-
-  store.setIsExporting(true);
-  store.setStepIndex(0);
-  store.setPlaying(false);
 
   // --- RESOURCE LIFECYCLE ---
   let extractor: WorkerExtractor | null = null;
   let videoTrack: MediaStreamTrack | null = null;
-  let infoOverlay: HTMLDivElement | null = null;
   let exportVideo: HTMLVideoElement | null = null;
   const chunks: Blob[] = [];
   let totalBytes = 0;
 
   try {
-
-    // --- AUTO CAPTURE MODE (Bypassing Throttling) ---
     const stream = (canvas as any).captureStream(RenderConstants.EXPORT_FPS);
     videoTrack = stream.getVideoTracks()[0];
     
@@ -91,111 +107,37 @@ export async function handleSOPVideoExport() {
     
     const recorder = new MediaRecorder(stream, { 
       mimeType, 
-      videoBitsPerSecond: RenderConstants.EXPORT_VIDEO_BITRATE,
-      bitsPerSecond: RenderConstants.EXPORT_VIDEO_BITRATE 
+      videoBitsPerSecond: RenderConstants.EXPORT_VIDEO_BITRATE
     });
-
-    // --- HELPER: PREVENT VISUAL SILENCE ---
-    const injectJitter = () => {
-      if (!ctx) return;
-      ctx.save();
-      ctx.globalAlpha = 0.01;
-      ctx.fillStyle = `rgb(${Math.random()*255},${Math.random()*255},${Math.random()*255})`;
-      ctx.fillRect(1919, 1079, 1, 1);
-      ctx.restore();
-    };
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
         chunks.push(e.data);
         totalBytes += e.data.size;
-        console.log(`🎬 [Export] Chunk received: ${e.data.size} bytes (Total: ${chunks.length}, Cumulative: ${(totalBytes/1024/1024).toFixed(2)}MB)`);
       }
     };
   
-  recorder.onstop = () => {
-    console.log(`🎬 [Export] Recorder stopped. State: ${recorder.state}`);
-    const blob = new Blob(chunks, { type: 'video/webm' });
-    console.log(`🎬 [Export] Final Blob size: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
-    
-    if (blob.size < 1000) {
-      console.error("❌ [Export] Output blob is too small. Likely black frames.");
-    }
+    recorder.onstop = () => {
+      console.log(`🎬 [Export] Recorder stopped.`);
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      if (blob.size < 1000) {
+        console.error("❌ [Export] Output blob too small.");
+        TelemetryService.record({ eventName: 'export.failed', sessionId, workspaceId, properties: { error: 'Empty output blob', size: blob.size } });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${session?.aiOutputs?.title || 'studiobase-cinematic'}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+        TelemetryService.record({ eventName: 'export.completed', sessionId, workspaceId, properties: { size: blob.size, frames: framesDrawn } });
+      }
+      store.setIsExporting(false);
+      store.setExportStatus('completed');
+    };
 
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${session?.aiOutputs?.title || 'studiobase-cinematic'}.webm`;
-    a.click();
-    URL.revokeObjectURL(url);
-    store.setIsExporting(false);
-  };
-
-  console.log("🎬 [Export] Starting Recorder...");
-  recorder.start(1000); // Small timeslices to prevent memory soak
-  const fps = RenderConstants.EXPORT_FPS;
-
-  // --- HELPER: DETECT TAINTED CANVAS ---
-  const validateCanvasIntegrity = () => {
-    try {
-      canvas.toDataURL(); 
-      return true;
-    } catch (e) {
-      console.error("❌ [Export] CANVAS TAINTED! CORS failure detected.", e);
-      return false;
-    }
-  };
-
-  // --- INTRO SLIDE ---
-  if (brand.showIntro) {
-    console.log("🎬 [Export] Rendering Intro Slide...");
-    for (let f = 0; f < 90; f++) {
-      ctx.fillStyle = brand.primaryColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 120px Inter, system-ui, sans-serif';
-      ctx.fillText(session?.aiOutputs?.title || 'Recording', canvas.width/2, canvas.height/2 - 40);
-      ctx.font = '50px Inter, system-ui, sans-serif';
-      ctx.globalAlpha = 0.6;
-      ctx.fillText('A StudioBase walkthrough', canvas.width/2, canvas.height/2 + 40);
-      ctx.globalAlpha = 1.0;
-      
-      injectJitter();
-      await new Promise(res => setTimeout(res, 0)); // Compositor Yield
-      framesRequested++; framesDrawn++;
-      await new Promise(res => setTimeout(res, 16)); // Allow encoding yield
-    }
-    validateCanvasIntegrity();
-  }
-
-  const steps = session?.steps || [];
-  const chapterMap = new Map((session?.metadata?.chapterBreaks || []).map(c => [c.afterStepId, c]));
-
-  // --- STEP BY STEP RENDERING (Unified Architecture) ---
-  // Store center in percentages (0-100) to match Preview Player logic
-  let currentX = 50;
-  
-  // --- FILTERED VISIBILITY HACK ---
-  // Transparent informational overlay (No occlusion to keep rasterizer active)
-  const infoOverlay = document.createElement('div');
-  Object.assign(infoOverlay.style, {
-    position: 'fixed',
-    left: '0px',
-    top: '20px',
-    width: '100vw',
-    textAlign: 'center',
-    zIndex: '10001',
-    color: '#fff',
-    pointerEvents: 'none',
-    fontFamily: 'Inter, system-ui, sans-serif',
-    textShadow: '0 2px 4px rgba(0,0,0,0.5)'
-  });
-  infoOverlay.innerHTML = `
-    <div style="font-size: 24px; font-weight: bold;">🎬 Rendering Cinematic Video...</div>
-    <div style="font-size: 14px; opacity: 0.8;">Bypassing compositor throttling. Please keep this tab active.</div>
-  `;
-  document.body.appendChild(infoOverlay);
+    console.log("🎬 [Export] Starting Recorder...");
+    recorder.start(1000); 
 
     // --- DEDICATED EXPORT VIDEO NODE ---
     exportVideo = document.createElement('video');
@@ -205,36 +147,60 @@ export async function handleSOPVideoExport() {
     exportVideo.src = videoUrl;
     exportVideo.muted = true;
     exportVideo.playsInline = true;
-    
-    Object.assign(exportVideo.style, {
-      position: 'fixed',
-      left: '0px',
-      top: '0px',
-      width: '1920px',
-      height: '1080px',
-      objectFit: 'fill',
-      opacity: '1', 
-      zIndex: '10000', 
-      filter: 'brightness(0.2)',
-      pointerEvents: 'none',
-      willChange: 'transform'
-    });
+    exportVideo.style.display = 'none'; // Keep hidden
     document.body.appendChild(exportVideo);
 
-    console.log("🎬 [Export] Pre-flight check starting...");
     const renderer = new CanvasRenderer();
     extractor = new WorkerExtractor();
-    
-    if (videoUrl) {
-      try {
-        console.log("🔍 [Export] Initializing Deterministic Extractor (OFF-THREAD)...");
-        await extractor.init(videoUrl);
-      } catch (e) {
-        console.error("❌ [Export] Extractor initialization failed:", e);
-      }
-    }
+    await extractor.init(videoUrl);
+
+    TelemetryService.record({ eventName: 'export.started', sessionId, workspaceId });
 
     // --- TIMELINE NORMALIZATION ---
+    const fps = RenderConstants.EXPORT_FPS;
+
+    // --- HELPER: PREVENT VISUAL SILENCE ---
+    const injectJitter = () => {
+      ctx.save();
+      ctx.globalAlpha = 0.01;
+      ctx.fillStyle = `rgb(${Math.random()*255},${Math.random()*255},${Math.random()*255})`;
+      ctx.fillRect(RenderConstants.EXPORT_COMPOSITOR_WIDTH - 1, RenderConstants.EXPORT_COMPOSITOR_HEIGHT - 1, 1, 1);
+      ctx.restore();
+    };
+
+    // --- HELPER: DETECT TAINTED CANVAS ---
+    const validateCanvasIntegrity = () => {
+      try {
+        canvas.toDataURL(); 
+        return true;
+      } catch (e) {
+        console.error("❌ [Export] CANVAS TAINTED! CORS failure detected.", e);
+        TelemetryService.record({ eventName: 'export.canvas_tainted', sessionId, workspaceId });
+        return false;
+      }
+    };
+
+    // --- HELPER: RETRY-SAFE FRAME EXTRACTION ---
+    const getFrameWithRetry = async (targetMs: number, maxRetries = 3) => {
+      let lastErr = null;
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          const frame = await extractor!.getFrame(targetMs);
+          if (frame) return frame;
+        } catch (e: any) {
+          lastErr = e;
+          console.warn(`🎬 [Export] Frame extraction attempt ${attempt + 1} failed for ${targetMs}ms:`, e.message);
+          await new Promise(r => setTimeout(r, 100 * (attempt + 1))); // Backoff
+        }
+      }
+      TelemetryService.record({ 
+        eventName: 'export.frame_decode_failed', 
+        sessionId, 
+        workspaceId, 
+        properties: { timestampMs: targetMs, error: lastErr?.message } 
+      });
+      return null;
+    };
     const sessionStartTime = (session as any)?.metadata?.startTime || (session as any)?.startTime || (steps.length > 0 ? steps[0].timestamp : 0);
     const toRelativeMs = (absMs: number) => {
       if (!extractor) return 0;
@@ -426,14 +392,17 @@ export async function handleSOPVideoExport() {
           // Skip extraction, reuse masterFrame
         } else {
           try {
-            const newFrame = await extractor.getFrame(relTargetMs);
+            const newFrame = await getFrameWithRetry(relTargetMs);
             if (newFrame) {
               if (masterFrame) masterFrame.close();
               masterFrame = newFrame;
               absoluteLastLoggedMs = safeTargetMs;
+              successfulFrames++;
+            } else {
+              failedFrames++;
             }
           } catch (e) {
-            // Silently handle extraction failures to prevent log flood
+            failedFrames++;
           }
         }
       }
@@ -471,8 +440,9 @@ export async function handleSOPVideoExport() {
         const currentTotalFrame = (i * stepFrames) + f;
         const progressPct = (currentTotalFrame / totalFrames) * 100;
         
-        if (Math.floor(progressPct) % 25 === 0 && f === 0) {
+        if (Math.floor(progressPct) % 5 === 0 && f === 0) {
           console.log(`🎬 [Export Progress] ${Math.round(progressPct)}% Complete`);
+          store.setExportProgress(progressPct);
         }
         
         injectJitter();

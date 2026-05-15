@@ -7,18 +7,24 @@ export class AssetService {
     return files.map(f => ({
       key: f.key,
       contentType: f.contentType,
-      uploadUrl: `${origin}/upload/file?key=${encodeURIComponent(f.key)}`
+      uploadUrl: `${origin}/v1/assets/file?key=${encodeURIComponent(f.key)}`
     }));
   }
 
   async put(key: string, body: ArrayBuffer | ReadableStream, contentType: string) {
-    if (!key.startsWith('sessions/') && !key.startsWith('screenshots/') && !key.startsWith('videos/')) {
-      throw new Error('INVALID_PATH');
-    }
-
+    this.validatePath(key);
     return await this.env.R2.put(key, body, {
       httpMetadata: { contentType }
     });
+  }
+
+  async createMultipartUpload(key: string) {
+    this.validatePath(key);
+    return await this.env.R2.createMultipartUpload(key);
+  }
+
+  async resumeMultipartUpload(key: string, uploadId: string) {
+    return this.env.R2.resumeMultipartUpload(key, uploadId);
   }
 
   async get(key: string) {
@@ -41,5 +47,11 @@ export class AssetService {
     const quota = record?.r2StorageQuotaBytes || FREE_QUOTA;
 
     return { used, quota, percent: Math.round((used / quota) * 100) };
+  }
+
+  private validatePath(key: string) {
+    if (!key.startsWith('sessions/') && !key.startsWith('screenshots/') && !key.startsWith('videos/') && !key.startsWith('audio/')) {
+      throw new Error('INVALID_PATH');
+    }
   }
 }

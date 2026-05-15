@@ -26,11 +26,10 @@ export const workspaceMiddleware = () => {
     const user = c.get('user');
     if (!user) throw new HTTPException(401, { message: 'Authentication required' });
 
-    // 1. Extract workspaceId from multiple possible sources
+    // 1. Extract workspaceId from multiple possible sources (STRICT)
     const workspaceId = 
       c.req.query('workspaceId') || 
-      c.req.header('x-workspace-id') || 
-      (await tryGetWorkspaceIdFromSession(c));
+      c.req.header('x-workspace-id');
 
     if (!workspaceId) {
       recordEvent(c, { eventName: 'workspace.context_missing' }).catch(() => {});
@@ -111,21 +110,3 @@ export const requireExactRoles = (allowedRoles: WorkspaceRole[]) => {
   };
 };
 
-/**
- * Heuristic: If we're looking at a session, we can infer the workspaceId
- */
-async function tryGetWorkspaceIdFromSession(c: Context): Promise<string | null> {
-  const path = c.req.path;
-  const match = path.match(/\/sessions\/([^\/]+)/);
-  if (!match) return null;
-
-  const sessionId = match[1];
-  // Simple check to avoid SQL if it's not a UUID
-  if (sessionId.length < 32) return null;
-
-  const result = await c.env.DB.prepare(
-    'SELECT workspaceId FROM sessions WHERE id = ?'
-  ).bind(sessionId).first() as { workspaceId: string } | null;
-
-  return result?.workspaceId || null;
-}

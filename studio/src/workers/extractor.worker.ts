@@ -19,6 +19,13 @@ ctx.onmessage = async (e: MessageEvent) => {
         break;
       }
 
+      case 'CHECK_SUPPORT': {
+        const { config } = payload;
+        const support = await WebMFrameExtractor.checkHardwareSupport(config);
+        ctx.postMessage({ type: 'SUPPORT_RESULT', payload: support, requestId });
+        break;
+      }
+
       case 'GET_FRAME': {
         const { timestampMs } = payload;
         const frame = await extractor.getFrame(timestampMs);

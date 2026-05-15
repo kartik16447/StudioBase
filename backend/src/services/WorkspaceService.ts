@@ -1,5 +1,8 @@
 import { Env } from '../types/hono';
 import { AuditService } from './AuditService';
+import { Events } from '../telemetry/events';
+
+export type WorkspaceRole = 'Owner' | 'Admin' | 'Member' | 'Viewer';
 
 export class WorkspaceService {
   private audit: AuditService;
@@ -20,25 +23,26 @@ export class WorkspaceService {
     return await this.env.DB.prepare('SELECT * FROM workspaces WHERE id = ?').bind(id).first() as any;
   }
 
-  async update(id: string, userId: string, data: { name?: string }) {
-    const workspace = await this.getById(id);
-    if (!workspace || workspace.ownerId !== userId) {
-      throw new Error('FORBIDDEN');
-    }
+  async update(id: string, actorId: string, data: { name?: string }) {
     if (data.name) {
       await this.env.DB.prepare('UPDATE workspaces SET name = ?, updatedAt = ? WHERE id = ?')
         .bind(data.name, Date.now(), id).run();
     }
+
+    await this.audit.record({
+      eventName: 'workspace.updated',
+      workspaceId: id,
+      userId: actorId,
+      properties: { updates: data }
+    });
+
     return true;
   }
 
-  async createInvite(workspaceId: string, userId: string, role: string) {
-    const workspace = await this.getById(workspaceId);
-    if (!workspace || workspace.ownerId !== userId) {
-      throw new Error('FORBIDDEN');
-    }
-
+  async createInvite(workspaceId: string, actorId: string, role: WorkspaceRole) {
     const now = Date.now();
+    
+    // Check invite limit
     const { count } = await this.env.DB.prepare(
       'SELECT COUNT(*) as count FROM invites WHERE workspaceId = ? AND revokedAt IS NULL AND (expiresAt IS NULL OR expiresAt > ?)'
     ).bind(workspaceId, now).first() as any;
@@ -48,13 +52,19 @@ export class WorkspaceService {
     const id = crypto.randomUUID();
     const token = crypto.randomUUID();
     const expiresAt = now + 7 * 24 * 60 * 60 * 1000;
-    const inviteRole = role === 'Owner' ? 'Owner' : (role === 'Admin' ? 'Admin' : 'Member');
 
     await this.env.DB.prepare(
       'INSERT INTO invites (id, workspaceId, token, role, createdAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(id, workspaceId, token, inviteRole, now, expiresAt).run();
+    ).bind(id, workspaceId, token, role, now, expiresAt).run();
 
-    return { token, expiresAt, role: inviteRole };
+    await this.audit.record({
+      eventName: Events.WORKSPACE_INVITE,
+      workspaceId,
+      userId: actorId,
+      properties: { role, inviteId: id }
+    });
+
+    return { token, expiresAt, role };
   }
 
   async join(userId: string, token: string) {
@@ -69,31 +79,58 @@ export class WorkspaceService {
       'INSERT OR IGNORE INTO workspace_members (userId, workspaceId, role, joinedAt) VALUES (?, ?, ?, ?)'
     ).bind(userId, invite.workspaceId, invite.role || 'Member', now).run();
 
+    await this.audit.record({
+      eventName: 'workspace.member_joined',
+      workspaceId: invite.workspaceId,
+      userId: userId,
+      properties: { inviteId: invite.id }
+    });
+
     return invite.workspaceId;
   }
 
   async listMembers(workspaceId: string) {
     const { results } = await this.env.DB.prepare(
-      `SELECT users.id as userId, users.email, workspace_members.role FROM workspace_members
-       JOIN users ON users.id = workspace_members.userId WHERE workspace_members.workspaceId = ?`
+      `SELECT u.id as userId, u.email, u.name, u.avatarUrl, m.role, m.joinedAt FROM workspace_members m
+       JOIN users u ON u.id = m.userId WHERE m.workspaceId = ?`
     ).bind(workspaceId).all();
     return results;
   }
 
-  async removeMember(workspaceId: string, currentUserId: string, targetUserId: string) {
-    const membership = await this.env.DB.prepare(
+  async removeMember(workspaceId: string, actorId: string, targetUserId: string) {
+    if (actorId === targetUserId) throw new Error('CANNOT_REMOVE_SELF');
+
+    const targetMembership = await this.env.DB.prepare(
       'SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?'
-    ).bind(workspaceId, currentUserId).first() as any;
+    ).bind(workspaceId, targetUserId).first() as any;
 
-    if (!membership || membership.role !== 'Owner') {
-      throw new Error('FORBIDDEN');
-    }
-
-    if (currentUserId === targetUserId) throw new Error('CANNOT_REMOVE_SELF');
+    if (!targetMembership) throw new Error('NOT_FOUND');
+    if (targetMembership.role === 'Owner') throw new Error('CANNOT_REMOVE_OWNER');
 
     await this.env.DB.prepare('DELETE FROM workspace_members WHERE workspaceId = ? AND userId = ?')
       .bind(workspaceId, targetUserId).run();
+
+    await this.audit.record({
+      eventName: Events.WORKSPACE_MEMBER_REMOVED,
+      workspaceId,
+      userId: actorId,
+      properties: { removedUserId: targetUserId }
+    });
     
+    return true;
+  }
+
+  async revokeInvite(workspaceId: string, actorId: string, inviteId: string) {
+    await this.env.DB.prepare('UPDATE invites SET revokedAt = ? WHERE id = ? AND workspaceId = ?')
+      .bind(Date.now(), inviteId, workspaceId).run();
+
+    await this.audit.record({
+      eventName: 'workspace.invite_revoked',
+      workspaceId,
+      userId: actorId,
+      properties: { inviteId }
+    });
+
     return true;
   }
 }

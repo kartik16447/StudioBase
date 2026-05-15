@@ -40,6 +40,9 @@ interface StudioState {
   renderMode: 'hybrid' | 'slideshow';
   isExporting: boolean;
   exportTrigger: number;
+  exportStatus: 'idle' | 'checking' | 'exporting' | 'finishing' | 'failed' | 'completed';
+  exportError: string | null;
+  exportProgress: number;
 
   brand: BrandState;
   setBrand: (updates: Partial<BrandState>) => void;
@@ -65,6 +68,9 @@ interface StudioState {
   triggerScroll: () => void;
   setRenderMode: (mode: 'hybrid' | 'slideshow') => void;
   setIsExporting: (exporting: boolean) => void;
+  setExportStatus: (status: StudioState['exportStatus']) => void;
+  setExportError: (error: string | null) => void;
+  setExportProgress: (progress: number) => void;
   triggerExport: () => void;
   fetchSession: (sessionId: string) => Promise<void>;
 }
@@ -90,6 +96,9 @@ export const useStudioStore = create<StudioState>((set) => ({
   renderMode: 'hybrid',
   isExporting: false,
   exportTrigger: 0,
+  exportStatus: 'idle',
+  exportError: null,
+  exportProgress: 0,
 
   brand: {
     primaryColor: '#5E5CE6',
@@ -329,5 +338,8 @@ export const useStudioStore = create<StudioState>((set) => ({
   triggerScroll: () => set((state) => ({ scrollTrigger: state.scrollTrigger + 1 })),
   setRenderMode: (mode) => set({ renderMode: mode }),
   setIsExporting: (exporting) => set({ isExporting: exporting }),
+  setExportStatus: (status) => set({ exportStatus: status }),
+  setExportError: (error) => set({ exportError: error }),
+  setExportProgress: (progress) => set({ exportProgress: progress }),
   triggerExport: () => set((state) => ({ exportTrigger: state.exportTrigger + 1 })),
 }));
