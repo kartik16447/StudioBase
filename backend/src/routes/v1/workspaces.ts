@@ -25,6 +25,15 @@ wsRoutes.use('*', authMiddleware(), workspaceMiddleware());
 // 3. Update Workspace
 wsRoutes.patch('/', requirePermission('workspace:admin'), zValidator('json', UpdateWorkspaceSchema), WorkspaceController.update);
 
+// 3b. Get Workspace Settings (read-only)
+wsRoutes.get('/settings', async (c) => {
+  const ws = c.get('workspace');
+  const row = await c.env.DB.prepare(
+    'SELECT * FROM workspace_settings WHERE workspaceId = ?'
+  ).bind(ws.id).first();
+  return c.json({ settings: row || { workspaceId: ws.id, ssoEnabled: 0, dataRegion: 'global', retentionDays: 90 } });
+});
+
 // 4. Create Invite
 wsRoutes.post('/invites', requirePermission('member:invite'), zValidator('json', CreateInviteSchema), WorkspaceController.createInvite);
 

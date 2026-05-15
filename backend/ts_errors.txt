@@ -1,0 +1,46 @@
+src/db/recovery/localRecovery.ts(1,28): error TS2307: Cannot find module '@cloudflare/workers-types' or its corresponding type declarations.
+src/db/recovery/recoverLegacyAssets.ts(1,38): error TS2307: Cannot find module '@cloudflare/workers-types' or its corresponding type declarations.
+src/handlers/queue.ts(2,35): error TS2307: Cannot find module '../pipeline/processor' or its corresponding type declarations.
+src/index.ts(37,37): error TS2304: Cannot find name 'authMiddleware'.
+src/index.ts(39,51): error TS2304: Cannot find name 'HTTPException'.
+src/middlewares/auth.ts(24,31): error TS2554: Expected 3 arguments, but got 2.
+src/middlewares/workspace.ts(39,9): error TS2353: Object literal may only specify known properties, and 'code' does not exist in type 'HTTPExceptionOptions'.
+src/middlewares/workspace.ts(58,9): error TS2353: Object literal may only specify known properties, and 'code' does not exist in type 'HTTPExceptionOptions'.
+src/middlewares/workspace.ts(89,9): error TS2353: Object literal may only specify known properties, and 'code' does not exist in type 'HTTPExceptionOptions'.
+src/middlewares/workspace.ts(107,9): error TS2353: Object literal may only specify known properties, and 'code' does not exist in type 'HTTPExceptionOptions'.
+src/routes/v1/assets.ts(47,41): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/auth.ts(13,42): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/pipeline.ts(18,46): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/sessions.ts(29,45): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/sessions.ts(33,7): error TS2783: 'workspaceId' is specified more than once, so this usage will be overwritten.
+src/routes/v1/sessions.ts(76,45): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/sessions.ts(101,45): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/sessions.ts(115,45): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/sessions.ts(116,40): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/routes/v1/telemetry.ts(12,41): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/workspaces.ts(28,47): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/workspaces.ts(49,47): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/workspaces.ts(59,47): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/workspaces.ts(74,47): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/workspaces.ts(75,46): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/routes/v1/workspaces.ts(92,47): error TS2345: Argument of type 'ExecutionContext' is not assignable to parameter of type 'ExecutionContext<unknown>'.
+  Property 'exports' is optional in type 'ExecutionContext' but required in type 'ExecutionContext<unknown>'.
+src/routes/v1/workspaces.ts(94,55): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/schemas/sessions.ts(23,15): error TS2554: Expected 2-3 arguments, but got 1.
+src/schemas/sessions.ts(24,23): error TS2554: Expected 2-3 arguments, but got 1.
+src/schemas/workspaces.ts(5,18): error TS2554: Expected 2-3 arguments, but got 1.
