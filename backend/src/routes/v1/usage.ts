@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { Env, Variables } from '../../types/hono';
 import { authMiddleware } from '../../middlewares/auth';
-import { workspaceMiddleware, requireRole } from '../../middlewares/workspace';
+import { workspaceMiddleware, requirePermission } from '../../middlewares/workspace';
 import { AssetService } from '../../services/AssetService';
 
 const usage = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -17,7 +17,7 @@ usage.get('/storage', async (c) => {
 });
 
 // 2. Get Workspace Metrics Summary
-usage.get('/metrics', requireRole('Admin'), async (c) => {
+usage.get('/metrics', requirePermission('workspace:admin'), async (c) => {
   const ws = c.get('workspace');
   const { results } = await c.env.DB.prepare(
     `SELECT COUNT(*) as totalSessions, 

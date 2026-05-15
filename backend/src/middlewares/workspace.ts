@@ -73,34 +73,19 @@ export const workspaceMiddleware = () => {
   };
 };
 
-/**
- * RBAC Helper: Require a minimum role level
- */
-export const requireRole = (minRole: WorkspaceRole) => {
-  return async (c: AppContext, next: Next) => {
-    const ws = c.get('workspace');
-    if (!ws) throw new HTTPException(500, { message: 'Workspace context missing (requireRole called before workspaceMiddleware)' });
-
-    if (RoleLevels[ws.role] < RoleLevels[minRole]) {
-      throw new HTTPException(403, { 
-        message: `Insufficient permissions. Required: ${minRole}, You are: ${ws.role}`
-      });
-    }
-    await next();
-  };
-};
+import { Permission, hasPermission } from '../utils/permissions';
 
 /**
- * RBAC Helper: Require exact role matches
+ * PBAC Helper: Require a specific permission
  */
-export const requireExactRoles = (allowedRoles: WorkspaceRole[]) => {
+export const requirePermission = (requiredPermission: Permission) => {
   return async (c: AppContext, next: Next) => {
     const ws = c.get('workspace');
-    if (!ws) throw new HTTPException(500, { message: 'Workspace context missing' });
+    if (!ws) throw new HTTPException(500, { message: 'Workspace context missing (requirePermission called before workspaceMiddleware)' });
 
-    if (!allowedRoles.includes(ws.role)) {
+    if (!hasPermission(ws.role, requiredPermission)) {
       throw new HTTPException(403, { 
-        message: `Insufficient permissions. Allowed: ${allowedRoles.join(', ')}`
+        message: `Insufficient permissions. Missing: ${requiredPermission}`
       });
     }
     await next();

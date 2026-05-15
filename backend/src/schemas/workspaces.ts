@@ -21,3 +21,12 @@ export const LeaveWorkspaceSchema = z.object({
 export const RevokeInviteSchema = z.object({
   inviteId: z.string().uuid(),
 });
+
+export const WorkspaceSettingsSchema = z.object({
+  ssoEnabled: z.number().int().min(0).max(1).default(0),
+  ssoProvider: z.string().optional(),
+  samlConfig: z.string().optional(),
+  allowedDomains: z.string().optional(),
+  dataRegion: z.string().default('global'),
+  retentionDays: z.number().int().min(1).default(90),
+});

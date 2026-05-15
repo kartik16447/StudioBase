@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { Env, Variables } from '../../types/hono';
 import { zValidator } from '@hono/zod-validator';
 import { authMiddleware } from '../../middlewares/auth';
-import { workspaceMiddleware, requireRole } from '../../middlewares/workspace';
+import { workspaceMiddleware, requirePermission } from '../../middlewares/workspace';
 import { 
   CreateSessionSchema, 
   UpdateSessionSchema, 
@@ -92,7 +92,7 @@ sessions.get('/:id', async (c) => {
 });
 
 // 4. Update Session
-sessions.patch('/:id', requireRole('Member'), zValidator('json', UpdateSessionSchema), async (c) => {
+sessions.patch('/:id', requirePermission('sop:edit'), zValidator('json', UpdateSessionSchema), async (c) => {
   const user = c.get('user');
   const ws = c.get('workspace');
   const id = c.req.param('id');
@@ -107,7 +107,7 @@ sessions.patch('/:id', requireRole('Member'), zValidator('json', UpdateSessionSc
 });
 
 // 5. Delete Session
-sessions.delete('/:id', requireRole('Admin'), async (c) => {
+sessions.delete('/:id', requirePermission('workspace:admin'), async (c) => {
   const user = c.get('user');
   const ws = c.get('workspace');
   const id = c.req.param('id');

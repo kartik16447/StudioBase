@@ -15,6 +15,8 @@ import pipelineRoutes from './routes/v1/pipeline';
 import telemetryRoutes from './routes/v1/telemetry';
 import usageRoutes from './routes/v1/usage';
 import adminRoutes from './routes/v1/admin';
+import auditLogRoutes from './routes/v1/audit-logs';
+import ssoRoutes from './routes/v1/sso';
 
 import { handleScheduled } from './handlers/scheduled';
 import { handleQueue } from './handlers/queue';
@@ -36,6 +38,8 @@ v1.route('/pipeline', pipelineRoutes);
 v1.route('/telemetry', telemetryRoutes);
 v1.route('/usage', usageRoutes);
 v1.route('/admin', adminRoutes);
+v1.route('/audit-logs', auditLogRoutes);
+v1.route('/sso', ssoRoutes);
 
 // Maintenance & Recovery (Governance hardened)
 v1.get('/maintenance/recovery', authMiddleware(), async (c) => {
