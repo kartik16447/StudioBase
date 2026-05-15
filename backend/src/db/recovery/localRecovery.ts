@@ -1,4 +1,4 @@
-import { D1Database } from '@cloudflare/workers-types';
+
 
 export interface RecoveryResult {
   status: 'success' | 'failure';
@@ -8,7 +8,7 @@ export interface RecoveryResult {
   logs: string[];
 }
 
-export async function runLocalRecovery(db: D1Database, adminEmail: string): Promise<RecoveryResult> {
+export async function runLocalRecovery(db: any, adminEmail: string): Promise<RecoveryResult> {
   const logs: string[] = [];
   const result: RecoveryResult = {
     status: 'success',
@@ -22,7 +22,7 @@ export async function runLocalRecovery(db: D1Database, adminEmail: string): Prom
     logs.push(`[Recovery] Starting recovery for admin: ${adminEmail}`);
 
     // 1. Ensure Admin User exists
-    let user = await db.prepare('SELECT id FROM users WHERE email = ?').bind(adminEmail).first<{ id: string }>();
+    const user = await db.prepare('SELECT id FROM users WHERE email = ?').bind(adminEmail).first();
     let userId = user?.id;
 
     if (!userId) {
@@ -37,7 +37,7 @@ export async function runLocalRecovery(db: D1Database, adminEmail: string): Prom
     }
 
     // 2. Ensure a Workspace exists for this user
-    let workspace = await db.prepare('SELECT id FROM workspaces WHERE ownerId = ? LIMIT 1').bind(userId).first<{ id: string }>();
+    let workspace = await db.prepare('SELECT id FROM workspaces WHERE ownerId = ? LIMIT 1').bind(userId).first();
     let workspaceId = workspace?.id;
 
     if (!workspaceId) {
@@ -66,7 +66,7 @@ export async function runLocalRecovery(db: D1Database, adminEmail: string): Prom
     // 4. Repair Legacy Sessions
     // Detect sessions with missing workspaceId or ownerId (though schema has NOT NULL, they might be pointing to deleted records or dummy IDs)
     // We'll also check for any session where the owner doesn't exist
-    const sessions = await db.prepare('SELECT id, ownerId, workspaceId FROM sessions').all<{ id: string, ownerId: string, workspaceId: string }>();
+    const sessions = await db.prepare('SELECT id, ownerId, workspaceId FROM sessions').all();
     
     for (const session of sessions.results) {
       let needsRepair = false;

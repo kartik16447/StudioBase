@@ -27,12 +27,18 @@ export const ASSET_URL_TTL_SECONDS = 3600; // 1 hour
 
 export const PLAYER_BASE_URL = "https://player.studiobase.app";
 
-// Set this to false to test against the live production backend
-export const DEV_MODE = false; 
+// DEV_MODE is set at build time via the VITE_DEV_MODE environment variable.
+// Set VITE_DEV_MODE=true in a local .env file to point at localhost.
+// Never set this in production — Cloudflare Pages env vars do not include VITE_DEV_MODE.
+export const DEV_MODE = import.meta.env.VITE_DEV_MODE === 'true';
 
-export const BACKEND_URL = DEV_MODE
-  ? "http://localhost:8787/v1"
-  : "https://studiobase-backend.karthik-upadhyay98.workers.dev/v1";
+// BACKEND_URL: prefers an explicit override (VITE_BACKEND_URL) for CI/staging,
+// then falls back to localhost or the production worker based on DEV_MODE.
+export const BACKEND_URL: string =
+  (import.meta.env.VITE_BACKEND_URL as string | undefined) ??
+  (DEV_MODE
+    ? 'http://localhost:8787/v1'
+    : 'https://studiobase-backend.karthik-upadhyay98.workers.dev/v1');
 
 export const V1_API_URL = BACKEND_URL;
 

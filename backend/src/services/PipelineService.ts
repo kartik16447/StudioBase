@@ -5,7 +5,7 @@ import { PipelineJob } from './pipeline/PipelineProcessor';
 export class PipelineService {
   private audit: AuditService;
 
-  constructor(private env: Env, private executionCtx?: ExecutionContext) {
+  constructor(private env: Env, private executionCtx?: any) {
     this.audit = new AuditService(env, executionCtx);
   }
 

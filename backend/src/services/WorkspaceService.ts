@@ -7,7 +7,7 @@ export type WorkspaceRole = 'Owner' | 'Admin' | 'Member' | 'Viewer';
 export class WorkspaceService {
   private audit: AuditService;
 
-  constructor(private env: Env, private executionCtx?: ExecutionContext) {
+  constructor(private env: Env, private executionCtx?: any) {
     this.audit = new AuditService(env, executionCtx);
   }
 
@@ -54,8 +54,8 @@ export class WorkspaceService {
     const expiresAt = now + 7 * 24 * 60 * 60 * 1000;
 
     await this.env.DB.prepare(
-      'INSERT INTO invites (id, workspaceId, token, role, createdAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(id, workspaceId, token, role, now, expiresAt).run();
+      'INSERT INTO invites (id, workspaceId, token, role, createdAt, expiresAt, invitedBy) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, workspaceId, token, role, now, expiresAt, actorId).run();
 
     await this.audit.record({
       eventName: Events.WORKSPACE_INVITE,
@@ -76,8 +76,8 @@ export class WorkspaceService {
     if (invite.expiresAt && invite.expiresAt < now) throw new Error('EXPIRED');
 
     await this.env.DB.prepare(
-      'INSERT OR IGNORE INTO workspace_members (userId, workspaceId, role, joinedAt) VALUES (?, ?, ?, ?)'
-    ).bind(userId, invite.workspaceId, invite.role || 'Member', now).run();
+      'INSERT OR IGNORE INTO workspace_members (userId, workspaceId, role, joinedAt, invitedBy) VALUES (?, ?, ?, ?, ?)'
+    ).bind(userId, invite.workspaceId, invite.role || 'Member', now, invite.invitedBy || null).run();
 
     await this.audit.record({
       eventName: 'workspace.member_joined',

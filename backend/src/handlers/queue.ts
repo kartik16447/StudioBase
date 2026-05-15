@@ -1,5 +1,5 @@
 import { Env } from '../types/hono';
-import { PipelineProcessor } from '../pipeline/processor';
+import { PipelineProcessor } from '../services/pipeline/PipelineProcessor';
 
 export async function handleQueue(batch: MessageBatch, env: Env, ctx: ExecutionContext) {
   const processor = new PipelineProcessor(env);

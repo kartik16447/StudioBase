@@ -27,6 +27,11 @@ export async function handleSOPVideoExport() {
   store.setExportStatus('checking');
   store.setExportError(null);
   store.setExportProgress(0);
+  
+  const steps = session?.steps || [];
+  const chapters = (session as any)?.aiOutputs?.chapters || [];
+  const chapterMap = new Map(chapters.map((c: any) => [c.stepId, c]));
+  let currentX = 50;
 
   console.log("🎬 [Export] Phase 1: Environment Health Check");
 
@@ -95,8 +100,27 @@ export async function handleSOPVideoExport() {
   let extractor: WorkerExtractor | null = null;
   let videoTrack: MediaStreamTrack | null = null;
   let exportVideo: HTMLVideoElement | null = null;
+  let infoOverlay: HTMLDivElement | null = null;
   const chunks: Blob[] = [];
   let totalBytes = 0;
+
+  // --- PROGRESS OVERLAY ---
+  infoOverlay = document.createElement('div');
+  infoOverlay.id = 'export-progress-overlay';
+  infoOverlay.style.position = 'fixed';
+  infoOverlay.style.top = '20px';
+  infoOverlay.style.right = '20px';
+  infoOverlay.style.padding = '12px 20px';
+  infoOverlay.style.background = 'rgba(0,0,0,0.85)';
+  infoOverlay.style.color = 'white';
+  infoOverlay.style.borderRadius = '8px';
+  infoOverlay.style.fontFamily = 'Inter, sans-serif';
+  infoOverlay.style.fontSize = '14px';
+  infoOverlay.style.zIndex = '10000';
+  infoOverlay.style.backdropFilter = 'blur(10px)';
+  infoOverlay.style.border = '1px solid rgba(255,255,255,0.1)';
+  infoOverlay.innerText = '🎬 Preparing Export Engine...';
+  document.body.appendChild(infoOverlay);
 
   try {
     const stream = (canvas as any).captureStream(RenderConstants.EXPORT_FPS);
@@ -287,7 +311,7 @@ export async function handleSOPVideoExport() {
     // console.log(`🎬 [Export] Step ${i+1}/${steps.length}: ${step.id}`);
 
     // Chapter Card Transition
-    const chapter = i > 0 ? chapterMap.get(steps[i-1].id) : null;
+    const chapter = (i > 0 ? chapterMap.get(steps[i-1].id) : null) as any;
     if (chapter) {
       console.log(`🎬 [Export] Chapter Card: ${chapter.chapterTitle}`);
       for (let f = 0; f < 60; f++) {
@@ -443,6 +467,7 @@ export async function handleSOPVideoExport() {
         if (Math.floor(progressPct) % 5 === 0 && f === 0) {
           console.log(`🎬 [Export Progress] ${Math.round(progressPct)}% Complete`);
           store.setExportProgress(progressPct);
+          if (infoOverlay) infoOverlay.innerText = `🎬 Exporting: ${Math.round(progressPct)}%`;
         }
         
         injectJitter();

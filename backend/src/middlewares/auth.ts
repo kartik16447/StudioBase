@@ -1,9 +1,10 @@
-import { Context, Next } from 'hono';
+import { Next } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { verify } from 'hono/jwt';
+import { AppContext } from '../types/hono';
 
 export const authMiddleware = (options: { optional?: boolean } = {}) => {
-  return async (c: Context, next: Next) => {
+  return async (c: AppContext, next: Next) => {
     const authHeader = c.req.header('Authorization');
     const path = c.req.path;
     const isDev = c.env.ENVIRONMENT === 'development';
@@ -20,7 +21,7 @@ export const authMiddleware = (options: { optional?: boolean } = {}) => {
     try {
       // 1. Try Internal JWT Verification (Modern Path)
       try {
-        const payload = await verify(token, c.env.ENCRYPTION_KEY);
+        const payload = await verify(token, c.env.ENCRYPTION_KEY, 'HS256');
         if (payload && payload.id) {
           console.log(`[DIAGNOSTIC] Modern JWT Validated for ${path}. User: ${payload.id}, Workspace: ${payload.workspaceId}`);
           
@@ -47,16 +48,21 @@ export const authMiddleware = (options: { optional?: boolean } = {}) => {
       });
 
       if (!res.ok) {
-        // [RECOVERY BYPASS] For verification, allow proceeding with a mock user if in dev mode
-        // Relaxed check: trust tokens starting with ya29. (Google Access Tokens) or long tokens (ID tokens)
-        if (isDev && (token.startsWith('ya29.') || token.length > 500)) {
-          console.warn('⚠️ [DIAGNOSTIC] Applying RELAXED DEV BYPASS for verification');
-          const userInfo = {
-            id: 'user_5329d8a0',
-            email: 'karthik.upadhyay98@gmail.com',
-            name: 'Karthik (Recovered)',
-          };
-          c.set('user', userInfo);
+        // [DEV BYPASS] Only activates when:
+        //   1. ENVIRONMENT === 'development'
+        //   2. DEV_BYPASS_EMAIL env var is explicitly set
+        //   3. Token shape matches a Google token (ya29. prefix or ID token length)
+        // Never executes in production — DEV_BYPASS_EMAIL is absent from production vars.
+        const devBypassEmail = c.env.DEV_BYPASS_EMAIL;
+        if (isDev && devBypassEmail && (token.startsWith('ya29.') || token.length > 500)) {
+          console.warn(`⚠️ [DEV BYPASS] Resolving dev user: ${devBypassEmail}`);
+          const devUser = await c.env.DB.prepare(
+            'SELECT id, email, name, avatarUrl FROM users WHERE email = ?'
+          ).bind(devBypassEmail).first() as any;
+          if (!devUser) {
+            throw new HTTPException(401, { message: `Dev bypass user not found in DB: ${devBypassEmail}` });
+          }
+          c.set('user', { id: devUser.id, email: devUser.email, name: devUser.name, avatarUrl: devUser.avatarUrl });
           return next();
         }
         console.log(`[DIAGNOSTIC] Legacy Token Validation Failed via Google API: ${res.status}`);
@@ -71,29 +77,25 @@ export const authMiddleware = (options: { optional?: boolean } = {}) => {
         .bind(googleUser.email)
         .first() as any;
 
-      // --- AUTO-PROVISIONING (Dev Only) ---
-      if (!user && isDev) {
-        console.warn(`[RECOVERY] Auto-provisioning user: ${googleUser.email}`);
-        const newUserId = `user_${crypto.randomUUID().substring(0, 8)}`;
+      // --- AUTO-PROVISIONING (Dev Only, requires DEV_BYPASS_EMAIL to be set) ---
+      // This never runs in production because DEV_BYPASS_EMAIL is absent from production vars.
+      const devBypassEmail = (c.env as any).DEV_BYPASS_EMAIL as string | undefined;
+      if (!user && isDev && devBypassEmail && googleUser.email === devBypassEmail) {
+        console.warn(`[DEV] Auto-provisioning user: ${googleUser.email}`);
+        const newUserId = crypto.randomUUID();
         await c.env.DB.prepare('INSERT INTO users (id, email, name, avatarUrl, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
           .bind(newUserId, googleUser.email, googleUser.name || 'New User', googleUser.picture, now, now)
           .run();
         
-        const newWsId = `ws_${crypto.randomUUID().substring(0, 8)}`;
+        const newWsId = crypto.randomUUID();
+        const slug = googleUser.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + newUserId.slice(0, 6);
         await c.env.DB.prepare('INSERT INTO workspaces (id, name, slug, ownerId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)')
-          .bind(newWsId, 'My Workspace', 'my-ws', newUserId, now, now)
+          .bind(newWsId, `${googleUser.name || googleUser.email.split('@')[0]}'s Workspace`, slug, newUserId, now, now)
           .run();
         
         await c.env.DB.prepare('INSERT INTO workspace_members (userId, workspaceId, role, joinedAt) VALUES (?, ?, ?, ?)')
           .bind(newUserId, newWsId, 'Owner', now)
           .run();
-        
-        // Repair any orphaned sessions OR transfer from dummy user-1
-        const repairRes = await c.env.DB.prepare('UPDATE sessions SET ownerId = ?, workspaceId = ?, updatedAt = ? WHERE workspaceId IS NULL OR ownerId IS NULL OR ownerId = "unknown" OR ownerId = "user-1"')
-          .bind(newUserId, newWsId, now)
-          .run();
-        
-        console.log(`[RECOVERY] Repaired/Transferred ${repairRes.meta.changes} sessions to ${googleUser.email}`);
 
         user = { id: newUserId, email: googleUser.email, name: googleUser.name, avatarUrl: googleUser.picture };
       }

@@ -1,11 +1,12 @@
 import { Env } from '../types/hono';
 import { AuditService } from './AuditService';
 import { Events } from '../telemetry/events';
+import { SessionEnvelopeSchema } from '../schemas/SopSchema';
 
 export class SessionService {
   private audit: AuditService;
 
-  constructor(private env: Env, private executionCtx?: ExecutionContext) {
+  constructor(private env: Env, private executionCtx?: any) {
     this.audit = new AuditService(env, executionCtx);
   }
 
@@ -64,6 +65,22 @@ export class SessionService {
     return await this.env.DB.prepare(
       'SELECT * FROM sessions WHERE (id = ? OR shareToken = ?) AND workspaceId = ? AND deletedAt IS NULL'
     ).bind(id, id, workspaceId).first() as any;
+  }
+
+  async getEnvelope(id: string, workspaceId: string) {
+    const session = await this.getById(id, workspaceId);
+    if (!session || !session.r2JsonKey) return null;
+    
+    const obj = await this.env.R2.get(session.r2JsonKey);
+    if (!obj) return null;
+
+    try {
+      const data = await obj.json();
+      return SessionEnvelopeSchema.parse(data);
+    } catch (err) {
+      console.error(`[SCHEMA_DRIFT] Session ${id} envelope failed validation:`, err);
+      throw err;
+    }
   }
 
   async list(workspaceId: string, options: { limit?: number; cursor?: string } = {}) {

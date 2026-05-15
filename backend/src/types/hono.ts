@@ -1,3 +1,4 @@
+import { Context } from 'hono';
 import { WorkspaceContext } from '../middlewares/workspace';
 
 export interface Env {
@@ -11,6 +12,7 @@ export interface Env {
   SENTRY_DSN?: string;
   ALLOWED_ORIGINS?: string;
   ENVIRONMENT: 'production' | 'staging' | 'development';
+  DEV_BYPASS_EMAIL?: string; // Only present in local dev via wrangler.jsonc [env.development] — never in production.
 }
 
 export interface User {
@@ -27,3 +29,5 @@ export type Variables = {
   workspace: WorkspaceContext;
   requestId: string;
 };
+
+export type AppContext = Context<{ Bindings: Env; Variables: Variables }>;

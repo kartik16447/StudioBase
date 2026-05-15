@@ -7,7 +7,7 @@ import { sign } from 'hono/jwt';
 export class AuthService {
   private audit: AuditService;
 
-  constructor(private env: Env, private executionCtx?: ExecutionContext) {
+  constructor(private env: Env, private executionCtx?: any) {
     this.audit = new AuditService(env, executionCtx);
   }
 

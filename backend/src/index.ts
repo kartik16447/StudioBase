@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import * as Sentry from '@sentry/cloudflare';
 import { Env, Variables } from './types/hono';
 import { errorHandler } from './middlewares/error';
 import { loggerMiddleware } from './middlewares/logger';
 import { corsMiddleware } from './middlewares/cors';
+import { authMiddleware } from './middlewares/auth';
 
 import authRoutes from './routes/v1/auth';
 import workspaceRoutes from './routes/v1/workspaces';
@@ -23,18 +25,20 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', loggerMiddleware);
 app.use('*', corsMiddleware);
 
-// Routes (v1)
-app.route('/v1/auth', authRoutes);
-app.route('/v1/workspaces', workspaceRoutes);
-app.route('/v1/sessions', sessionRoutes);
-app.route('/v1/assets', assetRoutes);
-app.route('/v1/pipeline', pipelineRoutes);
-app.route('/v1/telemetry', telemetryRoutes);
-app.route('/v1/usage', usageRoutes);
-app.route('/v1/admin', adminRoutes);
+// --- V1 API Router ---
+const v1 = new Hono<{ Bindings: Env; Variables: Variables }>();
+
+v1.route('/auth', authRoutes);
+v1.route('/workspaces', workspaceRoutes);
+v1.route('/sessions', sessionRoutes);
+v1.route('/assets', assetRoutes);
+v1.route('/pipeline', pipelineRoutes);
+v1.route('/telemetry', telemetryRoutes);
+v1.route('/usage', usageRoutes);
+v1.route('/admin', adminRoutes);
 
 // Maintenance & Recovery (Governance hardened)
-app.get('/v1/maintenance/recovery', authMiddleware(), async (c) => {
+v1.get('/maintenance/recovery', authMiddleware(), async (c) => {
   const user = c.get('user');
   if (user.email !== c.env.ADMIN_EMAIL) throw new HTTPException(403);
   const { runLocalRecovery } = await import('./db/recovery/localRecovery');
@@ -42,11 +46,15 @@ app.get('/v1/maintenance/recovery', authMiddleware(), async (c) => {
   return c.json(result);
 });
 
+// Catch-all for unhandled v1 routes
+v1.all('/*', (c) => c.json({ error: 'Not Found', code: 'NOT_FOUND' }, 404));
+
+// Mount v1 router onto the root app
+app.route('/v1', v1);
+
+// --- Root level routes ---
 // Health check
 app.get('/health', (c) => c.json({ status: 'ok', version: '1.0.0', timestamp: Date.now() }));
-
-// Catch-all for unhandled v1 routes
-app.all('/v1/*', (c) => c.json({ error: 'Not Found', code: 'NOT_FOUND' }, 404));
 
 // Global Error Handler
 app.onError(errorHandler);

@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const UpdateWorkspaceSchema = z.object({
   name: z.string().min(1, 'Name cannot be empty').max(100).optional(),
-  brandConfig: z.record(z.any()).optional(),
+  brandConfig: z.record(z.string(), z.any()).optional(),
 });
 
 export const CreateInviteSchema = z.object({

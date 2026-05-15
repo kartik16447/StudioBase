@@ -1,4 +1,4 @@
-import { D1Database, R2Bucket } from '@cloudflare/workers-types';
+
 
 export interface RecoveryStats {
   scanned: number;
@@ -12,8 +12,8 @@ export interface RecoveryStats {
 }
 
 export async function runLegacyRecovery(
-  db: D1Database,
-  r2: R2Bucket,
+  db: any,
+  r2: any,
   targetEmail: string,
   dryRun: boolean = true
 ): Promise<RecoveryStats> {
@@ -36,7 +36,7 @@ export async function runLegacyRecovery(
   log(`Starting legacy recovery for ${targetEmail} (Dry Run: ${dryRun})`);
 
   // 1. Ensure User & Workspace
-  let user = await db.prepare('SELECT id FROM users WHERE email = ?').bind(targetEmail).first<{ id: string }>();
+  let user = await db.prepare('SELECT id FROM users WHERE email = ?').bind(targetEmail).first();
   let userId: string;
 
   if (!user) {
@@ -57,7 +57,7 @@ export async function runLegacyRecovery(
     log(`Using existing user ${userId}`);
   }
 
-  let workspace = await db.prepare('SELECT id FROM workspaces WHERE ownerId = ?').bind(userId).first<{ id: string }>();
+  let workspace = await db.prepare('SELECT id FROM workspaces WHERE ownerId = ?').bind(userId).first();
   let workspaceId: string;
 
   if (!workspace) {

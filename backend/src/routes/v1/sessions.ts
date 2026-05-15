@@ -30,8 +30,8 @@ sessions.post('/', zValidator('json', CreateSessionSchema), async (c) => {
   try {
     const result = await service.create({
       userId: user.id,
-      workspaceId: ws.id,
-      ...body
+      ...body,
+      workspaceId: ws.id, // Enforce context-based workspaceId
     });
 
     return c.json({ 
@@ -113,7 +113,7 @@ sessions.delete('/:id', requireRole('Admin'), async (c) => {
   const id = c.req.param('id');
 
   const service = new SessionService(c.env, c.executionCtx);
-  const success = await service.delete(id, ws.id, user.id);
+  const success = await service.delete(id!, ws.id!, user.id!);
   
   if (!success) throw new HTTPException(404, { message: 'Not found' });
 

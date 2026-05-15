@@ -1,6 +1,7 @@
-import { Context, Next } from 'hono';
+import { Next } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { recordEvent, Events } from '../telemetry/events';
+import { recordEvent } from '../telemetry/events';
+import { AppContext } from '../types/hono';
 
 export type WorkspaceRole = 'Owner' | 'Admin' | 'Member' | 'Viewer';
 
@@ -22,7 +23,7 @@ export interface WorkspaceContext {
  * Enforces explicit workspaceId, validates membership, and injects context.
  */
 export const workspaceMiddleware = () => {
-  return async (c: Context, next: Next) => {
+  return async (c: AppContext, next: Next) => {
     const user = c.get('user');
     if (!user) throw new HTTPException(401, { message: 'Authentication required' });
 
@@ -34,8 +35,7 @@ export const workspaceMiddleware = () => {
     if (!workspaceId) {
       recordEvent(c, { eventName: 'workspace.context_missing' }).catch(() => {});
       throw new HTTPException(400, { 
-        message: 'Explicit workspace context required. Please provide workspaceId in query or x-workspace-id header.',
-        code: 'WORKSPACE_CONTEXT_MISSING'
+        message: 'Explicit workspace context required. Please provide workspaceId in query or x-workspace-id header.'
       });
     }
 
@@ -53,8 +53,7 @@ export const workspaceMiddleware = () => {
       }).catch(() => {});
       
       throw new HTTPException(403, { 
-        message: 'You do not have access to this workspace.',
-        code: 'WORKSPACE_ACCESS_DENIED'
+        message: 'You do not have access to this workspace.'
       });
     }
 
@@ -78,14 +77,13 @@ export const workspaceMiddleware = () => {
  * RBAC Helper: Require a minimum role level
  */
 export const requireRole = (minRole: WorkspaceRole) => {
-  return async (c: Context, next: Next) => {
-    const ws = c.get('workspace') as WorkspaceContext;
+  return async (c: AppContext, next: Next) => {
+    const ws = c.get('workspace');
     if (!ws) throw new HTTPException(500, { message: 'Workspace context missing (requireRole called before workspaceMiddleware)' });
 
     if (RoleLevels[ws.role] < RoleLevels[minRole]) {
       throw new HTTPException(403, { 
-        message: `Insufficient permissions. Required: ${minRole}, You are: ${ws.role}`,
-        code: 'INSUFFICIENT_PERMISSIONS'
+        message: `Insufficient permissions. Required: ${minRole}, You are: ${ws.role}`
       });
     }
     await next();
@@ -96,14 +94,13 @@ export const requireRole = (minRole: WorkspaceRole) => {
  * RBAC Helper: Require exact role matches
  */
 export const requireExactRoles = (allowedRoles: WorkspaceRole[]) => {
-  return async (c: Context, next: Next) => {
-    const ws = c.get('workspace') as WorkspaceContext;
+  return async (c: AppContext, next: Next) => {
+    const ws = c.get('workspace');
     if (!ws) throw new HTTPException(500, { message: 'Workspace context missing' });
 
     if (!allowedRoles.includes(ws.role)) {
       throw new HTTPException(403, { 
-        message: `Insufficient permissions. Allowed: ${allowedRoles.join(', ')}`,
-        code: 'INSUFFICIENT_PERMISSIONS'
+        message: `Insufficient permissions. Allowed: ${allowedRoles.join(', ')}`
       });
     }
     await next();

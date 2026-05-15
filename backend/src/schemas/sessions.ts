@@ -20,8 +20,8 @@ export const UpdateSessionSchema = z.object({
   durationMs: z.number().int().min(0).optional(),
   pipelinePath: z.enum(['edge', 'cloud']).optional(),
   isPublic: z.boolean().optional(),
-  metadata: z.record(z.any()).optional(),
-  generatedOutputs: z.record(z.any()).optional(),
+  metadata: z.record(z.string(), z.any()).optional(),
+  generatedOutputs: z.record(z.string(), z.any()).optional(),
 });
 
 export const GetSessionsQuerySchema = z.object({
