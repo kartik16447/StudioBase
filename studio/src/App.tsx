@@ -6,7 +6,11 @@ import { HomePage } from './pages/HomePage';
 import { StudioPage } from './pages/StudioPage';
 import { BrandKitPage } from './pages/BrandKitPage';
 import { SharePage } from './pages/SharePage';
+import { WorkspaceSettingsPage } from './pages/WorkspaceSettingsPage';
+import { AuditLogPage } from './pages/AuditLogPage';
+import { AdminDiagnosticsPage } from './pages/AdminDiagnosticsPage';
 import { CommandPalette, KeyboardHintPill } from './components/CommandPalette';
+import { GlobalToastContainer } from './components/GlobalToast';
 import { sessionManager } from './lib/auth/sessionManager';
 
 function App() {
@@ -144,6 +148,9 @@ function App() {
         case 'brand': 
         case 'templates': return <BrandKitPage />;
         case 'share': return <SharePage />;
+        case 'team': return <WorkspaceSettingsPage />;
+        case 'audit-logs' as any: return <AuditLogPage />;
+        case 'admin' as any: return <AdminDiagnosticsPage />;
         default: return <HomePage />;
       }
     } catch (e: any) {
@@ -169,6 +176,7 @@ function App() {
 
       <CommandPalette />
       <KeyboardHintPill />
+      <GlobalToastContainer />
     </>
   );
 }

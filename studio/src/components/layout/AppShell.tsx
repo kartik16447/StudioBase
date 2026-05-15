@@ -83,7 +83,11 @@ export const Sidebar: React.FC = () => {
           <div className="px-3 mb-2 text-[10.5px] font-bold text-white/30 uppercase tracking-[0.16em]">Resources</div>
           <div className="space-y-0.5">
             <SidebarItem id="knowledge" icon={I.Bookmark} label="Knowledge Base" active={active === 'knowledge'} onClick={() => navigate('home')} />
-            <SidebarItem id="team" icon={I.User} label="Team Settings" active={active === 'team'} onClick={() => navigate('home')} />
+            <SidebarItem id="team" icon={I.Settings} label="Workspace Settings" active={active === 'team'} onClick={() => navigate('team')} />
+            <SidebarItem id={'audit-logs' as any} icon={I.Shield} label="Audit Logs" active={active === ('audit-logs' as any)} onClick={() => navigate('audit-logs' as any)} />
+            {import.meta.env.VITE_DEV_MODE === 'true' && (
+              <SidebarItem id={'admin' as any} icon={I.Activity} label="Diagnostics" active={active === ('admin' as any)} onClick={() => navigate('admin' as any)} />
+            )}
           </div>
         </section>
       </div>

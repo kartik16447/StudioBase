@@ -18,7 +18,7 @@ class ApiClient {
     return `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
   }
 
-  private async handleResponse<T>(res: Response): Promise<T> {
+  private async handleResponse<T>(res: Response, requestPath?: string): Promise<T> {
     if (!res.ok) {
       let errorData: any;
       try {
@@ -32,9 +32,20 @@ class ApiClient {
         errorData = { message: `Request failed with status ${res.status}` };
       }
 
+      // Global Error Interceptor
       if (res.status === 401) {
-        // Handle unauthorized (optional: redirect to login)
-        console.warn('🔑 [API] 401 Unauthorized - Session may have expired');
+        console.warn('🔑 [API] 401 Unauthorized - Redirecting to login');
+        window.dispatchEvent(new CustomEvent('SB_AUTH_EXPIRED'));
+      } else if (res.status === 403) {
+        console.warn('🚫 [API] 403 Forbidden:', requestPath);
+        window.dispatchEvent(new CustomEvent('SB_PERMISSION_DENIED', { 
+          detail: { path: requestPath } 
+        }));
+      } else if (res.status >= 500) {
+        console.error('💥 [API] Server error:', requestPath, errorData);
+        window.dispatchEvent(new CustomEvent('SB_SERVER_ERROR', { 
+          detail: { path: requestPath, message: errorData?.message } 
+        }));
       }
 
       const error = new Error(errorData.message || errorData.error || `Request failed with status ${res.status}`);
@@ -61,7 +72,7 @@ class ApiClient {
       method: 'GET',
       headers: { ...this.getHeaders(), ...options.headers },
     });
-    return this.handleResponse<T>(res);
+    return this.handleResponse<T>(res, path);
   }
 
   async post<T>(path: string, body?: any, options: RequestInit = {}): Promise<T> {
@@ -74,7 +85,7 @@ class ApiClient {
       headers: { ...this.getHeaders(), ...options.headers },
       body: body ? JSON.stringify(body) : undefined,
     });
-    return this.handleResponse<T>(res);
+    return this.handleResponse<T>(res, path);
   }
 
   async patch<T>(path: string, body?: any, options: RequestInit = {}): Promise<T> {
@@ -87,7 +98,7 @@ class ApiClient {
       headers: { ...this.getHeaders(), ...options.headers },
       body: body ? JSON.stringify(body) : undefined,
     });
-    return this.handleResponse<T>(res);
+    return this.handleResponse<T>(res, path);
   }
 
   async delete<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -99,7 +110,7 @@ class ApiClient {
       method: 'DELETE',
       headers: { ...this.getHeaders(), ...options.headers },
     });
-    return this.handleResponse<T>(res);
+    return this.handleResponse<T>(res, path);
   }
 
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -110,7 +121,7 @@ class ApiClient {
       ...options,
       headers: { ...this.getHeaders(), ...options.headers },
     });
-    return this.handleResponse<T>(res);
+    return this.handleResponse<T>(res, path);
   }
 
   // Helper for R2 uploads (bypass JSON and versioning if needed)

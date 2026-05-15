@@ -15,6 +15,8 @@ interface BackendSession {
   shareToken: string;
   title: string | null;
   status: string;
+  errorReason: string | null;
+  r2ExportKey: string | null;
   sessionType: 'steps' | 'video';
   createdAt: number;
   capturedUrl: string | null;
@@ -72,9 +74,10 @@ export const HomePage: React.FC = () => {
         }
         
         const data = await apiClient.get<any>('/sessions');
+        const rawList: BackendSession[] = data.sessions || [];
 
         // Map backend records to UI SessionEnvelope format
-        const mapped: SessionEnvelope[] = data.sessions.map((s: BackendSession) => ({
+        const mapped: SessionEnvelope[] = rawList.map((s: BackendSession) => ({
           sessionId: s.id,
           schemaVersion: '1.0',
           sessionType: s.sessionType,
@@ -92,7 +95,11 @@ export const HomePage: React.FC = () => {
           },
           metadata: {
             durationMs: s.durationMs,
-            stepCount: s.stepCount
+            stepCount: s.stepCount,
+            // Carry pipeline state for UI wire-up
+            pipelineStatus: s.status,
+            errorReason: s.errorReason,
+            r2ExportKey: s.r2ExportKey,
           }
         }));
         
@@ -219,36 +226,94 @@ export const HomePage: React.FC = () => {
               {[0,1,2,3,4,5].map(i => <SessionCardSkeleton key={i} />)}
             </>
           ) : (
-            <>
-              <NewSessionCard onClick={() => alert('Open browser extension to start a capture session.')} />
-              {filtered.map(s => (
-                <SessionCard 
-                  key={s.sessionId} 
-                  session={s} 
-                  onClick={() => openSession(s)}
-                  onDelete={async () => {
-                    try {
-                      await apiClient.delete(`/sessions/${s.sessionId}`);
-                      setSessions(prev => prev.filter(x => x.sessionId !== s.sessionId));
-                    } catch (err) {
-                      console.error('[onDelete] failed:', err);
-                    }
-                  }}
-                  onRename={async (newTitle) => {
-                    try {
-                      await apiClient.patch(`/sessions/${s.sessionId}`, { title: newTitle });
-                      setSessions(prev => prev.map(x => 
-                        x.sessionId === s.sessionId 
-                          ? { ...x, aiOutputs: { ...x.aiOutputs, title: newTitle }, capturedTitle: newTitle }
-                          : x
-                      ));
-                    } catch (err) {
-                      console.error('[onRename] failed:', err);
-                    }
-                  }}
-                />
-              ))}
-            </>
+              <>
+                <NewSessionCard onClick={() => alert('Open browser extension to start a capture session.')} />
+                {filtered.map(s => {
+                  const meta = s.metadata as any;
+                  const status: string = meta?.pipelineStatus || 'draft';
+                  const errorReason: string | null = meta?.errorReason || null;
+                  const r2ExportKey: string | null = meta?.r2ExportKey || null;
+                  return (
+                    <div key={s.sessionId} className="flex flex-col gap-1">
+                      <SessionCard
+                        session={s}
+                        onClick={() => openSession(s)}
+                        onDelete={async () => {
+                          try {
+                            await apiClient.delete(`/sessions/${s.sessionId}`);
+                            setSessions(prev => prev.filter(x => x.sessionId !== s.sessionId));
+                          } catch (err) {
+                            console.error('[onDelete] failed:', err);
+                          }
+                        }}
+                        onRename={async (newTitle) => {
+                          try {
+                            await apiClient.patch(`/sessions/${s.sessionId}`, { title: newTitle });
+                            setSessions(prev => prev.map(x =>
+                              x.sessionId === s.sessionId
+                                ? { ...x, aiOutputs: { ...x.aiOutputs, title: newTitle }, capturedTitle: newTitle }
+                                : x
+                            ));
+                          } catch (err) {
+                            console.error('[onRename] failed:', err);
+                          }
+                        }}
+                      />
+                      {/* Pipeline Status Strip */}
+                      <div className="flex items-center justify-between px-3 py-1.5 rounded-b-sm bg-surface border border-white/5 border-t-0 -mt-1">
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            'text-[10px] font-bold px-2 py-0.5 rounded-full border',
+                            status === 'ready' ? 'bg-green-500/15 text-green-300 border-green-500/30' :
+                            status === 'processing' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
+                            status === 'queued' ? 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30' :
+                            status === 'failed' ? 'bg-red-500/15 text-red-300 border-red-500/30' :
+                            'bg-white/10 text-text-3 border-white/10'
+                          )}>
+                            {status.toUpperCase()}
+                          </span>
+                          {status === 'failed' && errorReason && (
+                            <span className="text-[11px] text-red-300 truncate max-w-[180px]" title={errorReason}>
+                              {errorReason}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {r2ExportKey && (
+                            <a
+                              href={apiClient.getUrl(`/assets/${encodeURIComponent(r2ExportKey)}`)}
+                              className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <I.Download size={12} /> Download
+                            </a>
+                          )}
+                          {status === 'failed' && (
+                            <button
+                              className="flex items-center gap-1 text-[11px] font-semibold text-yellow-300 hover:text-yellow-200 transition-colors"
+                              onClick={async () => {
+                                try {
+                                  await apiClient.post(`/pipeline/trigger`, { sessionId: s.sessionId });
+                                  setSessions(prev => prev.map(x =>
+                                    x.sessionId === s.sessionId
+                                      ? { ...x, metadata: { ...x.metadata, pipelineStatus: 'queued', errorReason: null } }
+                                      : x
+                                  ));
+                                } catch (err) {
+                                  console.error('[Retry] failed:', err);
+                                }
+                              }}
+                            >
+                              <I.RefreshCw size={12} /> Retry
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
           )}
         </div>
 
