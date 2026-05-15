@@ -14,12 +14,11 @@ import { TelemetryService } from '../../../services/TelemetryService';
  * MASTER CINEMATIC COMPOSITOR (STABILIZED v2)
  * Renders the session frame-by-frame into a 1080p WebM
  */
-export async function handleSOPVideoExport() {
+export async function handleSOPVideoExport(baseConfig: { session: any; theme: any; renderMode: string }) {
   const store = useStudioStore.getState();
   if (store.isExporting) return;
 
-  const session = store.session;
-  const brand = store.brand;
+  const { session, theme: brand, renderMode } = baseConfig;
   const workspaceId = (session as any)?.workspaceId || 'default';
   const sessionId = session?.sessionId || 'unknown';
   
@@ -435,20 +434,22 @@ export async function handleSOPVideoExport() {
       if (!currentAsset) continue;
 
       try {
-        await renderer.render({
+        await renderer.render(
           ctx,
-          dimensions: { width: canvas.width, height: canvas.height },
-          masterFrame: currentAsset,
-          step: step, 
-          prevStep: prevStep, 
-          progress: springProgress, 
-          theme: {
-            primaryColor: brand.primaryColor,
-            logoUrl: brand.logoUrl ?? undefined,
-            watermark: brand.watermark ?? undefined
-          }, 
-          renderMode: 'hybrid' 
-        });
+          {
+            dimensions: { width: canvas.width, height: canvas.height },
+            step: step, 
+            prevStep: prevStep, 
+            progress: springProgress, 
+            theme: {
+              primaryColor: brand.primaryColor,
+              logoUrl: brand.logoUrl ?? undefined,
+              watermark: brand.watermark ?? undefined
+            }, 
+            renderMode: renderMode 
+          },
+          currentAsset
+        );
         
         // --- SYNCHRONIZED 60FPS HEARTBEAT ---
         // 1. Force the recorder to capture the CURRENT state of the canvas
@@ -607,10 +608,9 @@ export const VideoCanvas: React.FC = () => {
   // SLIDE CACHE: Preload screenshots for slideshow mode
   const slideImageRef = useRef<HTMLImageElement | null>(null);
 
-  // Listen for global export trigger
   useEffect(() => {
     if (exportTrigger > 0 && !isExporting && useStudioStore.getState().activeView === 'video') {
-      handleSOPVideoExport();
+      handleSOPVideoExport({ session, theme: brand, renderMode: useStudioStore.getState().renderMode });
     }
   }, [exportTrigger]);
 
@@ -811,20 +811,22 @@ export const VideoCanvas: React.FC = () => {
       ctx.clearRect(0, 0, internalW, internalH);
       ctx.save();
       
-      renderer.render({
+      renderer.render(
         ctx,
-        dimensions: { width: internalW, height: internalH },
-        masterFrame: renderMode === 'hybrid' ? video : (slideImageRef.current || video), 
-        step: currentStep,
-        prevStep: prevStep,
-        progress: springProgress,
-        theme: {
-          primaryColor: brand.primaryColor,
-          logoUrl: brand.logoUrl ?? undefined,
-          watermark: brand.watermark ?? undefined
+        {
+          dimensions: { width: internalW, height: internalH },
+          step: currentStep,
+          prevStep: prevStep,
+          progress: springProgress,
+          theme: {
+            primaryColor: brand.primaryColor,
+            logoUrl: brand.logoUrl ?? undefined,
+            watermark: brand.watermark ?? undefined
+          },
+          renderMode: renderMode || 'hybrid'
         },
-        renderMode: renderMode || 'hybrid'
-      });
+        renderMode === 'hybrid' ? video : (slideImageRef.current || video)
+      );
 
       ctx.restore();
 
@@ -977,7 +979,7 @@ export const VideoCanvas: React.FC = () => {
               size="sm" 
               icon={I.Video} 
               disabled={isExporting}
-              onClick={() => handleSOPVideoExport()}
+              onClick={() => handleSOPVideoExport({ session, theme: brand, renderMode: useStudioStore.getState().renderMode })}
             >
               {isExporting ? 'Exporting...' : 'Export Cinematic'}
             </Button>

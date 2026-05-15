@@ -102,6 +102,17 @@ class ApiClient {
     return this.handleResponse<T>(res);
   }
 
+  async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+    this.logLegacyWarning(url);
+
+    const res = await fetch(url, {
+      ...options,
+      headers: { ...this.getHeaders(), ...options.headers },
+    });
+    return this.handleResponse<T>(res);
+  }
+
   // Helper for R2 uploads (bypass JSON and versioning if needed)
   async upload(url: string, body: ArrayBuffer | Blob, contentType: string) {
     const res = await fetch(url, {

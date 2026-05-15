@@ -1,35 +1,21 @@
 import { CinematicMath } from './CinematicMath';
 import { RenderConstants } from './RenderConstants';
+import type { IRenderer, RenderSpec } from './types';
 
-export interface RenderState {
-  ctx: CanvasRenderingContext2D;
-  dimensions: { width: number; height: number };
-  masterFrame: ImageBitmap | HTMLImageElement | HTMLVideoElement | null;
-  step: any;
-  prevStep: any | null;
-  progress: number; // 0 to 1
-  theme: {
-    primaryColor: string;
-    logoUrl?: string;
-    watermark?: string;
-  };
-  renderMode: 'hybrid' | 'slideshow';
-}
-
-export class CanvasRenderer {
+export class CanvasRenderer implements IRenderer {
   /**
    * Main entry point for drawing a single frame.
    */
-  public render(state: RenderState) {
-    const { ctx, dimensions, progress, step, prevStep, renderMode } = state;
+  public render(ctx: CanvasRenderingContext2D, spec: RenderSpec, masterFrame: ImageBitmap | HTMLImageElement | HTMLVideoElement | null) {
+    const { dimensions, progress, step, prevStep, renderMode } = spec;
 
     // 1. CLEAR & BACKGROUND
-    this.drawBackground(state);
+    this.drawBackground(ctx, spec);
 
     // 2. CAMERA CALCULATION (Unified Math)
-    const target = CinematicMath.getTarget(step, renderMode);
+    const target = CinematicMath.getTarget(step, renderMode as any);
     const prevTarget = prevStep 
-      ? CinematicMath.getTarget(prevStep, renderMode) 
+      ? CinematicMath.getTarget(prevStep, renderMode as any) 
       : target; // LATCH: Start at the current target to prevent snap from center at session start
 
     const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -53,20 +39,20 @@ export class CanvasRenderer {
     // 4. DRAW ASSET (VIDEO OR IMAGE)
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    this.drawMainAsset(state, currentScale);
+    this.drawMainAsset(ctx, spec, masterFrame, currentScale);
 
     // 5. DRAW INTERACTION HIGHLIGHT
-    this.drawInteractionHighlight(state);
+    this.drawInteractionHighlight(ctx, spec);
 
     // 6. RESTORE TRANSFORM
     ctx.restore();
 
     // 7. DRAW OVERLAYS (Annotations, Typing, etc.)
-    this.drawOverlays(state);
+    this.drawOverlays(ctx, spec);
   }
 
-  private drawBackground(state: RenderState) {
-    const { ctx, dimensions, theme } = state;
+  private drawBackground(ctx: CanvasRenderingContext2D, spec: RenderSpec) {
+    const { dimensions, theme } = spec;
     const { width, height } = dimensions;
 
     // Base dark background
@@ -96,12 +82,12 @@ export class CanvasRenderer {
     ctx.fillRect(0, 0, width, height);
   }
 
-  private drawMainAsset(state: RenderState, currentScale: number) {
-    const { ctx, dimensions, masterFrame } = state;
+  private drawMainAsset(ctx: CanvasRenderingContext2D, spec: RenderSpec, masterFrame: ImageBitmap | HTMLImageElement | HTMLVideoElement | null, currentScale: number) {
+    const { dimensions, step } = spec;
     if (!masterFrame) return;
 
     // Viewport-based dimensioning for coordinate parity
-    const coords = state.step?.data?.coordinates;
+    const coords = step?.data?.coordinates;
     const vw = coords?.viewportWidth || 1440;
     const vh = coords?.viewportHeight || 900;
 
@@ -126,8 +112,8 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
-  private drawInteractionHighlight(state: RenderState) {
-    const { ctx, dimensions, step, theme } = state;
+  private drawInteractionHighlight(ctx: CanvasRenderingContext2D, spec: RenderSpec) {
+    const { dimensions, step, theme } = spec;
     const coords = step?.data?.coordinates;
     if (!coords) return;
 
@@ -159,8 +145,8 @@ export class CanvasRenderer {
     ctx.restore();
   }
 
-  private drawOverlays(state: RenderState) {
-    const { ctx, step, progress } = state;
+  private drawOverlays(ctx: CanvasRenderingContext2D, spec: RenderSpec) {
+    const { step, progress } = spec;
 
     const annotations = step?.annotations || [];
     annotations.forEach((anno: any) => {
@@ -168,16 +154,49 @@ export class CanvasRenderer {
     });
 
     if (step?.action === 'input' && step?.inputValue && progress > 0.2) {
-      this.drawTypingOverlay(state);
+      this.drawTypingOverlay(ctx, spec);
     }
   }
 
-  private drawAnnotation(_ctx: CanvasRenderingContext2D, _anno: any, _progress: number) {
-    // Placeholder for future phases
+  private drawAnnotation(ctx: CanvasRenderingContext2D, anno: any, progress: number) {
+    // Basic implementation of drawAnnotation
+    if (!anno || progress < 0.1) return;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+
+    const x = anno.x || 100;
+    const y = anno.y || 100;
+    const w = anno.width || 300;
+    const h = anno.height || 100;
+
+    // Fade in
+    ctx.globalAlpha = Math.min(1, (progress - 0.1) * 2);
+
+    if ((ctx as any).roundRect) {
+      ctx.beginPath();
+      (ctx as any).roundRect(x, y, w, h, 12);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeRect(x, y, w, h);
+    }
+
+    if (anno.text) {
+      ctx.fillStyle = '#fff';
+      ctx.font = '24px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(anno.text, x + w / 2, y + h / 2 + 8);
+    }
+
+    ctx.restore();
   }
 
-  private drawTypingOverlay(state: RenderState) {
-    const { ctx, dimensions, step, progress } = state;
+  private drawTypingOverlay(ctx: CanvasRenderingContext2D, spec: RenderSpec) {
+    const { dimensions, step, progress } = spec;
     const { width, height } = dimensions;
 
     const typeLen = Math.floor((progress - 0.2) * 1.5 * step.inputValue.length);

@@ -3,7 +3,9 @@
  * Main Thread Bridge for the Off-Thread Frame Extraction Worker
  */
 
-export class WorkerExtractor {
+import type { IFrameExtractor } from '../modules/render-engine/types';
+
+export class WorkerExtractor implements IFrameExtractor {
   private worker: Worker;
   private pendingRequests: Map<string, { resolve: (val: any) => void, reject: (err: any) => void }> = new Map();
   private duration: number = 0;

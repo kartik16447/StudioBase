@@ -19,7 +19,11 @@ export const DemoCanvas: React.FC = () => {
   // Listen for global export trigger
   useEffect(() => {
     if (exportTrigger > 0 && !isExporting && useStudioStore.getState().activeView === 'demo') {
-      handleSOPVideoExport();
+      handleSOPVideoExport({ 
+        session, 
+        theme: brand, 
+        renderMode: useStudioStore.getState().renderMode 
+      });
     }
   }, [exportTrigger]);
 

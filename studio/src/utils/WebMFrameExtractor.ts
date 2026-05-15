@@ -7,8 +7,9 @@
  */
 
 import { WebMIndexer } from './WebMIndexer';
+import type { IFrameExtractor } from '../modules/render-engine/types';
 
-export class WebMFrameExtractor {
+export class WebMFrameExtractor implements IFrameExtractor {
   private decoder: VideoDecoder | null = null;
   private indexer: WebMIndexer | null = null;
   
