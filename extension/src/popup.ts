@@ -37,6 +37,7 @@ const btnOpenStudio = document.getElementById("btn-open-studio")!;
 const btnRecordAgain = document.getElementById("btn-record-again")!;
 const btnTryAgain = document.getElementById("btn-try-again")!;
 const btnToggleMic = document.getElementById("btn-toggle-mic") as HTMLButtonElement;
+const btnToggleVideo = document.getElementById("btn-toggle-video") as HTMLButtonElement;
 const btnSkipCountdown = document.getElementById("btn-skip-countdown") as HTMLButtonElement;
 
 const recTimer = document.getElementById("rec-timer")!;
@@ -53,6 +54,7 @@ let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let pendingCountdownTarget: AppState["target"] | null = null;
 let hasMicPermission = false;
 let isMicEnabled = false;
+let isVideoEnabled = true;
 
 // 1. Initial State Load
 chrome.storage.local.get(["sb_user", "sb_state", "email", "picture"], (stored: any) => {
@@ -112,6 +114,12 @@ function renderMicToggleState() {
   if (isMicEnabled) btnToggleMic.classList.add("active");
 }
 
+function renderVideoToggleState() {
+  btnToggleVideo.classList.remove("active");
+  btnToggleVideo.title = isVideoEnabled ? "Disable Screen Video" : "Enable Screen Video";
+  if (isVideoEnabled) btnToggleVideo.classList.add("active");
+}
+
 async function detectMicPermissionState() {
   try {
     if (navigator.permissions?.query) {
@@ -131,6 +139,7 @@ async function detectMicPermissionState() {
     hasMicPermission = false;
   }
   renderMicToggleState();
+  renderVideoToggleState();
 }
 
 async function handleSignIn() {
@@ -185,34 +194,20 @@ async function handleSignIn() {
 
 async function sendStartRecording(target: AppState["target"]) {
   try {
-    const streamId = await new Promise<string>((resolve, reject) => {
-      if (!chrome.desktopCapture) {
-        return reject(new Error("desktopCapture API not available."));
-      }
-      chrome.desktopCapture.chooseDesktopMedia(
-        ["screen", "window", "tab"],
-        (id) => {
-          if (id) resolve(id);
-          else reject(new Error("Capture cancelled"));
-        }
-      );
-    });
+    if (!target?.tabId) throw new Error("No target tab");
+    
+    const payloadTarget = {
+      ...target,
+      includeMic: hasMicPermission && isMicEnabled,
+      includeVideo: isVideoEnabled,
+      userTitle: recTitleInput?.value?.trim() || '',
+      streamId: null,
+    };
 
-    const payloadTarget = target
-      ? { 
-          ...target, 
-          streamId,
-          includeMic: hasMicPermission && isMicEnabled,
-          userTitle: recTitleInput?.value?.trim() || "" 
-        }
-      : { streamId };
-
-    chrome.runtime.sendMessage({
-      type: "START_RECORDING",
-      target: payloadTarget,
-    });
+    chrome.runtime.sendMessage({ type: "START_RECORDING", target: payloadTarget });
   } catch (err: any) {
-    console.error("Capture picker failed:", err);
+    console.error("Failed to start recording:", err);
+    chrome.runtime.sendMessage({ type: "ABORT_RECORDING" });
   }
 }
 
@@ -262,9 +257,27 @@ function renderState(newState: AppState) {
       progressPct.textContent = `${realProgress}%`;
       break;
     case "ready":
+      showScreen(screenSuccess);
+      (document.querySelector(".success-title") as HTMLElement).textContent = "Capture Ready!";
+      (document.querySelector(".success-meta") as HTMLElement).textContent = "Your interactive session is ready.";
+      (document.querySelector(".success-check") as HTMLElement).textContent = "✓";
+      (document.querySelector(".success-actions") as HTMLElement).style.display = "flex";
+      btnOpenStudio.textContent = "Open in Studio";
+      break;
     case "enriching":
+      showScreen(screenSuccess);
+      (document.querySelector(".success-title") as HTMLElement).textContent = "Processing...";
+      (document.querySelector(".success-meta") as HTMLElement).textContent = "Generating steps and descriptions...";
+      (document.querySelector(".success-check") as HTMLElement).textContent = "⌛";
+      (document.querySelector(".success-actions") as HTMLElement).style.display = "none";
+      break;
     case "failed_enrichment":
       showScreen(screenSuccess);
+      (document.querySelector(".success-title") as HTMLElement).textContent = "Processing Failed";
+      (document.querySelector(".success-meta") as HTMLElement).textContent = "We couldn't enrich your capture, but it's saved.";
+      (document.querySelector(".success-check") as HTMLElement).textContent = "⚠️";
+      (document.querySelector(".success-actions") as HTMLElement).style.display = "flex";
+      btnOpenStudio.textContent = "Retry Enrichment";
       break;
     case "error":
       showScreen(screenError);
@@ -317,6 +330,11 @@ btnToggleMic.addEventListener("click", async () => {
   renderMicToggleState();
 });
 
+btnToggleVideo.addEventListener("click", () => {
+  isVideoEnabled = !isVideoEnabled;
+  renderVideoToggleState();
+});
+
 btnSkipCountdown.addEventListener("click", () => {
   if (countdownInterval) clearInterval(countdownInterval);
   countdownOverlay.style.display = "none";
@@ -333,7 +351,7 @@ btnStop.addEventListener("click", () => {
 btnCopyLink.addEventListener("click", async () => {
   const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
   const token = sb_user?.accessToken;
-  const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}`;
+  const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}${sb_user?.workspaceId ? `&workspaceId=${sb_user.workspaceId}` : ""}`;
   navigator.clipboard.writeText(url).then(() => {
     toast.classList.add("visible");
     setTimeout(() => toast.classList.remove("visible"), 2000);
@@ -341,9 +359,13 @@ btnCopyLink.addEventListener("click", async () => {
 });
 
 btnOpenStudio.addEventListener("click", async () => {
+  if (state.status === "failed_enrichment") {
+    chrome.runtime.sendMessage({ type: "RETRY_UPLOAD" });
+    return;
+  }
   const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
   const token = sb_user?.accessToken;
-  const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}`;
+  const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}${sb_user?.workspaceId ? `&workspaceId=${sb_user.workspaceId}` : ""}`;
   chrome.tabs.create({ url });
 });
 

@@ -1,12 +1,281 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import type { Step, SessionEnvelope } from '../../../../shared/types/session';
+import type { Step, SessionEnvelope, AnnotationShape } from '../../../../shared/types/session';
 import { I } from '../icons';
 import { 
   cn, Badge, IconButton, Tooltip, StepNumber, ScreenshotPlaceholder, 
   GlassPanel, Avatar, Button
 } from '../ui';
 import { useStudioStore } from '../../store/useStudioStore';
+import { AnimatePresence } from 'framer-motion';
+
+// ─── CopyLinkButton ───────────────────────────────────────────────────
+const CopyLinkButton: React.FC<{ url: string }> = ({ url }) => {
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={cn(
+        'w-6 h-6 rounded-full inline-flex items-center justify-center transition-all duration-300 relative group overflow-hidden',
+        copied ? 'bg-green-50' : 'hover:bg-white/80 active:scale-90'
+      )}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        {copied ? (
+          <motion.div
+            key="check"
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -10, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+          >
+            <I.Check size={11} className="text-green-600" strokeWidth={3} />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="copy"
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -10, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+            className="text-text-3 group-hover:text-text"
+          >
+            <I.Copy size={11} strokeWidth={2.5} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </button>
+  );
+};
+
+export const AnnotationCanvas: React.FC<{
+  step: Step;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  onSave: (annotation: NonNullable<Step['annotations']>[number]) => void;
+  onClear: () => void;
+}> = ({ step, containerRef: _containerRef, onSave, onClear }) => {
+  const activeTool = useStudioStore(state => state.activeTool);
+  const [drawing, setDrawing] = React.useState(false);
+  const [startPct, setStartPct] = React.useState({ x: 0, y: 0 });
+  const [currentPct, setCurrentPct] = React.useState({ x: 0, y: 0 });
+  const [textInput, setTextInput] = React.useState<{ x: number; y: number } | null>(null);
+  const [textValue, setTextValue] = React.useState('');
+  const svgRef = React.useRef<SVGSVGElement>(null);
+
+  const isActive = activeTool !== 'cursor' && activeTool !== 'zoom' && activeTool !== 'move' && activeTool !== 'spotlight';
+  const annotations = step.annotations || [];
+
+  const getPct = (e: React.MouseEvent) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
+    return {
+      x: Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100)),
+    };
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!isActive) return;
+    if (activeTool === 'text') {
+      const pct = getPct(e);
+      setTextInput(pct);
+      setTextValue('');
+      return;
+    }
+    e.preventDefault();
+    const pct = getPct(e);
+    setStartPct(pct);
+    setCurrentPct(pct);
+    setDrawing(true);
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!drawing) return;
+    setCurrentPct(getPct(e));
+  };
+
+  const handleMouseUp = () => {
+    if (!drawing) return;
+    setDrawing(false);
+    const x = Math.min(startPct.x, currentPct.x);
+    const y = Math.min(startPct.y, currentPct.y);
+    const w = Math.abs(currentPct.x - startPct.x);
+    const h = Math.abs(currentPct.y - startPct.y);
+    if (w < 1 && h < 1) return;
+    const shape = activeTool === 'highlight' ? 'box'
+      : activeTool === 'blur' ? 'blur'
+      : activeTool === 'circle' ? 'circle'
+      : activeTool as AnnotationShape;
+    const color = activeTool === 'highlight' ? '#FFC107'
+      : activeTool === 'blur' ? 'blur'
+      : 'var(--color-primary, #5E5CE6)';
+    onSave({
+      id: `anno-${Date.now()}`,
+      shape,
+      x,
+      y,
+      width: w,
+      height: h,
+      color,
+    });
+  };
+
+  const handleTextSubmit = () => {
+    if (!textInput || !textValue.trim()) { setTextInput(null); return; }
+    onSave({
+      id: `anno-${Date.now()}`,
+      shape: 'text',
+      x: textInput.x,
+      y: textInput.y,
+      text: textValue.trim(),
+      color: 'var(--color-primary, #5E5CE6)',
+    });
+    setTextInput(null);
+    setTextValue('');
+  };
+
+  const draftX = Math.min(startPct.x, currentPct.x);
+  const draftY = Math.min(startPct.y, currentPct.y);
+  const draftW = Math.abs(currentPct.x - startPct.x);
+  const draftH = Math.abs(currentPct.y - startPct.y);
+
+  return (
+    <div className="absolute inset-0 z-10">
+      <svg
+        ref={svgRef}
+        className="absolute inset-0 w-full h-full"
+        style={{ cursor: isActive ? 'crosshair' : 'default', pointerEvents: isActive ? 'all' : 'none' }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => setDrawing(false)}
+      >
+        {/* Saved annotations */}
+        {annotations.map(a => {
+          if (a.shape === 'blur') return null;
+          if (a.shape === 'box') return (
+            <rect key={a.id}
+              x={`${a.x}%`} y={`${a.y}%`}
+              width={`${a.width}%`} height={`${a.height}%`}
+              fill={a.color === '#FFC107' ? 'rgba(255,193,7,0.25)' : 'none'}
+              stroke={a.color === '#FFC107' ? '#FFC107' : 'var(--color-primary,#5E5CE6)'}
+              strokeWidth="2" rx="3"
+            />
+          );
+          if (a.shape === 'arrow') {
+            const x1 = a.x; const y1 = a.y;
+            const x2 = (a.x + (a.width ?? 10)); const y2 = (a.y + (a.height ?? 10));
+            return (
+              <g key={a.id}>
+                <defs>
+                  <marker id={`ah-${a.id}`} markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                    <path d="M0,0 L0,6 L8,3 z" fill="var(--color-primary,#5E5CE6)" />
+                  </marker>
+                </defs>
+                <line x1={`${x1}%`} y1={`${y1}%`} x2={`${x2}%`} y2={`${y2}%`}
+                  stroke="var(--color-primary,#5E5CE6)" strokeWidth="2.5"
+                  markerEnd={`url(#ah-${a.id})`} />
+              </g>
+            );
+          }
+          if (a.shape === 'circle') return (
+            <ellipse
+              key={a.id}
+              cx={`${a.x + (a.width ?? 10) / 2}%`}
+              cy={`${a.y + (a.height ?? 10) / 2}%`}
+              rx={`${(a.width ?? 10) / 2}%`}
+              ry={`${(a.height ?? 10) / 2}%`}
+              fill="none"
+              stroke="var(--color-primary,#5E5CE6)"
+              strokeWidth="2"
+            />
+          );
+          if (a.shape === 'text') return (
+            <foreignObject key={a.id} x={`${a.x}%`} y={`${a.y}%`} width="200" height="40">
+              <div className="bg-primary text-white text-[12px] font-bold px-2 py-1 rounded shadow-lg whitespace-nowrap" style={{ background: 'var(--color-primary,#5E5CE6)' }}>
+                {a.text}
+              </div>
+            </foreignObject>
+          );
+          return null;
+        })}
+
+        {/* Draft shape while drawing */}
+        {drawing && (activeTool === 'box' || activeTool === 'highlight' || activeTool === 'blur') && (
+          <rect
+            x={`${draftX}%`} y={`${draftY}%`}
+            width={`${draftW}%`} height={`${draftH}%`}
+            fill={activeTool === 'highlight' ? 'rgba(255,193,7,0.2)' : activeTool === 'blur' ? 'rgba(0,0,0,0.2)' : 'none'}
+            stroke={activeTool === 'highlight' ? '#FFC107' : activeTool === 'blur' ? '#888' : 'var(--color-primary,#5E5CE6)'}
+            strokeWidth="2" strokeDasharray="4 2" rx="3"
+          />
+        )}
+        {drawing && activeTool === 'circle' && (
+          <ellipse
+            cx={`${draftX + draftW / 2}%`}
+            cy={`${draftY + draftH / 2}%`}
+            rx={`${draftW / 2}%`}
+            ry={`${draftH / 2}%`}
+            fill="none"
+            stroke="var(--color-primary,#5E5CE6)"
+            strokeWidth="2" strokeDasharray="4 2"
+          />
+        )}
+        {drawing && activeTool === 'arrow' && (
+          <line x1={`${startPct.x}%`} y1={`${startPct.y}%`}
+            x2={`${currentPct.x}%`} y2={`${currentPct.y}%`}
+            stroke="var(--color-primary,#5E5CE6)" strokeWidth="2.5" strokeDasharray="4 2" />
+        )}
+      </svg>
+
+      {/* Blur annotations as DOM divs (backdrop-filter) */}
+      {annotations.filter(a => a.shape === 'blur').map(a => (
+        <div key={a.id}
+          className="absolute pointer-events-none"
+          style={{
+            left: `${a.x}%`, top: `${a.y}%`,
+            width: `${a.width}%`, height: `${a.height}%`,
+            backdropFilter: 'blur(12px)',
+            background: 'rgba(0,0,0,0.3)',
+          }}
+        />
+      ))}
+
+      {/* Text input popover */}
+      {textInput && (
+        <div className="absolute z-20" style={{ left: `${textInput.x}%`, top: `${textInput.y}%` }}>
+          <input
+            autoFocus
+            value={textValue}
+            onChange={e => setTextValue(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleTextSubmit(); if (e.key === 'Escape') setTextInput(null); }}
+            onBlur={handleTextSubmit}
+            placeholder="Type label…"
+            className="bg-white border-2 border-primary rounded px-2 py-1 text-[13px] outline-none shadow-card-lifted min-w-[120px]"
+          />
+        </div>
+      )}
+
+      {/* Clear button */}
+      {annotations.length > 0 && !isActive && (
+        <button
+          onClick={onClear}
+          className="absolute top-2 right-2 z-20 h-6 px-2 rounded-pill bg-surface/90 text-[11px] font-semibold text-text-2 hover:text-danger hover:bg-surface transition-colors shadow-card flex items-center gap-1"
+        >
+          <I.X size={10} /> Clear
+        </button>
+      )}
+    </div>
+  );
+};
 
 // ─── StepCard ──────────────────────────────────────────────────────────
 export const StepCard: React.FC<{
@@ -20,6 +289,7 @@ export const StepCard: React.FC<{
   onFocus?: () => void;
 }> = ({ step, hue = 244, onEdit, onAnnotate, onDelete, focused, onFocus }) => {
   const session = useStudioStore(state => state.session);
+  const updateStep = useStudioStore(state => state.updateStep);
   const text = step.textOverride || step.generatedText || '';
   return (
     <article
@@ -47,16 +317,30 @@ export const StepCard: React.FC<{
         )}
       </div>
 
-      <ScreenshotPlaceholder step={step} session={session} hue={hue} className="mb-5" />
+      <div className="relative mb-5">
+        <ScreenshotPlaceholder step={step} session={session} mode="blueprint" hue={hue} />
+        <AnnotationCanvas
+          step={step}
+          containerRef={React.useRef<HTMLDivElement>(null)}
+          onSave={(anno) => {
+            const existing = step.annotations || [];
+            updateStep(step.id, { annotations: [...existing, anno] });
+          }}
+          onClear={() => updateStep(step.id, { annotations: [] })}
+        />
+      </div>
 
       <p className="text-[16px] leading-[1.65] text-text relative z-10" style={{ textWrap: 'pretty' as any }}>
         {text}
       </p>
 
-      <div className="mt-4 flex items-center gap-3 relative z-10">
-        <Badge tone="neutral" size="sm" icon={I.Globe}>
-          {(step.url || '').replace(/^https?:\/\//,'').split('/')[0]}
-        </Badge>
+      <div className="mt-4 flex items-center gap-2 relative z-10">
+        <div className="flex items-center bg-surface-2 rounded-pill pr-1">
+          <Badge tone="neutral" size="sm" icon={I.Globe} className="bg-transparent border-none">
+            {(step.url || '').replace(/^https?:\/\//,'')}
+          </Badge>
+          <CopyLinkButton url={step.url || ''} />
+        </div>
         {step.textOverride && (
           <Badge tone="primary" size="sm">edited</Badge>
         )}
@@ -118,7 +402,15 @@ export const SummaryCallout: React.FC<{ session: SessionEnvelope }> = ({ session
 };
 
 // ─── SessionCard ───────────────────────────────────────────────────────
-export const SessionCard: React.FC<{ session: SessionEnvelope; onClick?: () => void }> = ({ session, onClick }) => {
+export const SessionCard: React.FC<{ 
+  session: SessionEnvelope; 
+  onClick?: () => void;
+  onRename?: (newTitle: string) => void;
+  onDelete?: () => void;
+}> = ({ session, onClick, onRename, onDelete }) => {
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  
   // @ts-ignore
   const hue = session._hue ?? 244;
   
@@ -137,6 +429,32 @@ export const SessionCard: React.FC<{ session: SessionEnvelope; onClick?: () => v
     if (diff < 86400) return `${Math.round(diff/3600)}h ago`;
     if (diff < 604800) return `${Math.round(diff/86400)}d ago`;
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [menuOpen]);
+
+  const handleRename = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    const newTitle = prompt('Enter new session title:', session.aiOutputs.title || undefined);
+    if (newTitle && newTitle.trim()) {
+      onRename?.(newTitle.trim());
+    }
+  };
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    onDelete?.();
   };
 
   return (
@@ -184,9 +502,36 @@ export const SessionCard: React.FC<{ session: SessionEnvelope; onClick?: () => v
             <Avatar name="Maya Chen" size={22} hue={198} />
             <Avatar name="Diego Ramos" size={22} hue={22} />
           </div>
-          <span className="text-[11px] text-text-3 inline-flex items-center gap-1">
-            <I.Eye size={12} strokeWidth={2} /> {12 + ((session.sessionId.charCodeAt(6) || 0) % 80)}
-          </span>
+          
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-text-3 inline-flex items-center gap-1">
+              <I.Eye size={12} strokeWidth={2} /> {12 + ((session.sessionId.charCodeAt(6) || 0) % 80)}
+            </span>
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+                className="w-6 h-6 rounded-full inline-flex items-center justify-center text-text-3 hover:text-text hover:bg-surface-2 transition-colors"
+              >
+                <I.MoreHorizontal size={15} />
+              </button>
+              {menuOpen && (
+                <div className="absolute bottom-full right-0 mb-1 z-50 min-w-[120px] bg-surface border border-border rounded-sm shadow-card py-1 overflow-hidden">
+                  <button
+                    onClick={handleRename}
+                    className="w-full px-3 py-1.5 text-left text-[13px] text-text hover:bg-surface-2 transition-colors"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="w-full px-3 py-1.5 text-left text-[13px] text-danger hover:bg-surface-2 transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -195,17 +540,22 @@ export const SessionCard: React.FC<{ session: SessionEnvelope; onClick?: () => v
 
 // ─── FloatingToolbar ───────────────────────────────────────────────────
 export const FloatingToolbar: React.FC = () => {
-  const { isToolbarVisible, activeTool, setActiveTool } = useStudioStore();
+  const isToolbarVisible = useStudioStore(state => state.isToolbarVisible);
+  const activeTool = useStudioStore(state => state.activeTool);
+  const setActiveTool = useStudioStore(state => state.setActiveTool);
+  const activeView = useStudioStore(state => state.activeView);
   
-  if (!isToolbarVisible) return null;
+  if (!isToolbarVisible || activeView !== 'sop') return null;
 
   const tools = [
     { id: 'cursor',    icon: I.Cursor,     label: 'Select (V)', key: 'v' },
     { id: 'spotlight', icon: I.Crosshair,  label: 'Spotlight (S)', key: 's' },
     { id: 'highlight', icon: I.Highlighter, label: 'Highlight (B)', key: 'b' },
+    { id: 'circle', icon: I.Circle, label: 'Circle (C)', key: 'c' },
     { id: 'text',      icon: I.Type,        label: 'Text (T)', key: 't' },
     { id: 'zoom',      icon: I.ZoomIn,      label: 'Zoom (Z)', key: 'z' },
     { id: 'move',      icon: I.Move,        label: 'Move canvas', key: 'm' },
+    { id: 'blur', icon: I.EyeOff, label: 'Blur / Redact (R)', key: 'r' },
   ];
 
   return (
@@ -232,53 +582,8 @@ export const FloatingToolbar: React.FC = () => {
   );
 };
 
-// ─── StudioTopBar ──────────────────────────────────────────────────────
-export const StudioTopBar: React.FC = () => {
-  const { navigate, activeView, setActiveView } = useStudioStore();
-  return (
-    <header className="h-14 bg-surface border-b border-border flex items-center px-4 gap-4 z-40 relative">
-      <button 
-        onClick={() => navigate('home')}
-        className="w-9 h-9 rounded-full hover:bg-surface-2 inline-flex items-center justify-center transition-colors text-text-2 hover:text-text"
-      >
-        <I.ArrowLeft size={18} strokeWidth={2.2} />
-      </button>
-
-      <div className="w-px h-6 bg-border mx-1" />
-
-      <div className="flex items-center bg-surface-2 rounded-pill p-0.5 relative">
-        <button 
-          onClick={() => setActiveView('sop')}
-          className={cn('relative px-4 h-8 rounded-pill text-[12.5px] font-semibold transition-colors', activeView==='sop' ? 'text-text' : 'text-text-2')}
-        >
-          {activeView==='sop' && <motion.span layoutId="view-bg" className="absolute inset-0 bg-white rounded-pill shadow-sm" />}
-          <span className="relative inline-flex items-center gap-1.5">
-            <I.FileText size={14} /> SOP View
-          </span>
-        </button>
-        <button 
-          onClick={() => setActiveView('video')}
-          className={cn('relative px-4 h-8 rounded-pill text-[12.5px] font-semibold transition-colors', activeView==='video' ? 'text-text' : 'text-text-2')}
-        >
-          {activeView==='video' && <motion.span layoutId="view-bg" className="absolute inset-0 bg-white rounded-pill shadow-sm" />}
-          <span className="relative inline-flex items-center gap-1.5">
-            <I.Play size={14} /> Video Preview
-          </span>
-        </button>
-      </div>
-
-      <div className="ml-auto flex items-center gap-3">
-        <div className="flex -space-x-1.5 mr-2">
-          <Avatar name="Kartik Upadhyay" size={24} />
-          <div className="w-6 h-6 rounded-full border-2 border-white bg-surface-2 flex items-center justify-center text-[10px] font-bold text-text-3">+2</div>
-        </div>
-        <Button variant="ghost" size="sm" icon={I.History}>Revisions</Button>
-        <Button variant="ghost" size="sm" icon={I.Settings}>Settings</Button>
-        <Button variant="primary" size="sm" icon={I.Share2}>Publish</Button>
-      </div>
-    </header>
-  );
-};
+export * from './StudioHeader';
+export * from './SidebarControls';
 
 // ─── ShareHeader ──────────────────────────────────────────────────────
 export const ShareHeader: React.FC<{ session: SessionEnvelope }> = ({ session }) => {

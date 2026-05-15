@@ -7,17 +7,17 @@
       "enabled": true,
       "head_sampling_rate": 1,
       "persist": true,
-      "invocation_logs": true
+      "invocation_logs": true,
     },
     "traces": {
       "enabled": false,
       "persist": true,
-      "head_sampling_rate": 1
-    }
+      "head_sampling_rate": 1,
+    },
   },
   "vars": {
     "ENABLE_TEXT_GEN": "true",
-    "ENABLE_TTS": "true"
+    "ENABLE_TTS": "false",
   },
   "main": "src/index.ts",
   "compatibility_date": "2026-05-03",
@@ -28,21 +28,21 @@
         "queue": "studiobase-pipeline",
         "max_batch_size": 5,
         "max_batch_timeout": 30,
-        "max_retries": 3
-      }
-    ]
+        "max_retries": 3,
+      },
+    ],
   },
   "r2_buckets": [
     {
       "binding": "R2",
-      "bucket_name": "studiobase-assets"
-    }
+      "bucket_name": "studiobase-assets",
+    },
   ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "studiobase-db",
-      "database_id": "a22b148a-c590-4050-991a-7dfd162a5d08"
-    }
-  ]
+      "database_id": "a22b148a-c590-4050-991a-7dfd162a5d08",
+    },
+  ],
 }

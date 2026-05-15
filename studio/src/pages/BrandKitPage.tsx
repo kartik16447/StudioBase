@@ -5,6 +5,7 @@ import {
   cn, Badge, SectionLabel, Button, IconButton, FieldShell, Card 
 } from '../components/ui';
 import { ComingSoon } from '../components/studio/Panels';
+import { useStudioStore } from '../store/useStudioStore';
 
 const BRAND_TABS = [
   { id: 'logos', label: 'Logos', icon: I.Image, phase: 2 },
@@ -87,21 +88,52 @@ export const BrandKitPage: React.FC = () => {
 };
 
 const LogosTab: React.FC = () => {
-  const [primary, setPrimary] = useState('#5E5CE6');
+  const brand = useStudioStore(state => state.brand);
+  const setBrand = useStudioStore(state => state.setBrand);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
   return (
     <div className="grid grid-cols-3 gap-6">
       <div className="col-span-2">
         <SectionLabel>Workspace logo</SectionLabel>
-        <div className="grad-border h-56 flex items-center justify-center mb-6">
-          <div className="text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-primary-light flex items-center justify-center mb-3">
-              <I.Upload size={20} className="text-primary" />
-            </div>
-            <div className="text-[14px] font-semibold text-text mb-1">Drag & drop your logo</div>
-            <div className="text-[12px] text-text-2">SVG or PNG, transparent background recommended</div>
-            <Button variant="ghost" size="sm" className="mt-4">Browse files</Button>
+        
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setBrand({ logoUrl: URL.createObjectURL(file) });
+          }}
+        />
+
+        {brand.logoUrl ? (
+          <div className="relative h-56 flex items-center justify-center grad-border mb-6">
+            <img src={brand.logoUrl} className="max-h-36 max-w-xs object-contain" />
+            <button
+              onClick={(e) => { e.stopPropagation(); setBrand({ logoUrl: null }); }}
+              className="absolute top-3 right-3 w-7 h-7 rounded-full bg-surface flex items-center justify-center shadow-card hover:text-danger"
+            >
+              <I.X size={14} />
+            </button>
           </div>
-        </div>
+        ) : (
+          <div 
+            className="grad-border h-56 flex items-center justify-center mb-6 cursor-pointer hover:bg-surface-2 transition-colors"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <div className="text-center">
+              <div className="w-12 h-12 mx-auto rounded-full bg-primary-light flex items-center justify-center mb-3">
+                <I.Upload size={20} className="text-primary" />
+              </div>
+              <div className="text-[14px] font-semibold text-text mb-1">Drag & drop your logo</div>
+              <div className="text-[12px] text-text-2">SVG or PNG, transparent background recommended</div>
+              <Button variant="ghost" size="sm" className="mt-4">Browse files</Button>
+            </div>
+          </div>
+        )}
 
         <SectionLabel hint="Used on intro/outro & exports">Logo variants</SectionLabel>
         <div className="grid grid-cols-3 gap-3">
@@ -115,7 +147,7 @@ const LogosTab: React.FC = () => {
                   border: '1px solid rgba(0,0,0,0.06)',
                 }}
               >
-                {i === 2 ? <span style={{ color: primary }}>S</span> : <span>Studio<span style={{ color: primary }}>Base</span></span>}
+                {i === 2 ? <span style={{ color: brand.primaryColor }}>S</span> : <span>Studio<span style={{ color: brand.primaryColor }}>Base</span></span>}
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-[12.5px] font-semibold">{v}</span>
@@ -133,25 +165,25 @@ const LogosTab: React.FC = () => {
             {['#5E5CE6','#0A84FF','#30D158','#FF9F0A','#FF453A','#BF5AF2'].map(c => (
               <button
                 key={c}
-                onClick={() => setPrimary(c)}
-                className={cn('aspect-square rounded-img relative transition-transform hover:scale-105', primary === c && 'ring-2 ring-offset-2 ring-text')}
+                onClick={() => setBrand({ primaryColor: c })}
+                className={cn('aspect-square rounded-img relative transition-transform hover:scale-105', brand.primaryColor === c && 'ring-2 ring-offset-2 ring-text')}
                 style={{ background: c }}
               >
-                {primary === c && <I.Check size={18} className="text-white absolute inset-0 m-auto" strokeWidth={3} />}
+                {brand.primaryColor === c && <I.Check size={18} className="text-white absolute inset-0 m-auto" strokeWidth={3} />}
               </button>
             ))}
           </div>
           <FieldShell icon={I.Type}>
             <span className="text-text-3 text-[11px] font-mono uppercase">HEX</span>
-            <input value={primary} onChange={e => setPrimary(e.target.value)} className="flex-1 bg-transparent outline-none text-sm font-mono" />
-            <span className="w-5 h-5 rounded" style={{ background: primary }} />
+            <input value={brand.primaryColor} onChange={e => setBrand({ primaryColor: e.target.value })} className="flex-1 bg-transparent outline-none text-sm font-mono" />
+            <span className="w-5 h-5 rounded" style={{ background: brand.primaryColor }} />
           </FieldShell>
         </Card>
 
         <SectionLabel className="mt-6">Font</SectionLabel>
         <Card className="p-5">
           <div className="text-text-2 text-[11px] mb-1">Currently using</div>
-          <div className="text-[22px] font-semibold tracking-tight">SF Pro Display</div>
+          <div className="text-[22px] font-semibold tracking-tight">{brand.font}</div>
           <div className="text-[13px] text-text-2 mt-1">A versatile sans-serif with high legibility at small sizes.</div>
           <Button variant="ghost" size="sm" className="mt-4" iconRight={I.ChevronDown}>Change font</Button>
         </Card>

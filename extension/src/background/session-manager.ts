@@ -12,20 +12,25 @@ export interface Session {
   endedAt?: string;
   status: 'recording' | 'paused' | 'stopped';
   events: CaptureEvent[];
+  videoKey?: string | null;
 }
 
 // ─── IndexedDB Helpers ───────────────────────────────────────
 
 const DB_NAME = 'studiobase';
-const STORE_NAME = 'screenshots';
+const SCREENSHOTS_STORE = 'screenshots';
+const CHUNKS_STORE = 'chunks';
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(DB_NAME, 2); // Bump version to add chunks store
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
+      if (!db.objectStoreNames.contains(SCREENSHOTS_STORE)) {
+        db.createObjectStore(SCREENSHOTS_STORE);
+      }
+      if (!db.objectStoreNames.contains(CHUNKS_STORE)) {
+        db.createObjectStore(CHUNKS_STORE);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -36,9 +41,20 @@ function openDB(): Promise<IDBDatabase> {
 export async function saveScreenshot(sessionId: string, stepIndex: number, blob: Blob): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
+    const transaction = db.transaction(SCREENSHOTS_STORE, 'readwrite');
+    const store = transaction.objectStore(SCREENSHOTS_STORE);
     const request = store.put(blob, `${sessionId}_${stepIndex}`);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function saveChunk(sessionId: string, index: number, blob: Blob): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(CHUNKS_STORE, 'readwrite');
+    const store = transaction.objectStore(CHUNKS_STORE);
+    const request = store.put(blob, `${sessionId}_${index}`);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
@@ -47,9 +63,8 @@ export async function saveScreenshot(sessionId: string, stepIndex: number, blob:
 export async function getScreenshots(sessionId: string): Promise<{ stepIndex: number, blob: Blob }[]> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    // Use bound range to find all keys starting with {sessionId}_
+    const transaction = db.transaction(SCREENSHOTS_STORE, 'readonly');
+    const store = transaction.objectStore(SCREENSHOTS_STORE);
     const range = IDBKeyRange.bound(`${sessionId}_`, `${sessionId}_\uffff`);
     const request = store.openCursor(range);
     const results: { stepIndex: number, blob: Blob }[] = [];
@@ -67,6 +82,48 @@ export async function getScreenshots(sessionId: string): Promise<{ stepIndex: nu
     };
     request.onerror = () => reject(request.error);
   });
+}
+
+export async function getChunks(sessionId: string): Promise<{ index: number, blob: Blob }[]> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(CHUNKS_STORE, 'readonly');
+    const store = transaction.objectStore(CHUNKS_STORE);
+    const range = IDBKeyRange.bound(`${sessionId}_`, `${sessionId}_\uffff`);
+    const request = store.openCursor(range);
+    const results: { index: number, blob: Blob }[] = [];
+
+    request.onsuccess = (event: any) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        const key = cursor.key as string;
+        const indexStr = key.substring(key.lastIndexOf('_') + 1);
+        results.push({ index: parseInt(indexStr, 10), blob: cursor.value });
+        cursor.continue();
+      } else {
+        resolve(results.sort((a, b) => a.index - b.index));
+      }
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function clearSessionData(sessionId: string): Promise<void> {
+  const db = await openDB();
+  const stores = [SCREENSHOTS_STORE, CHUNKS_STORE];
+  for (const s of stores) {
+    const tx = db.transaction(s, 'readwrite');
+    const store = tx.objectStore(s);
+    const range = IDBKeyRange.bound(`${sessionId}_`, `${sessionId}_\uffff`);
+    const request = store.openCursor(range);
+    request.onsuccess = (event: any) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        store.delete(cursor.key);
+        cursor.continue();
+      }
+    };
+  }
 }
 
 // ─── Session Lifecycle ───────────────────────────────────────
@@ -153,4 +210,14 @@ export async function recoverSession(): Promise<Session | null> {
     return sb_sessions as Session;
   }
   return null;
+}
+
+/**
+ * Aborts and removes the current session from session storage.
+ */
+export async function abortSession(sessionId: string): Promise<void> {
+  const { sb_sessions } = await chrome.storage.session.get('sb_sessions') as { sb_sessions?: Session };
+  if (sb_sessions && sb_sessions.sessionId === sessionId) {
+    await chrome.storage.session.remove('sb_sessions');
+  }
 }

@@ -132,7 +132,7 @@ export interface TemplateMeta {
 // Smart screenshot annotations — arrows, boxes, text callouts
 // Used in SOP view and exported docs
 
-export type AnnotationShape = "arrow" | "box" | "circle" | "text";
+export type AnnotationShape = "arrow" | "box" | "circle" | "text" | "blur";
 
 export interface Annotation {
   id: string;
@@ -240,6 +240,9 @@ export interface Step {
   courseware?: CoursewareMeta;
   template?: TemplateMeta;
   overlay?: OverlayMeta;
+
+  // Metadata captured at interaction time
+  data?: Record<string, any>;
 }
 
 // ─── Session Envelope ───────────────────────────────────────
@@ -296,5 +299,6 @@ export interface SessionEnvelope {
   // Trupeer-equivalent — optional, populated post-pipeline
   brand?: BrandConfig;              // workspace branding applied at render time
   avatar?: AvatarConfig;            // AI avatar config if user requested it
+  videoKey?: string | null;         // R2 key for the recorded .webm video file
   activeLanguage?: string;          // which translation is currently active ("en" default)
 }

@@ -68,7 +68,7 @@ export const AIShimmer: React.FC<AIShimmerProps> = ({
           />
         )}
       </AnimatePresence>
-      <div className="relative z-[1]">{children}</div>
+      <div className="relative z-[1] h-full w-full">{children}</div>
     </div>
   );
 };

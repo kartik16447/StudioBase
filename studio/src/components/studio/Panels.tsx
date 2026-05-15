@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../../store/useStudioStore';
 import { I } from '../icons';
 import { 
-  cn, Badge, IconButton, StepNumber, SectionLabel, FieldShell, AIShimmer, Toggle, Button, ScreenshotPlaceholder
+  cn, Badge, IconButton, StepNumber, SectionLabel, FieldShell, AIShimmer, Toggle, Button, ScreenshotPlaceholder, Tooltip
 } from '../ui';
 import type { Step } from '../../../../shared/types/session';
 
@@ -10,7 +11,14 @@ import type { Step } from '../../../../shared/types/session';
 // ─── Script panel ──────────────────────────────────────────────────────
 // Per-step text editor — list with selectable rows, edit inline.
 export const ScriptPanel: React.FC = () => {
-  const { session, focusedStepId, setFocusStep, currentStepIndex, setStepIndex, updateStep, triggerScroll, scrollTrigger } = useStudioStore();
+  const session = useStudioStore(state => state.session);
+  const focusedStepId = useStudioStore(state => state.focusedStepId);
+  const setFocusStep = useStudioStore(state => state.setFocusStep);
+  const currentStepIndex = useStudioStore(state => state.focusedStepIndex);
+  const setStepIndex = useStudioStore(state => state.setStepIndex);
+  const updateStep = useStudioStore(state => state.updateStep);
+  const triggerScroll = useStudioStore(state => state.triggerScroll);
+  const scrollTrigger = useStudioStore(state => state.scrollTrigger);
   
   const [tone, setTone] = useState('Friendly & concise');
   const [search, setSearch] = useState('');
@@ -72,7 +80,7 @@ export const ScriptPanel: React.FC = () => {
 
       {/* Step list — wrapped in AIShimmer for processing state */}
       <AIShimmer isActive={isGenerating} className="flex-1 min-h-0">
-        <div className="h-full scroll-y px-3 py-3 space-y-1.5">
+        <div className="h-full scroll-y p-2 space-y-1">
           {steps.map((step, idx) => (
             <ScriptStepRow 
               key={step.id} 
@@ -89,15 +97,23 @@ export const ScriptPanel: React.FC = () => {
             />
           ))}
           {steps.length === 0 && (
-            <div className="text-center text-text-3 text-sm py-12">No steps match your search.</div>
+            <div className="text-center text-text-3 text-sm py-12 px-6">
+              No steps match your search. Try different keywords.
+            </div>
           )}
         </div>
       </AIShimmer>
 
       {/* Footer — bulk actions */}
-      <div className="px-5 py-3 border-t border-border flex items-center justify-between">
-        <span className="text-[12px] text-text-2">{steps.length} of {session.steps.length} steps</span>
-        <Button variant="ghost" size="sm" icon={I.Languages}>Translate</Button>
+      <div className="px-5 py-3 border-t border-border flex items-center justify-between shrink-0 bg-surface/80 backdrop-blur-sm">
+        <span className="text-[12px] text-text-3 font-medium">
+          {steps.length} of {session.steps.length} steps
+        </span>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" icon={I.Languages} className="h-8 text-[12px]">
+            Translate
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -113,48 +129,72 @@ const ScriptStepRow: React.FC<{
 }> = ({ step, active, isPlaying, onClick, onUpdate, innerRef }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(step.textOverride || step.generatedText || '');
+  const deleteStep = useStudioStore(state => state.deleteStep);
 
   return (
     <div
       ref={innerRef}
       onClick={onClick}
       className={cn(
-        'rounded-sm p-3 cursor-pointer transition-all border group relative',
-        active ? 'bg-primary-light border-primary/30' : 'bg-transparent border-transparent hover:bg-surface-2',
-        isPlaying && !active && 'ring-1 ring-primary/20'
+        'group relative rounded-sm p-4 transition-all duration-200 cursor-pointer border-l-[3px]',
+        active 
+          ? 'bg-primary-light border-primary shadow-sm ring-1 ring-primary/5' 
+          : 'bg-transparent border-transparent hover:bg-surface-2 hover:border-text-3/30',
+        isPlaying && !active && 'bg-surface-2 ring-1 ring-primary/10'
       )}
     >
-      <div className="flex items-start gap-3">
-        <div className="relative">
-          <StepNumber n={step.sequence} size="badge" />
+      <div className="flex items-start gap-4">
+        <div className="relative shrink-0 pt-0.5">
+          <StepNumber n={step.sequence} size="badge" className={cn(
+            'transition-transform duration-200',
+            active ? 'scale-110 shadow-sm' : 'bg-surface-3 text-text-3'
+          )} />
           {isPlaying && (
-            <span className="absolute -right-1 -top-1 w-2.5 h-2.5 bg-primary rounded-full ring-2 ring-white animate-pulse" />
+            <span className="absolute -right-0.5 -top-0.5 w-2.5 h-2.5 bg-primary rounded-full ring-2 ring-white animate-pulse" />
           )}
         </div>
+        
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-1">
-            <span className="text-[10.5px] font-bold tracking-wider uppercase text-text-3">{step.action}</span>
-            {step.elementText && (
-              <span className="text-[11px] text-text-2 font-mono truncate">· {step.elementText}</span>
+          <header className="flex items-center gap-2 mb-1.5 h-5">
+            <span className={cn(
+              "text-[10px] font-black uppercase tracking-widest px-1.5 rounded-[4px] leading-relaxed",
+              active ? "bg-primary text-white" : "bg-text-3/10 text-text-3"
+            )}>
+              {step.data?.context === 'desktop' ? 'desktop' : step.action}
+            </span>
+            <span className="text-[11px] text-text-2 font-mono truncate max-w-[140px] opacity-70">
+              · {step.data?.context === 'desktop' ? '◎ Desktop Activity' : (step.elementText || 'Browser Tab')}
+            </span>
+            {step.textOverride && (
+              <div className="w-1 h-1 rounded-full bg-primary ml-auto" title="Manually edited" />
             )}
-            {step.textOverride && <Badge tone="primary" size="sm" className="ml-auto">edited</Badge>}
-          </div>
+          </header>
           
           {isEditing ? (
             <textarea
               autoFocus
               value={text}
               onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  setIsEditing(false);
+                  onUpdate(text);
+                }
+              }}
               onBlur={() => {
                 setIsEditing(false);
                 onUpdate(text);
               }}
-              className="w-full bg-white border border-primary rounded-md p-2 text-[13px] text-text outline-none resize-none"
+              className="w-full bg-white border border-primary rounded-md p-3 text-[13.5px] text-text outline-none shadow-card-lifted resize-none leading-relaxed"
               rows={3}
             />
           ) : (
             <p 
-              className="text-[13px] text-text leading-snug line-clamp-3 group-hover:line-clamp-none transition-all" 
+              className={cn(
+                "text-[13.5px] leading-[1.6] transition-all",
+                text ? "text-text" : "text-text-3 italic font-medium"
+              )}
               style={{ textWrap: 'pretty' as any }}
               onClick={(e) => {
                 if (active) {
@@ -163,15 +203,39 @@ const ScriptStepRow: React.FC<{
                 }
               }}
             >
-              {text}
+              {text || 'Click to add a voiceover script for this step...'}
             </p>
           )}
         </div>
       </div>
       
       {active && !isEditing && (
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-          <IconButton icon={I.Edit2} label="Edit text" size={28} onClick={() => setIsEditing(true)} />
+        <div className="absolute top-1/2 -translate-y-1/2 right-3 flex items-center gap-0.5 bg-white border border-border shadow-card-lifted rounded-pill p-1 opacity-0 group-hover:opacity-100 transition-all scale-95 group-hover:scale-100 origin-right z-20">
+          <Tooltip content="Edit Script">
+            <IconButton 
+              icon={I.Edit2} 
+              label="Edit" 
+              size={28} 
+              onClick={(e) => { e.stopPropagation(); setIsEditing(true); }} 
+            />
+          </Tooltip>
+          <Tooltip content="AI Regenerate">
+            <IconButton 
+              icon={I.Sparkles} 
+              label="AI" 
+              size={28} 
+              className="text-primary hover:text-primary-700" 
+            />
+          </Tooltip>
+          <Tooltip content="Delete Step">
+            <IconButton 
+              icon={I.Trash2} 
+              label="Delete" 
+              size={28} 
+              className="hover:text-danger hover:bg-danger/10" 
+              onClick={(e) => { e.stopPropagation(); deleteStep(step.id); }} 
+            />
+          </Tooltip>
         </div>
       )}
     </div>
@@ -179,114 +243,171 @@ const ScriptStepRow: React.FC<{
 };
 
 // ─── Brand panel ───────────────────────────────────────────────────────
-export const BrandPanel: React.FC = () => {
-  const [primaryColor, setPrimaryColor] = useState('#5E5CE6');
-  const [font, setFont] = useState('SF Pro');
-  const [showIntro, setShowIntro] = useState(true);
-  const [showOutro, setShowOutro] = useState(false);
-  const [watermark, setWatermark] = useState('StudioBase');
-  const swatches = ['#5E5CE6', '#0A84FF', '#30D158', '#FF9F0A', '#FF453A', '#BF5AF2', '#FF375F', '#1D1D1F'];
-  const fonts = ['SF Pro', 'Inter', 'Geist', 'Söhne', 'Söhne Mono', 'Helvetica Neue'];
+  export const BrandPanel: React.FC = () => {
+  const brand = useStudioStore(state => state.brand);
+  const setBrand = useStudioStore(state => state.setBrand);
+    const [saved, setSaved] = React.useState(false);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  return (
-    <div className="h-full scroll-y px-5 py-5 space-y-7">
-      <section>
-        <SectionLabel hint="PNG or SVG, up to 2 MB">Workspace logo</SectionLabel>
-        <div className="grad-border h-24 flex items-center justify-center">
-          <div className="text-center">
-            <I.Upload size={20} className="text-primary mx-auto mb-1" strokeWidth={2} />
-            <div className="text-[12.5px] font-medium text-text">Drop your logo</div>
-            <div className="text-[11px] text-text-3">or click to browse</div>
-          </div>
-        </div>
-      </section>
+    const swatches = ['#5E5CE6','#0A84FF','#30D158','#FF9F0A','#FF453A','#BF5AF2','#FF375F','#1D1D1F'];
+    const fonts = ['Inter','SF Pro','Geist','Söhne','Helvetica Neue'];
 
-      <section>
-        <SectionLabel>Primary color</SectionLabel>
-        <div className="flex items-center gap-2 mb-3">
-          {swatches.map(c => (
-            <button
-              key={c}
-              onClick={() => setPrimaryColor(c)}
-              className={cn(
-                'relative w-8 h-8 rounded-full transition-transform hover:scale-110',
-                primaryColor === c && 'ring-2 ring-offset-2 ring-text',
-              )}
-              style={{ background: c, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.1)' }}
+    const update = (updates: Parameters<typeof setBrand>[0]) => {
+      setBrand(updates);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    };
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      update({ logoUrl: url });
+    };
+
+    return (
+      <div className="h-full scroll-y px-5 py-5 space-y-7">
+
+        {/* Saved indicator */}
+        <AnimatePresence>
+          {saved && (
+            <motion.div
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-1.5 text-[12px] text-green-600 font-medium"
             >
-              {primaryColor === c && (
-                <I.Check size={14} className="text-white absolute inset-0 m-auto" strokeWidth={3} />
-              )}
-            </button>
-          ))}
-        </div>
-        <FieldShell icon={I.Type}>
-          <span className="text-text-3 text-xs font-mono">HEX</span>
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+              Applied live
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Logo */}
+        <section>
+          <SectionLabel hint="PNG or SVG, up to 2 MB">Workspace logo</SectionLabel>
           <input
-            value={primaryColor}
-            onChange={e => setPrimaryColor(e.target.value)}
-            className="flex-1 bg-transparent outline-none text-sm font-mono"
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileChange}
           />
-          <span className="w-5 h-5 rounded" style={{ background: primaryColor }} />
-        </FieldShell>
-      </section>
-
-      <section>
-        <SectionLabel>Font family</SectionLabel>
-        <div className="space-y-1.5">
-          {fonts.map(f => (
-            <button
-              key={f}
-              onClick={() => setFont(f)}
-              className={cn(
-                'w-full flex items-center justify-between p-3 rounded-sm transition-colors text-left',
-                font === f ? 'bg-primary-light ring-1 ring-primary/40' : 'bg-surface-2 hover:bg-[#E6E6EC]',
-              )}
+          {brand.logoUrl ? (
+            <div className="relative grad-border h-24 flex items-center justify-center">
+              <img src={brand.logoUrl} className="max-h-14 max-w-[160px] object-contain" />
+              <button
+                onClick={() => update({ logoUrl: null })}
+                className="absolute top-2 right-2 w-6 h-6 rounded-full bg-surface-2 flex items-center justify-center text-text-2 hover:text-danger transition-colors"
+              >
+                <I.X size={12} />
+              </button>
+            </div>
+          ) : (
+            <div
+              className="grad-border h-24 flex items-center justify-center cursor-pointer hover:bg-surface-2 transition-colors"
+              onClick={() => fileInputRef.current?.click()}
             >
-              <div>
-                <div className="text-[13.5px] font-semibold text-text">{f}</div>
-                <div className="text-[18px] text-text-2 leading-tight mt-0.5">The quick brown fox</div>
+              <div className="text-center">
+                <I.Upload size={20} className="text-primary mx-auto mb-1" strokeWidth={2} />
+                <div className="text-[12.5px] font-medium text-text">Drop your logo</div>
+                <div className="text-[11px] text-text-3">or click to browse</div>
               </div>
-              {font === f && <I.Check size={16} className="text-primary" />}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section>
-        <SectionLabel>Slides</SectionLabel>
-        <div className="space-y-2">
-          <div className="flex items-center justify-between p-3 rounded-sm bg-surface-2">
-            <div>
-              <div className="text-[13.5px] font-semibold text-text">Branded intro slide</div>
-              <div className="text-[11.5px] text-text-2">Show before step 1</div>
             </div>
-            <Toggle checked={showIntro} onChange={setShowIntro} />
-          </div>
-          <div className="flex items-center justify-between p-3 rounded-sm bg-surface-2">
-            <div>
-              <div className="text-[13.5px] font-semibold text-text">Outro slide</div>
-              <div className="text-[11.5px] text-text-2">Closing card with logo + CTA</div>
-            </div>
-            <Toggle checked={showOutro} onChange={setShowOutro} />
-          </div>
-        </div>
-      </section>
+          )}
+        </section>
 
-      <section>
-        <SectionLabel>Watermark</SectionLabel>
-        <FieldShell icon={I.Type}>
-          <input
-            value={watermark}
-            onChange={e => setWatermark(e.target.value)}
-            placeholder="Watermark text"
-            className="flex-1 bg-transparent outline-none text-sm"
-          />
-        </FieldShell>
-      </section>
-    </div>
-  );
-};
+        {/* Primary color */}
+        <section>
+          <SectionLabel>Primary color</SectionLabel>
+          <div className="flex items-center gap-2 mb-3">
+            {swatches.map(c => (
+              <button
+                key={c}
+                onClick={() => update({ primaryColor: c })}
+                className={cn(
+                  'relative w-8 h-8 rounded-full transition-transform hover:scale-110',
+                  brand.primaryColor === c && 'ring-2 ring-offset-2 ring-text',
+                )}
+                style={{ background: c, boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.1)' }}
+              >
+                {brand.primaryColor === c && (
+                  <I.Check size={14} className="text-white absolute inset-0 m-auto" strokeWidth={3} />
+                )}
+              </button>
+            ))}
+          </div>
+          <FieldShell icon={I.Type}>
+            <span className="text-text-3 text-xs font-mono">HEX</span>
+            <input
+              value={brand.primaryColor}
+              onChange={e => update({ primaryColor: e.target.value })}
+              className="flex-1 bg-transparent outline-none text-sm font-mono"
+            />
+            <span className="w-5 h-5 rounded" style={{ background: brand.primaryColor }} />
+          </FieldShell>
+        </section>
+
+        {/* Font */}
+        <section>
+          <SectionLabel>Font family</SectionLabel>
+          <div className="space-y-1.5">
+            {fonts.map(f => (
+              <button
+                key={f}
+                onClick={() => update({ font: f })}
+                className={cn(
+                  'w-full flex items-center justify-between p-3 rounded-sm transition-colors text-left',
+                  brand.font === f ? 'bg-primary-light ring-1 ring-primary/40' : 'bg-surface-2 hover:bg-[#E6E6EC]',
+                )}
+              >
+                <div>
+                  <div className="text-[13.5px] font-semibold text-text">{f}</div>
+                  <div className="text-[18px] text-text-2 leading-tight mt-0.5">The quick brown fox</div>
+                </div>
+                {brand.font === f && <I.Check size={16} className="text-primary" />}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Slides */}
+        <section>
+          <SectionLabel>Slides</SectionLabel>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between p-3 rounded-sm bg-surface-2">
+              <div>
+                <div className="text-[13.5px] font-semibold text-text">Branded intro slide</div>
+                <div className="text-[11.5px] text-text-2">Show before step 1</div>
+              </div>
+              <Toggle checked={brand.showIntro} onChange={v => update({ showIntro: v })} />
+            </div>
+            <div className="flex items-center justify-between p-3 rounded-sm bg-surface-2">
+              <div>
+                <div className="text-[13.5px] font-semibold text-text">Outro slide</div>
+                <div className="text-[11.5px] text-text-2">Closing card with logo + CTA</div>
+              </div>
+              <Toggle checked={brand.showOutro} onChange={v => update({ showOutro: v })} />
+            </div>
+          </div>
+        </section>
+
+        {/* Watermark */}
+        <section>
+          <SectionLabel>Watermark</SectionLabel>
+          <FieldShell icon={I.Type}>
+            <input
+              value={brand.watermark}
+              onChange={e => update({ watermark: e.target.value })}
+              placeholder="Watermark text"
+              className="flex-1 bg-transparent outline-none text-sm"
+            />
+          </FieldShell>
+        </section>
+
+      </div>
+    );
+  };
 
 // ─── Chapters panel ────────────────────────────────────────────────────
 export const ChaptersPanel: React.FC = () => {
@@ -399,7 +520,9 @@ export const VisualsPanel: React.FC = () => (
   <ComingSoon title="Smart Visuals" phase={4} description="Auto-blur PII, swap backgrounds, beautify cursor paths, and apply screen recordings styling." />
 );
 export const ZoomsPanel: React.FC = () => {
-  const { session, focusedStepIndex, updateStep } = useStudioStore();
+  const session = useStudioStore(state => state.session);
+  const focusedStepIndex = useStudioStore(state => state.focusedStepIndex);
+  const updateStep = useStudioStore(state => state.updateStep);
   const currentStep = session?.steps[focusedStepIndex];
 
   if (!session || !currentStep) return null;

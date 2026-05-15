@@ -1,7 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { Step, SessionEnvelope } from '../../../../shared/types/session';
-import { I } from '../icons';
 
 export * from './DotGrid';
 export * from './AIShimmer';
@@ -334,126 +333,153 @@ export const ScreenshotPlaceholder: React.FC<{
   showChrome?: boolean;
   className?: string;
   url?: string;
+  mode?: 'blueprint' | 'stage';
+  parallaxOffset?: { x: number; y: number };
 }> = ({
   step,
   session,
   hue = 244,
   aspect = '16 / 10',
   rounded = 'rounded-img',
-  showChrome = true,
   className = '',
-  url,
+  mode = 'blueprint',
+  parallaxOffset = { x: 0, y: 0 },
 }) => {
+  const [isLoaded, setIsLoaded] = React.useState(false);
   const tint = `hsl(${hue} 70% 60%)`;
   const tintSoft = `hsl(${hue} 70% 96%)`;
-  const action = step?.action;
 
-  const cx = step?.coordinates?.x ? `${(step.coordinates.x / (step.coordinates.viewportWidth||1440)) * 100}%` : '62%';
-  const cy = step?.coordinates?.y ? `${(step.coordinates.y / (step.coordinates.viewportHeight||900)) * 100}%` : '58%';
+  const vw = step?.data?.coordinates?.viewportWidth || 1440;
+  const vh = step?.data?.coordinates?.viewportHeight || 900;
+  const adaptiveRatio = vw / vh;
 
-  // Try to get real screenshot URL
   const realUrl = step?.screenshotKey && session?.assets?.[step.screenshotKey] 
     ? session.assets[step.screenshotKey] 
     : null;
 
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!realUrl || !canvasRef.current) return;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = realUrl;
+    img.onload = () => {
+      [canvasRef.current, bgCanvasRef.current].forEach(canvas => {
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+      });
+      setIsLoaded(true);
+    };
+  }, [realUrl]);
+
+  // Explicitly reset load state when step changes to prevent ghosting
+  React.useEffect(() => {
+    if (isLoaded) {
+      console.log(`🖼️ [ScreenshotPlaceholder] Invalidate: ${step?.id}`);
+      setIsLoaded(false);
+    }
+  }, [step?.id]);
+
+  // Render Blueprint (Native Proportions)
+  if (mode === 'blueprint') {
+    return (
+      <div
+        className={cn(rounded, 'relative overflow-hidden shadow-card bg-[#070709]', className)}
+        style={{ aspectRatio: adaptiveRatio, boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
+      >
+        {realUrl ? (
+          <canvas 
+            ref={canvasRef}
+            className={cn(
+              "w-full h-full object-contain transition-opacity duration-200",
+              isLoaded ? "opacity-100" : "opacity-0"
+            )}
+          />
+        ) : (
+          <SkeletonPlaceholder tintSoft={tintSoft} tint={tint} />
+        )}
+      </div>
+    );
+  }
+
+  // Render Stage (Cinematic 16:9 with Layers)
   return (
-    <div
-      className={cn(rounded, 'relative overflow-hidden shadow-card bg-white', className)}
-      style={{ aspectRatio: aspect, boxShadow: '0 4px 20px rgba(0,0,0,0.08), inset 0 0 0 1px rgba(0,0,0,0.04)' }}
+    <div 
+      className={cn(rounded, 'relative overflow-hidden bg-black', className)}
+      style={{ aspectRatio: aspect }}
     >
-      {showChrome && (
-        <div className="h-9 px-3 border-b border-border flex items-center gap-2 bg-[#FAFAFC]">
-          <div className="flex gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#FF5F57]" />
-            <span className="w-2.5 h-2.5 rounded-full bg-[#FEBC2E]" />
-            <span className="w-2.5 h-2.5 rounded-full bg-[#28C840]" />
-          </div>
-          <div className="flex-1 mx-3 h-5 rounded-md bg-white border border-border flex items-center px-2 text-[10px] text-text-3 font-mono truncate">
-            {url || step?.url || 'https://app.example.com/dashboard'}
-          </div>
-        </div>
-      )}
+      {/* LAYER 1: Ambient Backdrop (Blurred & Parallax) */}
+      <div 
+        className={cn(
+          "absolute inset-0 pointer-events-none will-change-transform transition-opacity duration-300",
+          isLoaded ? "opacity-80" : "opacity-0"
+        )}
+        style={{
+          transform: `scale(1.25) translate(${parallaxOffset.x * 0.35}%, ${parallaxOffset.y * 0.35}%)`,
+          filter: 'blur(36px) brightness(0.6) saturate(0.9)',
+        }}
+      >
+        <canvas 
+          ref={bgCanvasRef} 
+          className="w-full h-full object-cover" 
+        />
+      </div>
 
-      {realUrl ? (
-        <div className="absolute inset-0 top-9">
-          <img src={realUrl} className="w-full h-full object-cover" alt="Step screenshot" />
-          {action === 'click' && (
-            <div className="absolute pointer-events-none" style={{ left: cx, top: cy, transform: 'translate(-50%,-50%)' }}>
-              <span className="absolute -inset-6 rounded-full" style={{ background: 'radial-gradient(circle, rgba(94,92,230,0.4), transparent 70%)' }} />
-              <div className="relative">
-                <span className="block w-4 h-4 rounded-full bg-primary ring-4 ring-primary/30 shadow-lg" />
-                <I.Cursor size={16} className="absolute top-full left-full -translate-x-1 -translate-y-1 text-white drop-shadow-md fill-primary" strokeWidth={2.5} />
-              </div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="absolute inset-0 top-9 flex">
-          <div className="w-[18%] h-full p-2 space-y-1.5" style={{ background: tintSoft }}>
-            <div className="h-3 rounded bg-white/80 w-3/4" />
-            <div className="h-2.5 rounded bg-white/60 w-1/2 mt-3" />
-            <div className="h-2 rounded bg-white/60 w-2/3" />
-            <div className="h-2 rounded bg-white/60 w-1/2" />
-            <div className="h-2 rounded mt-2" style={{ background: tint, width:'70%', opacity: 0.85 }} />
-            <div className="h-2 rounded bg-white/60 w-2/3" />
-            <div className="h-2 rounded bg-white/60 w-3/4" />
-            <div className="h-2 rounded bg-white/60 w-1/2" />
-            <div className="h-2 rounded bg-white/60 w-2/3" />
-            <div className="h-2 rounded bg-white/60 w-3/4 mt-4" />
-            <div className="h-2 rounded bg-white/60 w-1/2" />
-          </div>
-          <div className="flex-1 p-3 bg-white">
-            <div className="flex items-center justify-between mb-2">
-              <div className="h-3 rounded bg-text/80 w-1/3" />
-              <div className="flex gap-1.5">
-                <div className="h-5 w-12 rounded-md bg-surface-2" />
-                <div className="h-5 w-14 rounded-md" style={{ background: tint }} />
-              </div>
-            </div>
-            <div className="h-2 rounded bg-surface-2 w-1/2 mb-3" />
-            <div className="grid grid-cols-3 gap-2 mb-2.5">
-              {[0,1,2].map(i => (
-                <div key={i} className="h-12 rounded-md border border-border bg-[#FAFAFC] p-1.5 flex flex-col justify-between">
-                  <div className="h-1.5 rounded bg-text/60 w-2/3" />
-                  <div className="flex items-end gap-0.5 h-5">
-                    {[0,1,2,3,4,5].map(b => (
-                      <div key={b} className="flex-1 rounded-sm" style={{ background: tint, opacity: 0.2 + (b*0.13), height: `${20 + (b*9 % 60)}%` }} />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="space-y-1.5">
-              {[0,1,2,3,4].map(i => (
-                <div key={i} className="h-5 rounded-md border border-border bg-[#FAFAFC] flex items-center px-2 gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: i === 2 ? tint : '#AEAEB2' }} />
-                  <div className="h-1.5 rounded bg-text/40 flex-1" style={{ maxWidth: `${40 + (i * 11 % 50)}%` }} />
-                  <div className="h-1.5 rounded bg-surface-2 w-8" />
-                  <div className="h-3.5 w-3.5 rounded-full" style={{ background: `hsl(${(hue + i*40) % 360} 70% 60%)` }} />
-                </div>
-              ))}
-            </div>
-          </div>
+      {/* LAYER 2: Sharp Foreground */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        {realUrl ? (
+          <canvas 
+            ref={canvasRef}
+            className={cn(
+              "max-w-full max-h-full object-contain shadow-2xl transition-all duration-300",
+              isLoaded ? "opacity-100 scale-100" : "opacity-0 scale-95"
+            )}
+          />
+        ) : (
+          <SkeletonPlaceholder tintSoft={tintSoft} tint={tint} />
+        )}
+      </div>
 
-          {action === 'click' && (
-            <>
-              <div className="absolute pointer-events-none" style={{ left: cx, top: cy, transform: 'translate(-50%,-50%)' }}>
-                <span className="absolute -inset-6 rounded-full" style={{ background: 'radial-gradient(circle, rgba(94,92,230,0.25), transparent 70%)' }} />
-                <span className="block w-3 h-3 rounded-full bg-primary ring-4 ring-primary/30" />
-              </div>
-              {step?.elementText && (
-                <div className="absolute pointer-events-none px-2 py-1 rounded-md bg-text text-white text-[10px] font-medium shadow-lg"
-                  style={{ left: `calc(${cx} + 14px)`, top: `calc(${cy} - 16px)` }}>
-                  {step.elementText}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+      {/* LAYER 3: Depth Overlay (Vignette) */}
+      <div 
+        className="absolute inset-0 pointer-events-none" 
+        style={{
+          background: 'radial-gradient(circle at center, transparent 45%, rgba(0,0,0,0.25) 100%)'
+        }}
+      />
     </div>
   );
 };
+
+const SkeletonPlaceholder: React.FC<{ tintSoft: string, tint: string }> = ({ tintSoft, tint }) => (
+  <div className="absolute inset-0 flex">
+    <div className="w-[18%] h-full p-2 space-y-1.5" style={{ background: tintSoft }}>
+      <div className="h-3 rounded bg-white/80 w-3/4" />
+      <div className="h-2.5 rounded bg-white/60 w-1/2 mt-3" />
+      <div className="h-2 rounded bg-white/60 w-2/3" />
+      <div className="h-2 rounded bg-white/60 w-1/2" />
+      <div className="h-2 rounded mt-2" style={{ background: tint, width:'70%', opacity: 0.85 }} />
+      <div className="h-2 rounded bg-white/60 w-3/4" />
+      <div className="h-2 rounded bg-white/60 w-1/2" />
+    </div>
+    <div className="flex-1 p-3 bg-white">
+      <div className="h-3 rounded bg-text/80 w-1/3 mb-4" />
+      <div className="h-2 rounded bg-surface-2 w-1/2 mb-3" />
+      <div className="grid grid-cols-3 gap-2 mb-2.5">
+        {[0,1,2].map(i => <div key={i} className="h-12 rounded-md border border-border bg-[#FAFAFC]" />)}
+      </div>
+      <div className="space-y-1.5">
+        {[0,1,2,3,4].map(i => <div key={i} className="h-5 rounded-md border border-border bg-[#FAFAFC]" />)}
+      </div>
+    </div>
+  </div>
+);
 
 // ─── SectionLabel ──────────────────────────────────────────────────────
 export const SectionLabel: React.FC<{ children: React.ReactNode, hint?: string, className?: string }> = ({ 

@@ -11,8 +11,10 @@ export type AppStatus =
 
 export interface CaptureTarget {
   includeMic?: boolean;
-  streamId?: string;
+  includeVideo?: boolean;
+  streamId?: string | null;
   tabId?: number;
+  tabUrl?: string;
   tabTitle?: string;
   userTitle?: string;
 }
@@ -20,7 +22,10 @@ export interface CaptureTarget {
 export interface AppState {
   status: AppStatus;
   sessionId?: string | null;
+  localSessionId?: string | null;
   startedAt?: number | null;
+  includeMic?: boolean;
+  includeVideo?: boolean;
   target?: CaptureTarget | null;
   uploadProgress?: number;
   uploadUrl?: string | null;
@@ -97,6 +102,10 @@ export type WorkerMessage =
   | { type: 'SET_STATUS'; status: AppStatus }
   | { type: 'START_RECORDING'; target: CaptureTarget }
   | { type: 'STOP_RECORDING' }
+  | { type: 'ABORT_RECORDING' }
+  | { type: 'RETRY_UPLOAD' }
+  | { type: 'SIGN_IN' }
+  | { type: 'SHOW_POPUP'; state: AppState }
   | { type: 'STATE_UPDATE'; state: AppState }
   | { type: 'LOG'; logMessage: { tag: string; data: any } }
   | { type: 'CAPTURE_STEP'; payload: any };

@@ -1,12 +1,12 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { SessionEnvelope, Step } from '../../shared/types/session';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { SessionEnvelope, Step } from "../../shared/types/session";
 
 interface Env {
   R2: R2Bucket;
   DB: D1Database;
   GEMINI_API_KEY: string;
   ENABLE_TEXT_GEN: string; // "true" | "false"
-  ENABLE_TTS: string;      // "true" | "false"
+  ENABLE_TTS: string; // "true" | "false"
 }
 
 interface TTSResponse {
@@ -16,10 +16,10 @@ interface TTSResponse {
         inlineData?: {
           mimeType: string;
           data: string;
-        }
-      }>
-    }
-  }>
+        };
+      }>;
+    };
+  }>;
 }
 
 interface PipelineMessage {
@@ -35,11 +35,11 @@ export default {
         await processSession(msg.body, env);
         msg.ack();
       } catch (err) {
-        console.error('Pipeline error:', err);
+        console.error("Pipeline error:", err);
         msg.retry();
       }
     }
-  }
+  },
 };
 
 async function processSession(msg: PipelineMessage, env: Env) {
@@ -52,46 +52,62 @@ async function processSession(msg: PipelineMessage, env: Env) {
 
   // Step 2 — Init Gemini
   const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite' });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+  // The extension uploads Session.events; SessionEnvelope uses steps — normalise here
+  const steps = (session as any).steps ?? (session as any).events ?? [];
+  if (!session.steps) (session as any).steps = steps;
 
   // Step 3 — Per-step: generate text + voiceover sequentially
-  for (const step of session.steps) {
+  for (const step of steps) {
+    // Normalise: extension uploads events with fields nested in `data`
+    const elementText = step.elementText || step.data?.elementText || "";
+    const stepUrl = step.url || step.data?.url || step.data?.frameUrl || "";
+    const stepAction = step.action || step.data?.action || step.type || "click";
+    const stepSelector = step.selector || step.data?.selector || "";
+    const stepCoords = step.coordinates || step.data?.coordinates;
+    if (stepCoords && !step.coordinates) step.coordinates = stepCoords;
+
     // 3a. Generate step text with Gemini
-    let generatedText = '';
-    if (env.ENABLE_TEXT_GEN !== 'true' || !step.elementText?.trim()) {
-      generatedText = step.elementText || 'Clicked element';
+    let generatedText = "";
+    if (env.ENABLE_TEXT_GEN !== "true" || !elementText.trim()) {
+      generatedText = elementText || "Clicked element";
       step.generatedText = generatedText;
-    } else try {
-      const prompt = `You are writing step-by-step instructions for a software walkthrough guide.
+    } else
+      try {
+        const prompt = `You are writing step-by-step instructions for a software walkthrough guide.
 
 Context:
-- Page URL: ${step.url}
-- Element clicked: ${step.elementText}
-- CSS selector: ${step.selector}
-- Action type: ${step.action}
+- Page URL: ${stepUrl}
+- Element clicked: ${elementText}
+- CSS selector: ${stepSelector}
+- Action type: ${stepAction}
 
 Write ONE clear, concise instruction sentence (max 20 words) describing what the user did.
 Start with an action verb. Be specific about the element name.
 Return only the sentence, no punctuation at end, no quotes.`;
 
-      const result = await model.generateContent(prompt);
-      generatedText = result.response.text().trim();
-    } catch (err) {
-      console.error(`Gemini failed for step ${step.id}:`, err);
-      generatedText = step.elementText || 'Clicked element';
-    }
+        const result = await model.generateContent(prompt);
+        generatedText = result.response.text().trim();
+      } catch (err) {
+        console.error(`Gemini failed for step ${step.id}:`, err);
+        generatedText = elementText || "Clicked element";
+      }
     step.generatedText = generatedText;
 
     console.log(`[${step.id}] generatedText: "${generatedText}"`);
 
     // 3b. Generate voiceover using Gemini TTS
-    const audio = env.ENABLE_TTS === 'true' ? await synthesizeSpeech(generatedText, env) : null;
+    const audio =
+      env.ENABLE_TTS === "true"
+        ? await synthesizeSpeech(generatedText, env)
+        : null;
 
     // 3c. If audio returned, upload to R2
     if (audio) {
       const voiceKey = `voiceovers/${workspaceId}/${sessionId}/${step.id}.wav`;
       await env.R2.put(voiceKey, audio, {
-        httpMetadata: { contentType: 'audio/wav' }
+        httpMetadata: { contentType: "audio/wav" },
       });
       step.voiceoverKey = voiceKey;
     } else {
@@ -99,12 +115,18 @@ Return only the sentence, no punctuation at end, no quotes.`;
     }
 
     // Step 4 — Compute animationTarget per step
+    // coordinates x/y are raw pixels; convert to % so studio can apply
+    // translateX = (50 - centerX) * scale without flying off screen.
+    const vw = step.coordinates?.viewportWidth ?? 1280;
+    const vh = step.coordinates?.viewportHeight ?? 720;
+    const rawX = step.coordinates?.x ?? vw / 2;
+    const rawY = step.coordinates?.y ?? vh / 2;
     step.animationTarget = {
-      centerX: step.coordinates?.x ?? 50,
-      centerY: step.coordinates?.y ?? 50,
+      centerX: (rawX / vw) * 100,
+      centerY: (rawY / vh) * 100,
       zoomScale: 2.5,
-      transitionType: 'fade', // canonical schema uses 'fade' instead of 'crossfade'
-      transitionDurationMs: 400
+      transitionType: "fade",
+      transitionDurationMs: 400,
     };
 
     // 3d. Rate limiting / courtesy sleep
@@ -114,7 +136,7 @@ Return only the sentence, no punctuation at end, no quotes.`;
   // Step 5 — Generate session-level AI outputs (one Gemini call)
   try {
     const sessionPrompt = `Given these step instructions:
-${session.steps.map((s, i) => `${i + 1}. ${s.generatedText}`).join('\n')}
+${steps.map((s: any, i: number) => `${i + 1}. ${s.generatedText}`).join("\n")}
 
 Return a JSON object with:
 - title: string (5-8 words, describes what this walkthrough accomplishes)
@@ -124,69 +146,77 @@ Return a JSON object with:
 Return only valid JSON, no markdown.`;
 
     const result = await model.generateContent(sessionPrompt);
-    const jsonStr = result.response.text().replace(/```json|```/g, '').trim();
+    const jsonStr = result.response
+      .text()
+      .replace(/```json|```/g, "")
+      .trim();
     const aiData = JSON.parse(jsonStr);
-    
+
     session.aiOutputs = {
-      title: aiData.title || 'Untitled Walkthrough',
-      summary: aiData.summary || '',
-      tags: aiData.tags || []
+      title: aiData.title || "Untitled Walkthrough",
+      summary: aiData.summary || "",
+      tags: aiData.tags || [],
     };
   } catch (err) {
-    console.error('Session-level AI failed:', err);
+    console.error("Session-level AI failed:", err);
     session.aiOutputs = {
-      title: 'Untitled Walkthrough',
-      summary: '',
-      tags: []
+      title: "Untitled Walkthrough",
+      summary: "",
+      tags: [],
     };
   }
 
   // Step 6 — Write enriched session JSON back to R2
   await env.R2.put(r2JsonKey, JSON.stringify(session), {
-    httpMetadata: { contentType: 'application/json' }
+    httpMetadata: { contentType: "application/json" },
   });
 
   // Step 7 — Update D1 status
   await env.DB.prepare(
-    'UPDATE sessions SET status = ?, updatedAt = ? WHERE id = ?'
-  ).bind('ready', Date.now(), sessionId).run();
+    "UPDATE sessions SET status = ?, updatedAt = ? WHERE id = ?",
+  )
+    .bind("ready", Date.now(), sessionId)
+    .run();
 }
 
-async function synthesizeSpeech(text: string, env: Env): Promise<ArrayBuffer | null> {
+async function synthesizeSpeech(
+  text: string,
+  env: Env,
+): Promise<ArrayBuffer | null> {
   try {
-    const safeText = text.length > 200 ? text.slice(0, 197) + '...' : text;
+    const safeText = text.length > 200 ? text.slice(0, 197) + "..." : text;
     if (!safeText.trim()) return null;
 
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent?key=${env.GEMINI_API_KEY}`,
       {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: safeText }] }],
           generationConfig: {
-            responseModalities: ['AUDIO'],
+            responseModalities: ["AUDIO"],
             speechConfig: {
               voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: 'Aoede' }
-              }
-            }
-          }
-        })
-      }
+                prebuiltVoiceConfig: { voiceName: "Aoede" },
+              },
+            },
+          },
+        }),
+      },
     );
 
     if (!res.ok) {
-      console.error('Gemini TTS error:', await res.text());
+      console.error("Gemini TTS error:", await res.text());
       return null;
     }
 
-    const data = await res.json() as TTSResponse;
+    const data = (await res.json()) as TTSResponse;
     const part = data.candidates?.[0]?.content?.parts?.[0]?.inlineData;
     if (!part?.data) return null;
 
-    const mimeType = part.mimeType ?? '';
-    console.log('TTS mimeType:', mimeType);
+    const mimeType = part.mimeType ?? "";
+    console.log("TTS mimeType:", mimeType);
 
     const binary = atob(part.data);
     const bytes = new Uint8Array(binary.length);
@@ -195,19 +225,29 @@ async function synthesizeSpeech(text: string, env: Env): Promise<ArrayBuffer | n
     }
 
     // If already WAV (starts with RIFF), return as-is
-    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+    if (
+      bytes[0] === 0x52 &&
+      bytes[1] === 0x49 &&
+      bytes[2] === 0x46 &&
+      bytes[3] === 0x46
+    ) {
       return bytes.buffer;
     }
 
     // Raw PCM — wrap with WAV header (24000 Hz, mono, 16-bit)
     return buildWav(bytes, 24000, 1, 16);
   } catch (err) {
-    console.error('TTS failed silently:', err);
+    console.error("TTS failed silently:", err);
     return null;
   }
 }
 
-function buildWav(pcm: Uint8Array, sampleRate: number, channels: number, bitDepth: number): ArrayBuffer {
+function buildWav(
+  pcm: Uint8Array,
+  sampleRate: number,
+  channels: number,
+  bitDepth: number,
+): ArrayBuffer {
   const byteRate = sampleRate * channels * (bitDepth / 8);
   const blockAlign = channels * (bitDepth / 8);
   const dataSize = pcm.byteLength;
@@ -215,25 +255,26 @@ function buildWav(pcm: Uint8Array, sampleRate: number, channels: number, bitDept
   const view = new DataView(buffer);
 
   const enc = (offset: number, str: string) => {
-    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    for (let i = 0; i < str.length; i++)
+      view.setUint8(offset + i, str.charCodeAt(i));
   };
 
-  enc(0, 'RIFF');
+  enc(0, "RIFF");
   view.setUint32(4, 36 + dataSize, true);
-  enc(8, 'WAVE');
-  enc(12, 'fmt ');
+  enc(8, "WAVE");
+  enc(12, "fmt ");
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);           // PCM
+  view.setUint16(20, 1, true); // PCM
   view.setUint16(22, channels, true);
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, byteRate, true);
   view.setUint16(32, blockAlign, true);
   view.setUint16(34, bitDepth, true);
-  enc(36, 'data');
+  enc(36, "data");
   view.setUint32(40, dataSize, true);
   new Uint8Array(buffer, 44).set(pcm);
 
   return buffer;
 }
 
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
