@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../store/useStudioStore';
 import { I } from '../components/icons';
-import { 
-  Button, Kbd 
+import {
+  Button, Kbd
 } from '../components/ui';
-import { 
+import {
   StudioHeader, SidebarControls
 } from '../components/studio';
+import { ShareModal } from '../components/studio/panels/ShareModal';
 import { SOPCanvas } from '../components/studio/canvases/SOPCanvas';
 import { VideoCanvas } from '../components/studio/canvases/VideoCanvas';
 import { DemoCanvas } from '../components/studio/canvases/DemoCanvas';
@@ -16,6 +17,11 @@ import {
 } from '../components/studio/Panels';
 import { RenderConstants } from '../modules/render-engine/RenderConstants';
 import { useSessionManager } from '../hooks/useSessionManager';
+import { useIsEmbed } from '../hooks/useIsEmbed';
+import { EmbedSOPView } from '../components/studio/canvases/EmbedSOPView';
+import { EmbedVideoView } from '../components/studio/canvases/EmbedVideoView';
+import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
+import { EmbedSlidesView } from '../components/studio/canvases/EmbedSlidesView';
 const STUDIO_TABS = [
   { id: 'script',   label: 'Script',   icon: I.FileText, component: ScriptPanel },
   { id: 'brand',    label: 'Brand',    icon: I.Palette,  component: BrandPanel },
@@ -28,6 +34,7 @@ const STUDIO_TABS = [
 ];
 
 export const StudioPage: React.FC = () => {
+  const { isEmbed, mode } = useIsEmbed();
   const session = useStudioStore(state => state.session);
   const sessionError = useStudioStore(state => state.sessionError);
   const activeTab = useStudioStore(state => state.activeTab);
@@ -39,10 +46,17 @@ export const StudioPage: React.FC = () => {
   const setActiveView = useStudioStore(state => state.setActiveView);
   const renderMode = useStudioStore(state => state.renderMode);
   const setRenderMode = useStudioStore(state => state.setRenderMode);
-
-
+  const [shareOpen, setShareOpen] = useState(false);
 
   useSessionManager();
+
+  // Embed mode: skip the full studio chrome and render the appropriate embed view
+  if (isEmbed) {
+    if (mode === 'video') return <EmbedVideoView />;
+    if (mode === 'demo') return <EmbedDemoView />;
+    if (mode === 'slides') return <EmbedSlidesView />;
+    return <EmbedSOPView />;
+  }
 
   console.log('[StudioPage] Render state:', { 
     hasSession: !!session, 
@@ -104,13 +118,15 @@ export const StudioPage: React.FC = () => {
 
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
-      <StudioHeader 
+      <StudioHeader
         activeView={activeView}
         setActiveView={setActiveView}
         renderMode={renderMode}
         setRenderMode={setRenderMode}
         onNavigateHome={() => navigate('home')}
+        onShareClick={() => setShareOpen(true)}
       />
+      <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
       <div className="flex-1 flex min-h-0">
         
         {/* Left Panel */}
