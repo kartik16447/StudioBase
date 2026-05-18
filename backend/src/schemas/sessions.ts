@@ -11,7 +11,7 @@ export const CreateSessionSchema = z.object({
 });
 
 export const UpdateSessionSchema = z.object({
-  status: z.enum(['uploading', 'uploaded', 'processing', 'ready', 'failed', 'credit_exhausted', 'deleted']).optional(),
+  status: z.enum(['uploading', 'uploaded', 'queued', 'processing', 'ready', 'failed', 'credit_exhausted', 'deleted']).optional(),
   title: z.string().max(200).optional(),
   r2JsonKey: z.string().optional(),
   r2VideoKey: z.string().optional(),

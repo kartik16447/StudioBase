@@ -7,578 +7,437 @@ import { RenderConstants } from '../../../modules/render-engine/RenderConstants'
 import { apiClient } from '../../../lib/apiClient';
 import { WorkerExtractor } from '../../../services/WorkerExtractor';
 import { CanvasRenderer } from '../../../modules/render-engine/CanvasRenderer';
-
+import { CinematicMath } from '../../../modules/render-engine/CinematicMath';
 import { TelemetryService } from '../../../services/TelemetryService';
+import { analyticsClient } from '../../../lib/analyticsClient';
+import { EmbedModal } from '../panels/EmbedModal';
 
-/**
- * MASTER CINEMATIC COMPOSITOR (STABILIZED v2)
- * Renders the session frame-by-frame into a 1080p WebM
- */
-export async function handleSOPVideoExport(baseConfig: { session: any; theme: any; renderMode: string }) {
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+export async function handleSOPVideoExport(config: {
+  session: any;
+  theme: any;
+  renderMode: string;
+}) {
   const store = useStudioStore.getState();
   if (store.isExporting) return;
 
-  const { session, theme: brand, renderMode } = baseConfig;
+  const { session, theme: brand, renderMode } = config;
   const workspaceId = (session as any)?.workspaceId || 'default';
-  const sessionId = session?.sessionId || 'unknown';
-  
+  const sessionId   = session?.sessionId || 'unknown';
+
   store.setIsExporting(true);
   store.setExportStatus('checking');
   store.setExportError(null);
   store.setExportProgress(0);
-  
+
   const steps = session?.steps || [];
-  const chapters = (session as any)?.aiOutputs?.chapters || [];
-  const chapterMap = new Map(chapters.map((c: any) => [c.stepId, c]));
-  let currentX = 50;
 
-  console.log("🎬 [Export] Phase 1: Environment Health Check");
-
-  // --- HEALTH CHECK: MEMORY & DECODER ---
-  if ((navigator as any).deviceMemory && (navigator as any).deviceMemory < 4) {
-    const error = "Low device memory detected (< 4GB). Export may fail.";
-    console.warn(`⚠️ [Export] ${error}`);
-    // We don't abort yet, but we log it
-    TelemetryService.record({ eventName: 'export.low_memory_warning', sessionId, workspaceId, properties: { memory: (navigator as any).deviceMemory } });
-  }
-
+  // ── Health checks ─────────────────────────────────────────────────────────
   try {
     const videoKey = (session as any)?.videoKey || 'screen-recording';
     const videoUrl = session?.assets?.[videoKey] || session?.assets?.['video'] || '';
-
-    // Verify Asset Integrity
-    if (!videoUrl) throw new Error("Video asset URL missing. Cannot export.");
-    const assetCheck = await fetch(videoUrl, { method: 'HEAD' });
-    if (!assetCheck.ok) throw new Error(`Video asset not available (Status: ${assetCheck.status})`);
-
-    // Verify Decoder Support
-    if (!(window as any).VideoDecoder) {
-      throw new Error("WebCodecs (VideoDecoder) not supported in this browser.");
-    }
+    if (!videoUrl) throw new Error('Video asset URL missing. Cannot export.');
+    const check = await fetch(videoUrl, { method: 'HEAD' });
+    if (!check.ok) throw new Error(`Video asset unavailable (${check.status})`);
+    if (!(window as any).VideoDecoder)
+      throw new Error('WebCodecs (VideoDecoder) not supported in this browser.');
   } catch (err: any) {
     store.setExportStatus('failed');
     store.setExportError(err.message);
     store.setIsExporting(false);
-    TelemetryService.record({ eventName: 'export.health_check_failed', sessionId, workspaceId, properties: { error: err.message } });
     return;
   }
 
-  let framesRequested = 0;
-  let framesDrawn = 0;
-  let successfulFrames = 0;
-  let failedFrames = 0;
-  
-  console.log("🎬 [Export] Phase 2: Initializing Deterministic Compositor");
   store.setExportStatus('exporting');
 
-  // 1. Setup high-res compositor (DOM ATTACHED for Hardware Sync)
+  // ── Compositor canvas (pinned to DOM for captureStream reliability) ────────
   const canvas = document.createElement('canvas');
-  canvas.id = 'export-compositor';
-  canvas.width = RenderConstants.EXPORT_COMPOSITOR_WIDTH;
+  canvas.id    = 'export-compositor';
+  canvas.width  = RenderConstants.EXPORT_COMPOSITOR_WIDTH;
   canvas.height = RenderConstants.EXPORT_COMPOSITOR_HEIGHT;
-  
-  // Enforce DOM Presence and Visibility for CaptureStream reliability
-  canvas.style.position = 'fixed';
-  canvas.style.left = '0';
-  canvas.style.top = '0';
-  canvas.style.width = RenderConstants.EXPORT_VISUAL_WIDTH; 
-  canvas.style.height = RenderConstants.EXPORT_VISUAL_HEIGHT;
-  canvas.style.opacity = '0.05'; 
-  canvas.style.pointerEvents = 'none';
-  canvas.style.zIndex = '9999';
+  Object.assign(canvas.style, {
+    position: 'fixed', left: '0', top: '0',
+    width: RenderConstants.EXPORT_VISUAL_WIDTH,
+    height: RenderConstants.EXPORT_VISUAL_HEIGHT,
+    opacity: '0.04', pointerEvents: 'none', zIndex: '9999',
+  });
   document.body.appendChild(canvas);
 
-  const ctx = canvas.getContext('2d', { willReadFrequently: true, alpha: false });
+  const ctx = canvas.getContext('2d', { willReadFrequently: false, alpha: false });
   if (!ctx) {
     store.setExportStatus('failed');
-    store.setExportError("Failed to get 2D context");
+    store.setExportError('Failed to get 2D context');
+    store.setIsExporting(false);
+    canvas.remove();
     return;
   }
 
-  // --- RESOURCE LIFECYCLE ---
+  // ── Progress overlay ───────────────────────────────────────────────────────
+  const overlay = document.createElement('div');
+  overlay.id = 'export-progress-overlay';
+  Object.assign(overlay.style, {
+    position: 'fixed', top: '20px', right: '20px',
+    padding: '12px 20px', background: 'rgba(0,0,0,0.88)', color: '#fff',
+    borderRadius: '8px', fontFamily: 'Inter,sans-serif', fontSize: '14px',
+    zIndex: '10000', backdropFilter: 'blur(10px)',
+    border: '1px solid rgba(255,255,255,0.1)',
+  });
+  overlay.innerText = '🎬 Preparing Export…';
+  document.body.appendChild(overlay);
+
   let extractor: WorkerExtractor | null = null;
   let videoTrack: MediaStreamTrack | null = null;
-  let exportVideo: HTMLVideoElement | null = null;
-  let infoOverlay: HTMLDivElement | null = null;
   const chunks: Blob[] = [];
-  let totalBytes = 0;
-
-  // --- PROGRESS OVERLAY ---
-  infoOverlay = document.createElement('div');
-  infoOverlay.id = 'export-progress-overlay';
-  infoOverlay.style.position = 'fixed';
-  infoOverlay.style.top = '20px';
-  infoOverlay.style.right = '20px';
-  infoOverlay.style.padding = '12px 20px';
-  infoOverlay.style.background = 'rgba(0,0,0,0.85)';
-  infoOverlay.style.color = 'white';
-  infoOverlay.style.borderRadius = '8px';
-  infoOverlay.style.fontFamily = 'Inter, sans-serif';
-  infoOverlay.style.fontSize = '14px';
-  infoOverlay.style.zIndex = '10000';
-  infoOverlay.style.backdropFilter = 'blur(10px)';
-  infoOverlay.style.border = '1px solid rgba(255,255,255,0.1)';
-  infoOverlay.innerText = '🎬 Preparing Export Engine...';
-  document.body.appendChild(infoOverlay);
 
   try {
-    const stream = (canvas as any).captureStream(RenderConstants.EXPORT_FPS);
-    videoTrack = stream.getVideoTracks()[0];
-    
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-      ? 'video/webm;codecs=vp9' : 'video/webm';
-    
-    const recorder = new MediaRecorder(stream, { 
-      mimeType, 
-      videoBitsPerSecond: RenderConstants.EXPORT_VIDEO_BITRATE
-    });
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        chunks.push(e.data);
-        totalBytes += e.data.size;
-      }
-    };
-  
-    recorder.onstop = () => {
-      console.log(`🎬 [Export] Recorder stopped.`);
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      if (blob.size < 1000) {
-        console.error("❌ [Export] Output blob too small.");
-        TelemetryService.record({ eventName: 'export.failed', sessionId, workspaceId, properties: { error: 'Empty output blob', size: blob.size } });
-      } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${session?.aiOutputs?.title || 'studiobase-cinematic'}.webm`;
-        a.click();
-        URL.revokeObjectURL(url);
-        TelemetryService.record({ eventName: 'export.completed', sessionId, workspaceId, properties: { size: blob.size, frames: framesDrawn } });
-      }
-      store.setIsExporting(false);
-      store.setExportStatus('completed');
-    };
-
-    console.log("🎬 [Export] Starting Recorder...");
-    recorder.start(1000); 
-
-    // --- DEDICATED EXPORT VIDEO NODE ---
-    exportVideo = document.createElement('video');
-    exportVideo.crossOrigin = "anonymous";
     const videoKey = (session as any)?.videoKey || 'screen-recording';
     const videoUrl = session?.assets?.[videoKey] || session?.assets?.['video'] || '';
-    exportVideo.src = videoUrl;
-    exportVideo.muted = true;
-    exportVideo.playsInline = true;
-    exportVideo.style.display = 'none'; // Keep hidden
-    document.body.appendChild(exportVideo);
 
-    const renderer = new CanvasRenderer();
+    const stream    = (canvas as any).captureStream(RenderConstants.EXPORT_FPS);
+    videoTrack      = stream.getVideoTracks()[0];
+    const mimeType  = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9' : 'video/webm';
+    const recorder  = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: RenderConstants.EXPORT_VIDEO_BITRATE,
+    });
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.start(500);
+
     extractor = new WorkerExtractor();
     await extractor.init(videoUrl);
 
-    TelemetryService.record({ eventName: 'export.started', sessionId, workspaceId });
+    const renderer = new CanvasRenderer();
+    const fps      = RenderConstants.EXPORT_FPS;
 
-    // --- TIMELINE NORMALIZATION ---
-    const fps = RenderConstants.EXPORT_FPS;
+    // ── Timeline helpers ───────────────────────────────────────────────────
+    const sessionStartTime =
+      (session as any)?.startedAt   ? new Date((session as any).startedAt).getTime()
+      : session?.capturedAt          ? new Date(session.capturedAt).getTime()
+      : (steps[0]?.timestamp || 0);
 
-    // --- HELPER: PREVENT VISUAL SILENCE ---
-    const injectJitter = () => {
+    const maxDuration = extractor.getDuration();
+
+    const toRelativeMs = (absMs: number) => {
+      const rel = absMs - sessionStartTime;
+      if (isNaN(rel)) return 0;
+      return Math.max(0, Math.min(rel, maxDuration));
+    };
+
+    const getFrameSafe = async (targetMs: number, retries = 2) => {
+      for (let i = 0; i < retries; i++) {
+        const f = await extractor!.getFrame(targetMs);
+        if (f) return f;
+        await delay(60 * (i + 1));
+      }
+      return null;
+    };
+
+    // Jitter pixel — keeps MediaRecorder from emitting a blank segment
+    const jitter = () => {
       ctx.save();
-      ctx.globalAlpha = 0.01;
-      ctx.fillStyle = `rgb(${Math.random()*255},${Math.random()*255},${Math.random()*255})`;
-      ctx.fillRect(RenderConstants.EXPORT_COMPOSITOR_WIDTH - 1, RenderConstants.EXPORT_COMPOSITOR_HEIGHT - 1, 1, 1);
+      ctx.globalAlpha = 0.008;
+      ctx.fillStyle = `rgb(${rnd(255)},${rnd(255)},${rnd(255)})`;
+      ctx.fillRect(canvas.width - 1, canvas.height - 1, 1, 1);
       ctx.restore();
     };
 
-    // --- HELPER: DETECT TAINTED CANVAS ---
-    const validateCanvasIntegrity = () => {
-      try {
-        canvas.toDataURL(); 
-        return true;
-      } catch (e) {
-        console.error("❌ [Export] CANVAS TAINTED! CORS failure detected.", e);
-        TelemetryService.record({ eventName: 'export.canvas_tainted', sessionId, workspaceId });
-        return false;
-      }
+    // ── Spring simulator for export (mirrors framer-motion springs) ────────
+    // Springs start at the full-overview position and carry momentum across
+    // every step — no reset at step boundaries, targets just update.
+    let springX = 50, springY = 50, springScale = 1.0;
+    let velX = 0, velY = 0, velScale = 0;
+    const DT = 1 / fps;
+    const simSpring = (
+      cur: number, vel: number, target: number,
+      stiffness: number, damping: number, mass: number,
+    ) => {
+      const f = -stiffness * (cur - target) - damping * vel;
+      const a = f / mass;
+      const nv = vel + a * DT;
+      const nc = cur + nv * DT;
+      return { value: nc, velocity: nv };
     };
 
-    // --- HELPER: RETRY-SAFE FRAME EXTRACTION ---
-    const getFrameWithRetry = async (targetMs: number, maxRetries = 3) => {
-      let lastErr = null;
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          const frame = await extractor!.getFrame(targetMs);
-          if (frame) return frame;
-        } catch (e: any) {
-          lastErr = e;
-          console.warn(`🎬 [Export] Frame extraction attempt ${attempt + 1} failed for ${targetMs}ms:`, e.message);
-          await new Promise(r => setTimeout(r, 100 * (attempt + 1))); // Backoff
-        }
-      }
-      TelemetryService.record({ 
-        eventName: 'export.frame_decode_failed', 
-        sessionId, 
-        workspaceId, 
-        properties: { timestampMs: targetMs, error: lastErr?.message } 
-      });
-      return null;
-    };
-    const sessionStartTime = (session as any)?.metadata?.startTime || (session as any)?.startTime || (steps.length > 0 ? steps[0].timestamp : 0);
-    const toRelativeMs = (absMs: number) => {
-      if (!extractor) return 0;
-      const maxDuration = extractor.getDuration();
-      const rel = absMs - sessionStartTime;
-      if (isNaN(rel)) return 0;
-      const clamped = Math.max(0, Math.min(rel, maxDuration));
-      
-      // Log anomalies
-      if (Math.abs(rel - clamped) > 1000000) {
-        console.warn(`🎬 [Timeline] Massive clamp detected: Absolute ${absMs}ms -> Relative ${clamped}ms`);
-      }
-      return clamped;
-    };
-
-  await new Promise(res => {
-    if (exportVideo) {
-      exportVideo.onloadedmetadata = () => {
-        if (exportVideo) {
-          console.log(`🎬 [Export] Metadata Ready. Size: ${exportVideo.videoWidth}x${exportVideo.videoHeight} | Duration: ${exportVideo.duration}s`);
-        }
-        res(null);
-      };
-    } else {
-      res(null);
-    }
-    setTimeout(res, 5000);
-  });
-
-  // --- WEBCODECS / TRACK PROCESSOR HACK ---
-  // On Mac Retina, the primary video is hardware-isolated. 
-  // MediaStreamTrackProcessor taps the stream before compositor optimizations apply.
-  const videoStream = (exportVideo as any).captureStream ? (exportVideo as any).captureStream() : null;
-  const track = videoStream?.getVideoTracks()[0];
-  let latestVideoFrame: any = null;
-  let reader: any = null;
-
-  if (track && (window as any).MediaStreamTrackProcessor) {
-    const processor = new (window as any).MediaStreamTrackProcessor({ track });
-    reader = processor.readable.getReader();
-    
-    // Non-blocking reader loop
-    (async () => {
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (latestVideoFrame) latestVideoFrame.close();
-          latestVideoFrame = value;
-        }
-      } catch (e) {
-        console.error("🎬 [Export] Frame reader failed:", e);
-      }
-    })();
-  } else {
-    console.warn("🎬 [Export] MediaStreamTrackProcessor not supported, falling back to direct.");
-  }
-
-  // --- HARD CORS / TAINT VALIDATION ---
-  try {
-    const testCanvas = document.createElement('canvas');
-    testCanvas.width = 1; testCanvas.height = 1;
-    const testCtx = testCanvas.getContext('2d');
-    if (testCtx) {
-      testCtx.drawImage(exportVideo, 0, 0, 1, 1);
-      testCanvas.toDataURL(); // Will throw if tainted
-      console.log("✅ [Export] CORS Validation Passed. Canvas is clean.");
-    }
-  } catch (e) {
-    console.error("❌ [Export] HARD ABORT: Canvas Tainted. CORS headers missing on R2.", e);
-    store.setIsExporting(false);
-    document.body.removeChild(exportVideo);
-    alert("Export Failed: Canvas Tainted. Please verify S3/R2 CORS headers.");
-    return;
-  }
-
-
-  let absoluteLastLoggedMs = -1;
-
-  for (let i = 0; i < steps.length; i++) {
-    store.setStepIndex(i);
-    const step = steps[i];
-    const prevStep = i > 0 ? steps[i-1] : null;
-    // console.log(`🎬 [Export] Step ${i+1}/${steps.length}: ${step.id}`);
-
-    // Chapter Card Transition
-    const chapter = (i > 0 ? chapterMap.get(steps[i-1].id) : null) as any;
-    if (chapter) {
-      console.log(`🎬 [Export] Chapter Card: ${chapter.chapterTitle}`);
-      for (let f = 0; f < 60; f++) {
-        ctx.fillStyle = brand.primaryColor;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#fff';
-        ctx.textAlign = 'center';
-        ctx.font = 'bold 60px Inter, system-ui, sans-serif';
-        ctx.globalAlpha = 0.6;
-        ctx.fillText('CHAPTER', canvas.width/2, canvas.height/2 - 60);
-        ctx.font = 'bold 120px Inter, system-ui, sans-serif';
-        ctx.globalAlpha = 1.0;
-        ctx.fillText(chapter.chapterTitle, canvas.width/2, canvas.height/2 + 40);
-        
-        injectJitter();
-        await new Promise(res => setTimeout(res, 0)); // Compositor Yield
-        framesRequested++; framesDrawn++;
-        await new Promise(res => setTimeout(res, 16));
-      }
-    }
-    
-    // Load Asset (Image or Video Bitmap)
-    const hasTimestamp = step.timestamp != null && step.timestamp > 0;
-    let asset: HTMLImageElement | ImageBitmap | HTMLVideoElement | null = null;
-
-    // Note: Frame extraction is now handled deterministically inside the tick loop
-
-    // --- ASSET PREPARATION ---
-    if (hasTimestamp) {
-      // Seek logic is already handled above
-    } else {
-      const imgUrl = step.screenshotKey ? session?.assets?.[step.screenshotKey] : null;
-      if (imgUrl) {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = imgUrl;
-        await new Promise(res => {
-          img.onload = res;
-          img.onerror = () => { console.error("❌ [Export] Failed to load img:", imgUrl); res(null); };
-        });
-        asset = img;
-      }
-    }
-
-    // --- STEP VALIDATION GUARD ---
-    // A step is valid if it has a screenshot asset OR a deterministic video timestamp
-    if (!asset && !hasTimestamp) {
-      console.warn(`⚠️ [Export] No asset or timestamp for step ${i}. Skipping.`);
-      continue;
-    }
-
-    // --- CINEMATIC TARGET CALCULATION (Safe Math Edition) ---
-    const startX = currentX || 50;
-
-    const coords = (step.data as any)?.coordinates;
-    let targetCenterX = 50;
-
-    if (coords && typeof coords.x === 'number') {
-      // Smart Defaults: Use 80x80 if width/height are missing
-      const w = typeof coords.width === 'number' ? coords.width : 80;
-      const vw = coords.viewportWidth || 1440;
-
-      // Center-Point Fix: Target the middle of the interaction box
-      const centerX = coords.x + (w / 2);
-      
-      targetCenterX = Math.max(15, Math.min(85, (centerX / vw) * 100));
-    } else {
-      // Vision Fallback: Subtle drift for native apps where metadata is missing
-      targetCenterX = 50;
-    }
-
-    const jumpDist = Math.abs(targetCenterX - startX);
-    let stepDuration = Math.max(2, ((step as any).duration || 5)); 
-    if (jumpDist > 40) stepDuration *= 1.5; // Smooth out large context snaps
-    const stepFrames = Math.floor(stepDuration * fps);
-
+    let exportTimeMs   = 0;
+    let absLastLoggedMs = -1;
     let masterFrame: ImageBitmap | null = null;
 
-    for (let f = 0; f < stepFrames; f++) {
-      // The step might last 5 seconds, but the camera should finish moving in 1.2s
-      const ANIMATION_DURATION_SEC = 1.2; 
-      const currentFrameTimeSec = f / fps;
-      const cameraProgress = Math.min(1.0, currentFrameTimeSec / ANIMATION_DURATION_SEC);
+    // Chapter map for export cards (PATCH 5)
+    const chapterMap = new Map<string, any>(
+      (session?.metadata?.chapterBreaks || []).map((c: any) => [c.afterStepId, c]),
+    );
 
-      // Safe approximation of an overdamped spring glide
-      const springProgress = 1 - Math.pow(1 - cameraProgress, 4);
+    // ── Intro slide (3 s) ──────────────────────────────────────────────────
+    if (brand.showIntro) {
+      const title = session?.aiOutputs?.title || 'Walkthrough';
+      const introFrames = Math.round(fps * 3);
+      for (let f = 0; f < introFrames; f++) {
+        const fadeA = f < 15 ? f / 15 : f > introFrames - 15 ? (introFrames - f) / 15 : 1;
+        ctx.fillStyle = '#0a0a10';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.globalAlpha = fadeA;
+        const ig = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+        ig.addColorStop(0, brand.primaryColor + 'f0');
+        ig.addColorStop(1, brand.primaryColor);
+        ctx.fillStyle = ig;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.round(canvas.height * 0.08)}px Inter, system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(title, canvas.width / 2, canvas.height / 2 - canvas.height * 0.06);
+        ctx.globalAlpha = fadeA * 0.7;
+        ctx.font = `400 ${Math.round(canvas.height * 0.04)}px Inter, system-ui, sans-serif`;
+        ctx.fillText('A StudioBase walkthrough', canvas.width / 2, canvas.height / 2 + canvas.height * 0.04);
+        ctx.restore();
+        jitter();
+        if (videoTrack && (videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
+        await delay(0);
+      }
+    }
 
-      // Overall step progress (used for frame extraction timing)
-      const progress = f / stepFrames;
+    for (let i = 0; i < steps.length; i++) {
+      store.setStepIndex(i);
+      const step     = steps[i];
+      const prevStep = i > 0 ? steps[i - 1] : null;
 
-      // --- DETERMINISTIC FRAME CAPTURE (STRICT FORWARD LATCH) ---
-      if (hasTimestamp && extractor) {
-        const calculatedMs = (step.timestamp || 0) + (progress * stepDuration * 1000);
-        
-        // Never let the playhead move backward, even by a microsecond
-        const safeTargetMs = Math.max(absoluteLastLoggedMs + 1, Math.floor(calculatedMs));
-        const relTargetMs = toRelativeMs(safeTargetMs);
+      // Camera target for this step — spring carries momentum from previous step
+      const target = CinematicMath.getTarget(step, renderMode);
 
-        // Optimization: If the playhead has moved less than 12ms, reuse the previous frame
-        // to prevent expensive GOP restarts and redundant seeks.
-        if (masterFrame && (safeTargetMs - absoluteLastLoggedMs) < 12 && absoluteLastLoggedMs !== -1) {
-          // Skip extraction, reuse masterFrame
-        } else {
-          try {
-            const newFrame = await getFrameWithRetry(relTargetMs);
-            if (newFrame) {
-              if (masterFrame) masterFrame.close();
-              masterFrame = newFrame;
-              absoluteLastLoggedMs = safeTargetMs;
-              successfulFrames++;
-            } else {
-              failedFrames++;
-            }
-          } catch (e) {
-            failedFrames++;
-          }
+      // Chapter card (PATCH 5) — 1.5 s branded title card before this step
+      const exportChapter = i > 0 ? chapterMap.get(steps[i - 1].id) : null;
+      if (exportChapter) {
+        const chFrames = Math.round(fps * 1.5);
+        for (let f = 0; f < chFrames; f++) {
+          const fadeA = f < 10 ? f / 10 : f > chFrames - 10 ? (chFrames - f) / 10 : 1;
+          ctx.fillStyle = '#0a0a10';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.save();
+          ctx.globalAlpha = fadeA;
+          const cg = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+          cg.addColorStop(0, brand.primaryColor + 'e6');
+          cg.addColorStop(1, brand.primaryColor);
+          ctx.fillStyle = cg;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = 'rgba(255,255,255,0.7)';
+          ctx.font = `500 ${Math.round(canvas.height * 0.04)}px Inter, system-ui, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('CHAPTER', canvas.width / 2, canvas.height * 0.40);
+          ctx.fillStyle = '#fff';
+          ctx.font = `bold ${Math.round(canvas.height * 0.09)}px Inter, system-ui, sans-serif`;
+          ctx.fillText(exportChapter.chapterTitle, canvas.width / 2, canvas.height * 0.55);
+          ctx.restore();
+          jitter();
+          if (videoTrack && (videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
+          await delay(0);
         }
       }
-      
-      const currentAsset = masterFrame || asset;
-      if (!currentAsset) continue;
 
-      try {
-        await renderer.render(
+      // Cross-context reorientation beat — hold at overview for ~120 ms of real frames
+      const sameCtx = CinematicMath.isSameContext(prevStep, step);
+      if (!sameCtx && i > 0) {
+        const overviewFrames = Math.round(fps * 0.13);
+        for (let of = 0; of < overviewFrames; of++) {
+          const sox = simSpring(springX, velX, 50, RenderConstants.CAMERA_XY_SPRING.stiffness, RenderConstants.CAMERA_XY_SPRING.damping, RenderConstants.CAMERA_XY_SPRING.mass);
+          const soy = simSpring(springY, velY, 50, RenderConstants.CAMERA_XY_SPRING.stiffness, RenderConstants.CAMERA_XY_SPRING.damping, RenderConstants.CAMERA_XY_SPRING.mass);
+          const sos = simSpring(springScale, velScale, 1.0, RenderConstants.CAMERA_SCALE_SPRING.stiffness, RenderConstants.CAMERA_SCALE_SPRING.damping, RenderConstants.CAMERA_SCALE_SPRING.mass);
+          springX = sox.value; velX = sox.velocity;
+          springY = soy.value; velY = soy.velocity;
+          springScale = sos.value; velScale = sos.velocity;
+          jitter();
+          if (videoTrack && (videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
+          await delay(0);
+        }
+      }
+
+      const stepDurationSec = Math.max(2,
+        step.voiceoverDurationMs
+          ? step.voiceoverDurationMs / 1000
+          : 3.5,
+      );
+      const stepFrames = Math.floor(stepDurationSec * fps);
+      const hasTimestamp = step.timestamp != null && step.timestamp > 0;
+
+      for (let f = 0; f < stepFrames; f++) {
+        const progress = f / stepFrames;
+        exportTimeMs += 1000 / fps;
+
+        // Advance spring
+        const sx = simSpring(springX, velX, target.pctX,
+          RenderConstants.CAMERA_XY_SPRING.stiffness,
+          RenderConstants.CAMERA_XY_SPRING.damping,
+          RenderConstants.CAMERA_XY_SPRING.mass);
+        const sy = simSpring(springY, velY, target.pctY,
+          RenderConstants.CAMERA_XY_SPRING.stiffness,
+          RenderConstants.CAMERA_XY_SPRING.damping,
+          RenderConstants.CAMERA_XY_SPRING.mass);
+        const ss = simSpring(springScale, velScale, target.scale,
+          RenderConstants.CAMERA_SCALE_SPRING.stiffness,
+          RenderConstants.CAMERA_SCALE_SPRING.damping,
+          RenderConstants.CAMERA_SCALE_SPRING.mass);
+        springX = sx.value; velX = sx.velocity;
+        springY = sy.value; velY = sy.velocity;
+        springScale = ss.value; velScale = ss.velocity;
+
+        // Frame extraction — skip if video has not advanced enough (≥ 30ms = 2 source frames)
+        if (hasTimestamp && extractor) {
+          const videoMs = (step.timestamp || 0) + progress * stepDurationSec * 1000;
+          const relMs   = toRelativeMs(videoMs);
+          const safeMs  = Math.max(absLastLoggedMs + 1, Math.floor(relMs));
+
+          if (!masterFrame || (safeMs - absLastLoggedMs) >= 30) {
+            const newFrame = await getFrameSafe(relMs);
+            if (newFrame) {
+              masterFrame?.close();
+              masterFrame = newFrame;
+              absLastLoggedMs = safeMs;
+            }
+          }
+        }
+
+        const asset = masterFrame;
+        if (!asset && !hasTimestamp) continue;
+
+        // Render
+        renderer.render(
           ctx,
           {
             dimensions: { width: canvas.width, height: canvas.height },
-            step: step, 
-            prevStep: prevStep, 
-            progress: springProgress, 
+            step, prevStep, progress,
             theme: {
               primaryColor: brand.primaryColor,
               logoUrl: brand.logoUrl ?? undefined,
-              watermark: brand.watermark ?? undefined
-            }, 
-            renderMode: renderMode 
+              watermark: brand.watermark ?? undefined,
+            },
+            renderMode,
+            camera: { pctX: springX, pctY: springY, scale: springScale },
+            timeMs: exportTimeMs,
           },
-          currentAsset
+          asset,
         );
-        
-        // --- SYNCHRONIZED 60FPS HEARTBEAT ---
-        // 1. Force the recorder to capture the CURRENT state of the canvas
+
+        jitter();
         if (videoTrack && (videoTrack as any).requestFrame) {
           (videoTrack as any).requestFrame();
         }
-        
-        // 2. Yield to the compositor to ensure the frame is flushed to the stream
-        await new Promise(res => requestAnimationFrame(() => res(null)));
-        
-        // --- SELECTIVE PROGRESS LOGGING (Noise Reduction) ---
-        const totalFrames = steps.length * stepFrames;
-        const currentTotalFrame = (i * stepFrames) + f;
-        const progressPct = (currentTotalFrame / totalFrames) * 100;
-        
-        if (Math.floor(progressPct) % 5 === 0 && f === 0) {
-          console.log(`🎬 [Export Progress] ${Math.round(progressPct)}% Complete`);
-          store.setExportProgress(progressPct);
-          if (infoOverlay) infoOverlay.innerText = `🎬 Exporting: ${Math.round(progressPct)}%`;
+
+        // Yield to browser so MediaRecorder can consume the frame.
+        // requestAnimationFrame was used previously but created a hard 16.7 ms
+        // wall-clock floor per frame even when the GPU was idle.
+        // setTimeout(0) is much faster while still giving the browser a chance
+        // to process events between frames.
+        await delay(0);
+
+        // Progress reporting (cheap, only on frame 0 of each step)
+        if (f === 0) {
+          const pct = Math.round((i / steps.length) * 100);
+          store.setExportProgress(pct);
+          overlay.innerText = `🎬 Exporting… ${pct}%  (step ${i + 1}/${steps.length})`;
         }
-        
-        injectJitter();
-      } catch (err) {
-        console.error("❌ [Export] Render tick error:", err);
-      } finally {
-        ctx.restore();
       }
-      
-      framesRequested++; 
-      framesDrawn++;
-    }
-    if (masterFrame) {
-      masterFrame.close();
+
+      masterFrame?.close();
       masterFrame = null;
     }
-    currentX = targetCenterX;
-    
-    if (i % 5 === 0) validateCanvasIntegrity();
-  }
 
-  console.log(`🎬 [Export] Loop Finished. Frames Drawn: ${framesDrawn}, Requested: ${framesRequested}`);
-  console.log(`🎬 [Export] Waiting for final chunks to flush...`);
-  
-  await new Promise(res => {
-    recorder.onstop = res;
-    recorder.stop();
-  });
+    // ── Outro slide (3 s) ──────────────────────────────────────────────────
+    if (brand.showOutro) {
+      const watermarkText = brand.watermark || 'StudioBase';
+      const outroFrames = Math.round(fps * 3);
+      for (let f = 0; f < outroFrames; f++) {
+        const fadeA = f < 15 ? f / 15 : f > outroFrames - 15 ? (outroFrames - f) / 15 : 1;
+        ctx.fillStyle = '#0a0a10';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.globalAlpha = fadeA;
+        const og = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+        og.addColorStop(0, brand.primaryColor + 'f0');
+        og.addColorStop(1, brand.primaryColor);
+        ctx.fillStyle = og;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.round(canvas.height * 0.06)}px Inter, system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(watermarkText, canvas.width / 2, canvas.height / 2);
+        ctx.restore();
+        jitter();
+        if (videoTrack && (videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
+        await delay(0);
+      }
+    }
 
-  // --- CLEANUP ---
-  document.body.removeChild(infoOverlay);
-  document.body.removeChild(exportVideo);
-  if (reader) reader.cancel();
-  if (track) track.stop();
-  if (latestVideoFrame) latestVideoFrame.close();
+    // ── Finalise ───────────────────────────────────────────────────────────
+    await new Promise<void>((res) => {
+      recorder.onstop = () => res();
+      recorder.stop();
+    });
 
-  const statsTotalFrames = successfulFrames + failedFrames;
-  const successRate = statsTotalFrames > 0 ? (successfulFrames / statsTotalFrames) * 100 : 0;
-  
-  console.log(`
-  🎬 [Export Summary]
-  -------------------
-  Total Frames Drawn: ${framesDrawn}
-  Sampled Validations: ${statsTotalFrames}
-  Successful Extractions: ${successfulFrames}
-  Failed Extractions (Magenta): ${failedFrames}
-  Success Rate: ${successRate.toFixed(1)}%
-  Final Blob Size: ${(totalBytes/1024/1024).toFixed(2)}MB
-  -------------------
-  `);
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    if (blob.size < 1000) throw new Error('Export output is empty or corrupted');
 
-  } catch (err) {
-    console.error("❌ [Export] Fatal error:", err);
+    // Download
+    const url = URL.createObjectURL(blob);
+    const a   = Object.assign(document.createElement('a'), {
+      href: url,
+      download: `${session?.aiOutputs?.title || 'studiobase-cinematic'}.webm`,
+    });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+
+    // Cloud sync
+    store.setExportStatus('finishing');
+    overlay.innerText = '☁️ Uploading to Cloud…';
+    try {
+      const exportKey = `videos/${sessionId}/export_${Date.now()}.webm`;
+      await apiClient.request(`/assets/file?key=${encodeURIComponent(exportKey)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'video/webm' },
+        body: blob,
+      });
+      await apiClient.request(`/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ r2VideoKey: exportKey, r2ExportKey: exportKey }),
+      });
+    } catch (e) {
+      console.error('[Export] Cloud sync failed:', e);
+      store.setExportError('Cloud sync failed. File saved locally.');
+    }
+
+    store.setExportStatus('completed');
+    TelemetryService.record({
+      eventName: 'export.completed', sessionId, workspaceId,
+      properties: { size: blob.size },
+    });
+    analyticsClient.track({
+      sessionId, workspaceId,
+      eventType: 'export_triggered',
+      metadata: { size: blob.size },
+    });
+
+  } catch (err: any) {
+    console.error('[Export] Fatal:', err);
+    store.setExportStatus('failed');
+    store.setExportError(err.message);
   } finally {
-    if (extractor) await extractor.destroy();
-    store.setIsExporting(false);
-    
-    if (infoOverlay && document.body.contains(infoOverlay)) document.body.removeChild(infoOverlay);
-    if (exportVideo && document.body.contains(exportVideo)) document.body.removeChild(exportVideo);
+    if (extractor) await extractor.destroy().catch(() => {});
     if (videoTrack) videoTrack.stop();
-  }
-
-  // --- AUTO DOWNLOAD & R2 UPLOAD ---
-  const finalBlob = new Blob(chunks, { type: 'video/webm' });
-  const url = URL.createObjectURL(finalBlob);
-  
-  // 1. Local Download Trigger
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `StudioBase_Export_${new Date().getTime()}.webm`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
-
-  // 2. R2 Upload & Pipeline Update
-  if (infoOverlay) {
-    document.body.appendChild(infoOverlay); // Re-add if needed
-    infoOverlay.innerText = '☁️ Uploading Export to Cloud...';
-  }
-
-  try {
-    const exportKey = `videos/${sessionId}/export_${Date.now()}.webm`;
-    
-    // Upload Blob to R2
-    await apiClient.request(`/assets/file?key=${encodeURIComponent(exportKey)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'video/webm' },
-      body: finalBlob
-    });
-
-    // Patch session with the new export key
-    await apiClient.request(`/sessions/${sessionId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ r2VideoKey: exportKey, r2ExportKey: exportKey })
-    });
-
-    if (infoOverlay) infoOverlay.innerText = '✅ Export Saved to Cloud';
-    setTimeout(() => {
-      if (infoOverlay && document.body.contains(infoOverlay)) document.body.removeChild(infoOverlay);
-    }, 2000);
-  } catch (uploadErr) {
-    console.error("❌ [Export] Cloud sync failed:", uploadErr);
-    if (infoOverlay) infoOverlay.innerText = '⚠️ Cloud Sync Failed (Local saved)';
-    setTimeout(() => {
-      if (infoOverlay && document.body.contains(infoOverlay)) document.body.removeChild(infoOverlay);
-    }, 3000);
+    canvas.remove();
+    overlay.remove();
+    store.setIsExporting(false);
   }
 }
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+type ViewMode = 'cinematic' | 'raw';
 
 export const VideoCanvas: React.FC = () => {
   const {
@@ -590,405 +449,689 @@ export const VideoCanvas: React.FC = () => {
     setStepIndex,
     brand,
     isExporting,
-    exportTrigger
+    exportTrigger,
   } = useStudioStore();
 
-  const [audio] = useState(new Audio());
-  const [isEnded, setIsEnded] = useState(false);
-  const ghostIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-  const playerRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const renderer = useMemo(() => new CanvasRenderer(), []);
-  const stepStartTimeRef = useRef<number>(0);
-  
-  // GOLDEN SOUL: Physics-based progress spring for hardware-synced smoothness
-  const progressSpring = useSpring(0, { stiffness: 120, damping: 24, restDelta: 0.001 });
-  
-  // SLIDE CACHE: Preload screenshots for slideshow mode
-  const slideImageRef = useRef<HTMLImageElement | null>(null);
+  const [viewMode, setViewMode]   = useState<ViewMode>('cinematic');
+  const [embedOpen, setEmbedOpen] = useState(false);
+  const [isEnded, setIsEnded]     = useState(false);
+  const [audioEl] = useState(() => new Audio());
 
+  // PATCH 4: Intro / Outro slide state
+  const [showIntroSlide, setShowIntroSlide] = useState(false);
+  const [introVisible,   setIntroVisible]   = useState(false);
+  const [showOutroSlide, setShowOutroSlide] = useState(false);
+  const [outroVisible,   setOutroVisible]   = useState(false);
+
+  // PATCH 5: Chapter card state
+  const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
+
+  const playerRef      = useRef<HTMLDivElement>(null);
+  const videoRef       = useRef<HTMLVideoElement>(null);
+  const rawVideoRef    = useRef<HTMLVideoElement>(null);
+  const canvasRef      = useRef<HTMLCanvasElement>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null); // direct DOM update for smooth fill
+  const renderer       = useMemo(() => new CanvasRenderer(), []);
+
+  // ── Camera springs (framer-motion) ──────────────────────────────────────
+  const { stiffness: sxy, damping: dxy, mass: mxy } = RenderConstants.CAMERA_XY_SPRING;
+  const { stiffness: ss,  damping: ds,  mass: ms  } = RenderConstants.CAMERA_SCALE_SPRING;
+  const camX     = useSpring(50,  { stiffness: sxy, damping: dxy, mass: mxy });
+  const camY     = useSpring(50,  { stiffness: sxy, damping: dxy, mass: mxy });
+  const camScale = useSpring(1.0, { stiffness: ss,  damping: ds,  mass: ms  });
+
+  const renderMode = useStudioStore((s) => s.renderMode);
+  const steps      = session?.steps || [];
+  const currentStep = steps[currentStepIndex];
+  const prevStep    = steps[currentStepIndex - 1] ?? null;
+
+  const rawVideoUrl = session?.videoKey
+    ? (session.assets?.[session.videoKey] ?? null)
+    : null;
+  const hybridVideoUrl = renderMode === 'hybrid' ? rawVideoUrl : null;
+
+  // ── Export trigger ───────────────────────────────────────────────────────
   useEffect(() => {
     if (exportTrigger > 0 && !isExporting && useStudioStore.getState().activeView === 'video') {
-      handleSOPVideoExport({ session, theme: brand, renderMode: useStudioStore.getState().renderMode });
+      handleSOPVideoExport({ session, theme: brand, renderMode: 'slideshow' });
     }
   }, [exportTrigger]);
 
-  const renderMode = useStudioStore(state => state.renderMode);
-  const rawVideoUrl = session?.videoKey ? (session.assets?.[session.videoKey] ?? null) : null;
-  const videoUrl = renderMode === 'hybrid' ? rawVideoUrl : null;
-
-  const steps = session?.steps || [];
-  const currentStep = steps[currentStepIndex];
-  const prevStep = steps[currentStepIndex - 1];
-
+  // PATCH 4: Stable session-end handler — captures latest brand.showOutro
+  const handleSessionEndRef = useRef<() => void>(() => { setIsEnded(true); });
   useEffect(() => {
-    if (!isExporting) {
-      console.log(`🎬 [VideoCanvas] Step Transition: ${currentStepIndex} (${currentStep?.id})`);
-      
-      // GOLDEN SOUL: Reset and Trigger the physics spring for 100% parity with Framer Motion feel
-      progressSpring.set(0);
-      setTimeout(() => progressSpring.set(1), 0);
-      
-      // LATCH: Record both the video playhead and the wall-clock time for the hybrid timer
-      if (videoRef.current) {
-        stepStartTimeRef.current = videoRef.current.currentTime * 1000;
-      }
-      (window as any).uiStepChangeTime = performance.now();
-    }
-  }, [currentStepIndex, currentStep?.id, isExporting, progressSpring]);
-
-  // --- SLIDE PRELOADER ---
-  useEffect(() => {
-    if (renderMode === 'slideshow' && currentStep?.screenshotKey) {
-      const url = session?.assets?.[currentStep.screenshotKey];
-      if (url) {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = url;
-        img.onload = () => {
-          slideImageRef.current = img;
-        };
-      }
-    }
-  }, [currentStep?.id, renderMode, session?.assets]);
-
-
-
-  useEffect(() => {
-    if (ghostIntervalRef.current) {
-      clearInterval(ghostIntervalRef.current);
-      ghostIntervalRef.current = null;
-    }
-
-    if (!isPlaying) return;
-    const value = currentStep?.inputValue;
-    if (!value || currentStep?.action !== 'input') return;
-
-    let i = 0;
-    ghostIntervalRef.current = setInterval(() => {
-      i++;
-      if (i >= value.length) {
-        if (ghostIntervalRef.current) clearInterval(ghostIntervalRef.current);
-        ghostIntervalRef.current = null;
-      }
-    }, 60);
-
-    return () => {
-      if (ghostIntervalRef.current) {
-        clearInterval(ghostIntervalRef.current);
-        ghostIntervalRef.current = null;
+    handleSessionEndRef.current = () => {
+      setPlaying(false);
+      const completionMs = Math.round(performance.now() - stepEnteredAt.current);
+      analyticsClient.track({ sessionId, sopId, workspaceId, eventType: 'sop_completed', durationMs: completionMs });
+      if (brand.showOutro) {
+        setShowOutroSlide(true);
+        setOutroVisible(true);
+        setTimeout(() => {
+          setOutroVisible(false);
+          setTimeout(() => { setShowOutroSlide(false); setIsEnded(true); }, 400);
+        }, 3000);
+      } else {
+        setIsEnded(true);
       }
     };
+  }, [brand.showOutro]);
+
+  // PATCH 5: Chapter card on step change
+  useEffect(() => {
+    if (!isPlaying || currentStepIndex === 0) return;
+    const chapterBreaks = session?.metadata?.chapterBreaks || [];
+    const prevStepId = steps[currentStepIndex - 1]?.id;
+    if (!prevStepId) return;
+    const chapter = (chapterBreaks as any[]).find((c) => c.afterStepId === prevStepId);
+    if (!chapter) return;
+    setShowChapterCard(chapter.chapterTitle);
+    const t = setTimeout(() => setShowChapterCard(null), 2000);
+    return () => clearTimeout(t);
   }, [currentStepIndex, isPlaying]);
 
-  // Sync video playback and seeking
+  // ── Step change: update camera springs ──────────────────────────────────
   useEffect(() => {
-    if (!videoRef.current || !videoUrl) return;
-    
-    const v = videoRef.current;
-    const handleVideoError = () => {
-      console.error("🎬 [VideoPlayer] Video playback error:", v.error);
-    };
-    const handleCanPlay = () => {
-      console.log("🎬 [VideoPlayer] Video is ready to play");
-    };
-    
-    v.addEventListener('error', handleVideoError);
-    v.addEventListener('canplay', handleCanPlay);
-    
-    return () => {
-      v.removeEventListener('error', handleVideoError);
-      v.removeEventListener('canplay', handleCanPlay);
-    };
-  }, [videoUrl]);
+    if (!currentStep || isExporting) return;
+    const target  = CinematicMath.getTarget(currentStep, renderMode);
+    const sameCtx = CinematicMath.isSameContext(prevStep, currentStep);
 
-  useEffect(() => {
-    if (!videoRef.current || !videoUrl || isPlaying) return; // Don't force seek while playing
-    const step = steps[currentStepIndex];
-    if (step?.timestamp != null) {
-      const targetTime = step.timestamp / 1000;
-      if (Math.abs(videoRef.current.currentTime - targetTime) > 0.5) {
-        videoRef.current.currentTime = targetTime;
+    if (sameCtx) {
+      // Same page — spring directly to new target
+      camX.set(target.pctX);
+      camY.set(target.pctY);
+      camScale.set(target.scale);
+    } else {
+      // Cross-context — briefly return to overview then snap to new target
+      camScale.set(1.0);
+      camX.set(50);
+      camY.set(50);
+      const t = setTimeout(() => {
+        camX.set(target.pctX);
+        camY.set(target.pctY);
+        camScale.set(target.scale);
+      }, 120);
+      return () => clearTimeout(t);
+    }
+
+    // Reset raw video seek position
+    if (videoRef.current && hybridVideoUrl && !isPlaying) {
+      const seekT = (currentStep.timestamp || 0) / 1000;
+      if (Math.abs(videoRef.current.currentTime - seekT) > 0.15) {
+        videoRef.current.currentTime = seekT;
       }
     }
-  }, [currentStepIndex, videoUrl, isPlaying]);
+
+    (window as any)._stepChangeTime = performance.now();
+  }, [currentStepIndex, currentStep?.id, currentStep?.animationTarget, renderMode]);
+
+  // ── Slide preloader ──────────────────────────────────────────────────────
+  // Always preload screenshot so paused hybrid frames have a static fallback.
+  const slideImageRef = useRef<HTMLImageElement | null>(null);
+  useEffect(() => {
+    if (!currentStep?.screenshotKey) return;
+    const url = session?.assets?.[currentStep.screenshotKey];
+    if (!url) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    img.onload = () => { slideImageRef.current = img; };
+  }, [currentStep?.id]);
+
+  // ── Video playback control ───────────────────────────────────────────────
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !hybridVideoUrl) return;
+    if (isPlaying && renderMode === 'hybrid') v.play().catch(() => {});
+    else v.pause();
+  }, [isPlaying, hybridVideoUrl, renderMode]);
 
   useEffect(() => {
-    if (!videoRef.current || !videoUrl) return;
-    if (isPlaying) {
-      videoRef.current.play().catch(() => {});
+    if (videoRef.current) videoRef.current.playbackRate = playbackRate;
+    if (rawVideoRef.current) rawVideoRef.current.playbackRate = playbackRate;
+  }, [playbackRate]);
+
+  // ── Auto-advance (slideshow) ─────────────────────────────────────────────
+  const stepStartWall = useRef(performance.now());
+  useEffect(() => { stepStartWall.current = performance.now(); }, [currentStepIndex]);
+
+  // Analytics tracking refs
+  const viewedSteps = useRef<Set<number>>(new Set());
+  const stepEnteredAt = useRef<number>(performance.now());
+
+  const sopId: string | null = (session as any)?.sopId ?? null;
+  const sessionId: string = session?.sessionId ?? 'unknown';
+  const workspaceId: string = (session as any)?.workspaceId ?? 'default';
+
+  // Track step_viewed / step_skipped / step_replayed on step change
+  useEffect(() => {
+    if (!session || isExporting) return;
+    const now = performance.now();
+    const prevIndex = currentStepIndex - 1;
+    // Record dwell on the previous step before moving
+    if (viewedSteps.current.size > 0 && prevIndex >= 0) {
+      const dwell = Math.round(now - stepEnteredAt.current);
+      if (dwell < 2000) {
+        analyticsClient.track({ sessionId, sopId, workspaceId, stepIndex: prevIndex, eventType: 'step_skipped', durationMs: dwell });
+      }
+    }
+    stepEnteredAt.current = now;
+    const alreadySeen = viewedSteps.current.has(currentStepIndex);
+    if (alreadySeen) {
+      analyticsClient.track({ sessionId, sopId, workspaceId, stepIndex: currentStepIndex, eventType: 'step_replayed' });
     } else {
-      videoRef.current.pause();
+      viewedSteps.current.add(currentStepIndex);
+      analyticsClient.track({ sessionId, sopId, workspaceId, stepIndex: currentStepIndex, eventType: 'step_viewed' });
     }
-  }, [isPlaying, videoUrl]);
+  }, [currentStepIndex]);
 
+  // Track sop_abandoned on unload
   useEffect(() => {
-    if (!videoRef.current || !videoUrl) return;
-    videoRef.current.playbackRate = playbackRate;
-  }, [playbackRate, videoUrl]);
+    if (!session) return;
+    const onUnload = () => {
+      const lastStep = viewedSteps.current.size > 0 ? Math.max(...viewedSteps.current) : null;
+      const totalStepsCount = (session?.steps || []).length;
+      if (lastStep === null || lastStep < totalStepsCount - 1) {
+        analyticsClient.track({ sessionId, sopId, workspaceId, stepIndex: lastStep, eventType: 'sop_abandoned' });
+      }
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [session]);
 
-
-
-  // Voiceover playback (Audio only, no longer controls step advancement)
+  // ── Voiceover ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isPlaying) {
-      audio.pause();
-      return;
-    }
-
+    if (!isPlaying) { audioEl.pause(); return; }
     if (currentStep?.voiceoverKey) {
       const url = apiClient.getUrl(`/assets/${currentStep.voiceoverKey}`);
-      if (audio.src !== url) {
-        audio.src = url;
-      }
-      audio.playbackRate = playbackRate;
-      audio.play().catch(console.error);
+      if (audioEl.src !== url) audioEl.src = url;
+      audioEl.playbackRate = playbackRate;
+      audioEl.play().catch(console.error);
     } else {
-      audio.pause();
+      audioEl.pause();
     }
   }, [currentStepIndex, isPlaying, playbackRate, currentStep?.voiceoverKey]);
 
-  // --- UNIFIED PREVIEW LOOP (rAF) ---
+  // ── Main rAF render loop ─────────────────────────────────────────────────
   useEffect(() => {
-    let rafId: number;
-    
-    const tick = () => {
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      if (!canvas || !video || !currentStep) {
-        rafId = requestAnimationFrame(tick);
-        return;
-      }
+    if (viewMode !== 'cinematic') return; // Raw player handles its own rendering
 
-      // 1. Internal Resolution Handling (2880x1440 standard)
-      const internalW = 2880;
-      const internalH = 1444;
-      
-      if (canvas.width !== internalW || canvas.height !== internalH) {
-        canvas.width = internalW;
-        canvas.height = internalH;
+    let rafId: number;
+
+    const tick = () => {
+      const canvas  = canvasRef.current;
+      const video   = videoRef.current;
+      if (!canvas || !currentStep) { rafId = requestAnimationFrame(tick); return; }
+
+      const cW = RenderConstants.PREVIEW_WIDTH;
+      const cH = RenderConstants.PREVIEW_HEIGHT;
+      if (canvas.width !== cW || canvas.height !== cH) {
+        canvas.width  = cW;
+        canvas.height = cH;
       }
 
       const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        rafId = requestAnimationFrame(tick);
-        return;
-      }
+      if (!ctx) { rafId = requestAnimationFrame(tick); return; }
 
-      // 2. Smooth Cinematic Progress & Latched Step Transition
-      const videoMs = video.currentTime * 1000;
-      const wallClockElapsed = performance.now() - ((window as any).uiStepChangeTime || performance.now());
-
-      // --- PLAYHEAD LATCH: Advance Step Index based on Video Time (Hybrid Mode) ---
-      const nextStep = steps[currentStepIndex + 1];
-      if (renderMode === 'hybrid' && isPlaying && nextStep && videoMs >= (nextStep.timestamp || 0)) {
-        if (currentStepIndex < steps.length - 1) {
-          setStepIndex(currentStepIndex + 1);
+      // ── Hybrid auto-advance via video timestamp ────────────────────────
+      if (renderMode === 'hybrid' && isPlaying && video) {
+        const videoMs   = (video.currentTime || 0) * 1000;
+        const nextStep  = steps[currentStepIndex + 1];
+        const curState  = useStudioStore.getState();
+        if (nextStep && videoMs >= (nextStep.timestamp || 0)) {
+          if (currentStepIndex < steps.length - 1) {
+            curState.setStepIndex(currentStepIndex + 1);
+          }
+        }
+        if (isPlaying && !nextStep && video.ended) {
+          handleSessionEndRef.current();
         }
       }
 
-      // --- SLIDES AUTO-ADVANCE: 3-second wall-clock latch ---
-      if (renderMode === 'slideshow' && isPlaying && wallClockElapsed >= 3000) {
-        if (currentStepIndex < steps.length - 1) {
-          setStepIndex(currentStepIndex + 1);
-        } else {
-          setPlaying(false);
-          setIsEnded(true);
+      // ── Slideshow auto-advance — respects voiceover duration + playback rate ──
+      if (renderMode === 'slideshow' && isPlaying) {
+        const elapsed   = performance.now() - stepStartWall.current;
+        const stepMs    = Math.max(2000, currentStep?.voiceoverDurationMs || 3500);
+        const effectiveMs = stepMs / (playbackRate || 1);
+
+        // Smooth progress bar — direct DOM write, no React re-render
+        if (progressBarRef.current) {
+          const completedFraction = currentStepIndex / steps.length;
+          const stepFraction      = (elapsed / effectiveMs) / steps.length;
+          const pct = Math.min(100, (completedFraction + stepFraction) * 100);
+          progressBarRef.current.style.width = `${pct}%`;
+        }
+
+        if (elapsed >= effectiveMs) {
+          const cs = useStudioStore.getState();
+          if (cs.currentStepIndex < steps.length - 1) {
+            cs.setStepIndex(cs.currentStepIndex + 1);
+          } else {
+            handleSessionEndRef.current();
+          }
         }
       }
 
-      // --- PLAYHEAD LATCH: Handle End of Session ---
-      if (isPlaying && !nextStep && video.ended) {
-        setPlaying(false);
-        setIsEnded(true);
-      }
-      
-      // GOLDEN SOUL: Read the physics-synced spring value
-      const springProgress = progressSpring.get();
+      // ── Render ────────────────────────────────────────────────────────
+      const masterFrame: HTMLVideoElement | HTMLImageElement | null =
+        renderMode === 'hybrid' && video && !video.paused && !video.ended
+          ? video
+          : (slideImageRef.current ?? (video ?? null));
 
-      // 3. Cinematic Draw Sequence (RETINA SCALED)
-      ctx.clearRect(0, 0, internalW, internalH);
-      ctx.save();
-      
       renderer.render(
         ctx,
         {
-          dimensions: { width: internalW, height: internalH },
+          dimensions: { width: cW, height: cH },
           step: currentStep,
-          prevStep: prevStep,
-          progress: springProgress,
+          prevStep,
+          progress: 1.0, // springs drive camera — progress only used for overlay effects
           theme: {
             primaryColor: brand.primaryColor,
             logoUrl: brand.logoUrl ?? undefined,
-            watermark: brand.watermark ?? undefined
+            watermark: brand.watermark ?? undefined,
           },
-          renderMode: renderMode || 'hybrid'
+          renderMode: renderMode || 'hybrid',
+          camera: {
+            pctX:  camX.get(),
+            pctY:  camY.get(),
+            scale: camScale.get(),
+          },
+          timeMs: performance.now(),
         },
-        renderMode === 'hybrid' ? video : (slideImageRef.current || video)
+        masterFrame,
       );
-
-      ctx.restore();
 
       rafId = requestAnimationFrame(tick);
     };
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [currentStepIndex, isPlaying, brand, renderMode, steps]);
+  }, [currentStepIndex, isPlaying, brand, renderMode, steps, viewMode]);
 
   if (!session) return null;
 
+  const totalSteps = steps.length;
+
   return (
-    <div ref={playerRef} className="flex-1 min-h-0 bg-surface flex flex-col relative group">
-      {/* DETERMINISTIC HIDDEN VIDEO FOR RENDERER TAPPING */}
-      {videoUrl && (
-        <video 
+    <div className="flex-1 min-h-0 flex flex-col relative">
+      {/* Hidden video element — feeds cinematic canvas in hybrid mode */}
+      {hybridVideoUrl && (
+        <video
           ref={videoRef}
-          src={videoUrl}
+          src={hybridVideoUrl}
           crossOrigin="anonymous"
           className="hidden"
           playsInline
           muted
+          preload="auto"
         />
       )}
 
-      {/* COMPOSITOR CANVAS (The Visible Soul) */}
-      <div className="flex-1 relative flex items-center justify-center p-8 overflow-hidden">
-        <div className="relative shadow-2xl rounded-sm overflow-hidden bg-black aspect-video max-h-full">
-          <canvas 
-            ref={canvasRef}
-            className="w-full h-full block"
-            style={{ 
-              imageRendering: 'crisp-edges' 
+      <style>{`
+        .studio-gradient {
+          background:
+            radial-gradient(ellipse at 30% 20%, rgba(99,102,241,0.10) 0%, transparent 60%),
+            radial-gradient(ellipse at 70% 80%, rgba(139,92,246,0.07) 0%, transparent 60%),
+            #111120;
+        }
+        @keyframes beam-drift {
+          0%   { transform: translateX(-60%) skewX(-12deg); opacity: 0; }
+          10%  { opacity: 1; }
+          90%  { opacity: 1; }
+          100% { transform: translateX(160%) skewX(-12deg); opacity: 0; }
+        }
+        .beam-drift { animation: beam-drift 5s ease-in-out infinite; }
+        @keyframes border-travel {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+        .border-travel { animation: border-travel 4s linear infinite; }
+      `}</style>
+
+      {/* ── Viewing area ───────────────────────────────────────────────── */}
+      <div className="flex-1 studio-gradient flex flex-col items-center justify-start py-16 px-8 min-h-0 overflow-y-auto">
+
+        {/* Floating player card — outer shell clips rotating border to 1.5px edge */}
+        <div
+          ref={playerRef}
+          className={cn(
+            'relative w-full max-w-5xl rounded-[18px] overflow-hidden',
+            viewMode !== 'cinematic' && 'hidden',
+          )}
+          style={{
+            maxHeight: 'calc(100vh - 280px)',
+            aspectRatio: '16/9',
+            padding: '1.5px',
+            filter: 'drop-shadow(0 20px 60px rgba(0,0,0,0.70)) drop-shadow(0 4px 6px rgba(0,0,0,0.30)) drop-shadow(0 0 40px rgba(99,102,241,0.05))',
+          }}
+        >
+          {/* Traveling border light — single bright spot sweeps the perimeter */}
+          <div
+            className="border-travel absolute pointer-events-none"
+            style={{
+              inset: '-150%',
+              background: `conic-gradient(from 0deg,
+                transparent 0%,
+                transparent 78%,
+                ${brand.primaryColor}55 86%,
+                rgba(255,255,255,0.32) 90%,
+                ${brand.primaryColor}55 94%,
+                transparent 100%
+              )`,
             }}
           />
-          
-          {/* Overlay for ended state */}
+
+          {/* Inner card */}
+          <div className="absolute inset-[1.5px] rounded-2xl overflow-hidden bg-[#12121a]">
+
+          {/* DOM background layers — visual richness for preview (z-0, behind canvas) */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+            <div className="absolute inset-0"
+              style={{
+                background: `radial-gradient(ellipse at 20% 80%, ${brand.primaryColor}1a 0%, transparent 55%),
+                             radial-gradient(ellipse at 80% 20%, rgba(139,92,246,0.12) 0%, transparent 50%)`,
+              }}
+            />
+            <div
+              className="beam-drift absolute top-0 bottom-0 w-[40%]"
+              style={{
+                background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.028), transparent)',
+                filter: 'blur(40px)',
+              }}
+            />
+            <div
+              className="absolute inset-0 animate-pulse"
+              style={{
+                background: `radial-gradient(ellipse at 50% 50%, ${brand.primaryColor}12 0%, transparent 65%)`,
+                animationDuration: '4s',
+              }}
+            />
+          </div>
+
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full block z-10"
+            style={{ imageRendering: 'auto' }}
+          />
+
+          {/* Inset edge glow */}
+          <div className="absolute inset-0 rounded-2xl pointer-events-none z-10"
+            style={{ boxShadow: 'inset 0 0 0 1px rgba(139,92,246,0.10), inset 0 0 24px rgba(99,102,241,0.04)' }}
+          />
+
+          {/* Watermark */}
+          {brand.watermark && (
+            <div className="absolute bottom-3 right-4 z-20 pointer-events-none opacity-55">
+              {brand.logoUrl
+                ? <img src={brand.logoUrl} className="h-5 object-contain" alt={brand.watermark} />
+                : <span className="text-white text-[11px] font-semibold tracking-wide">{brand.watermark}</span>
+              }
+            </div>
+          )}
+
+          {/* Intro slide */}
+          <AnimatePresence>
+            {showIntroSlide && (
+              <motion.div
+                key="intro"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: introVisible ? 1 : 0 }}
+                transition={{ duration: 0.4 }}
+                className="absolute inset-0 z-30 flex flex-col items-center justify-center text-center p-10"
+                style={{ background: `linear-gradient(135deg, ${brand.primaryColor}f0, ${brand.primaryColor})` }}
+              >
+                {brand.logoUrl && (
+                  <img src={brand.logoUrl} className="h-14 object-contain mb-6" alt="Logo" />
+                )}
+                <h2 className="text-3xl font-bold text-white mb-3">
+                  {session?.aiOutputs?.title || 'Walkthrough'}
+                </h2>
+                <p className="text-white/70 text-base">A StudioBase walkthrough</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Outro slide */}
+          <AnimatePresence>
+            {showOutroSlide && (
+              <motion.div
+                key="outro"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: outroVisible ? 1 : 0 }}
+                transition={{ duration: 0.4 }}
+                className="absolute inset-0 z-30 flex flex-col items-center justify-center text-center p-10"
+                style={{ background: `linear-gradient(135deg, ${brand.primaryColor}f0, ${brand.primaryColor})` }}
+              >
+                {brand.logoUrl && (
+                  <img src={brand.logoUrl} className="h-14 object-contain mb-4" alt="Logo" />
+                )}
+                <p className="text-white text-xl font-semibold tracking-wide">{brand.watermark || 'StudioBase'}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Chapter card */}
+          <AnimatePresence>
+            {showChapterCard && (
+              <motion.div
+                key="chapter"
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.35 }}
+                className="absolute inset-0 z-30 flex flex-col items-center justify-center text-center p-10"
+                style={{ background: `linear-gradient(135deg, ${brand.primaryColor}e6, ${brand.primaryColor})` }}
+              >
+                <p className="text-white/70 text-sm uppercase tracking-widest mb-3">Chapter</p>
+                <h2 className="text-3xl font-bold text-white">{showChapterCard}</h2>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Ended overlay */}
           <AnimatePresence>
             {isEnded && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="absolute inset-0 z-20 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-center p-10"
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="absolute inset-0 z-20 bg-black/65 backdrop-blur-sm flex flex-col items-center justify-center text-center p-10"
               >
                 <div className="w-16 h-16 rounded-full bg-primary/20 text-primary flex items-center justify-center mb-6">
                   <I.CheckCircle size={32} strokeWidth={2.5} />
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-2">End of Walkthrough</h2>
-                <p className="text-white/70 max-w-[320px] mb-8">You've reached the end of the step-by-step guide.</p>
+                <p className="text-white/60 max-w-xs mb-8">You've reached the end of the step-by-step guide.</p>
                 <div className="flex gap-3">
                   <Button variant="primary" size="md" icon={I.RotateCcw} onClick={() => {
-                    setStepIndex(0);
-                    setIsEnded(false);
-                    setPlaying(true);
+                    setStepIndex(0); setIsEnded(false); setPlaying(true);
                   }}>Watch again</Button>
-                  <Button variant="ghost" size="md" className="!text-white border-white/20" onClick={() => setIsEnded(false)}>Stay on last step</Button>
+                  <Button variant="ghost" size="md"
+                    className="!text-white border-white/20"
+                    onClick={() => setIsEnded(false)}>
+                    Stay here
+                  </Button>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Rendering Overlay */}
+          {/* Export overlay */}
           <AnimatePresence>
             {isExporting && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="absolute inset-0 z-30 bg-black/80 flex flex-col items-center justify-center text-center p-10"
+              <motion.div
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                className="absolute inset-0 z-30 bg-black/85 flex flex-col items-center justify-center text-center p-10"
               >
                 <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-6" />
-                <h2 className="text-xl font-bold text-white mb-2">🎬 Rendering Cinematic Video</h2>
-                <p className="text-white/60 max-w-[320px]">Recording 60FPS high-definition frames off-screen. Please do not close this tab.</p>
-                <div className="mt-8 px-4 py-2 bg-white/10 rounded-pill text-[12px] font-mono text-white/80">
-                  EXPORT_MODE: HARDWARE_ACCELERATED
-                </div>
+                <h2 className="text-xl font-bold text-white mb-2">🎬 Rendering Cinematic Export</h2>
+                <p className="text-white/50 max-w-xs text-sm">Do not close this tab.</p>
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+          </div>{/* /inner card */}
+        </div>{/* /outer border wrapper */}
+
+        {/* Raw video player */}
+        {viewMode === 'raw' && (
+          <div className="w-full max-w-5xl flex items-center justify-center rounded-2xl overflow-hidden p-4"
+            style={{ background: 'rgba(9,9,15,0.45)', backdropFilter: 'blur(12px)' }}
+          >
+            {rawVideoUrl ? (
+              <video
+                ref={rawVideoRef}
+                src={rawVideoUrl}
+                controls
+                controlsList="nodownload"
+                className="max-w-full max-h-full rounded-xl shadow-2xl"
+                onEnded={() => setIsEnded(true)}
+              />
+            ) : (
+              <p className="text-white/30 text-sm">No raw video available for this session.</p>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* CONTROLS */}
-      <div className="h-20 border-t border-border bg-bg flex items-center px-6 gap-6 relative z-10">
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" icon={I.SkipBack} onClick={() => setStepIndex(Math.max(0, currentStepIndex - 1))} />
-          <Button 
-            variant="primary" 
-            size="md" 
-            className="w-10 h-10 !p-0 rounded-full" 
-            icon={isPlaying ? I.Pause : I.Play} 
-            onClick={() => {
-              if (isEnded) {
-                setStepIndex(0);
-                setIsEnded(false);
-              }
-              setPlaying(!isPlaying);
-            }} 
-          />
-          <Button variant="ghost" size="sm" icon={I.SkipForward} onClick={() => setStepIndex(Math.min(steps.length - 1, currentStepIndex + 1))} />
-        </div>
+      {/* ── Controls bar ───────────────────────────────────────────────── */}
+      <div className="border-t border-border bg-bg relative z-10">
 
-        <div className="flex-1 h-1.5 bg-surface-2 rounded-pill relative group/progress cursor-pointer overflow-hidden">
-          <div 
-            className="absolute inset-y-0 left-0 bg-primary transition-all duration-300" 
-            style={{ width: `${((currentStepIndex + 1) / steps.length) * 100}%` }}
-          />
-        </div>
-
-        <div className="flex items-center gap-4">
-          <div className="text-[13px] font-medium text-text-2 tabular-nums">
-            Step {currentStepIndex + 1} of {steps.length}
+        {/* Row 1: progress bar (cinematic only) */}
+        {viewMode === 'cinematic' && (
+          <div
+            className="h-1 bg-surface-2 cursor-pointer group/p"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const pct  = (e.clientX - rect.left) / rect.width;
+              setStepIndex(Math.round(pct * (totalSteps - 1)));
+            }}
+          >
+            <div
+              ref={progressBarRef}
+              className="h-full bg-primary group-hover/p:opacity-80"
+              style={{ width: `${(currentStepIndex / totalSteps) * 100}%`, transition: 'none' }}
+            />
           </div>
-          <div className="h-4 w-px bg-border" />
-          <div className="flex items-center bg-surface-2 rounded-sm p-0.5">
-            {[1, 1.5, 2].map(speed => (
-              <button 
-                key={speed}
-                onClick={() => useStudioStore.getState().setPlaybackRate(speed)}
+        )}
+
+        {/* Row 2: controls */}
+        <div className="flex items-center px-4 h-14 gap-3 pr-36">
+
+          {/* Playback */}
+          {viewMode === 'cinematic' && (
+            <div className="flex items-center gap-1 shrink-0">
+              <Button variant="ghost" size="sm" icon={I.SkipBack}
+                onClick={() => setStepIndex(Math.max(0, currentStepIndex - 1))} />
+              <Button
+                variant="primary" size="md"
+                className="w-9 h-9 !p-0 rounded-full"
+                icon={isPlaying ? I.Pause : I.Play}
+                onClick={() => {
+                  if (isEnded) { setStepIndex(0); setIsEnded(false); setPlaying(true); return; }
+                  if (!isPlaying && currentStepIndex === 0 && brand.showIntro) {
+                    setShowIntroSlide(true);
+                    setIntroVisible(true);
+                    setTimeout(() => {
+                      setIntroVisible(false);
+                      setTimeout(() => { setShowIntroSlide(false); setPlaying(true); }, 400);
+                    }, 3000);
+                    return;
+                  }
+                  setPlaying(!isPlaying);
+                }}
+              />
+              <Button variant="ghost" size="sm" icon={I.SkipForward}
+                onClick={() => setStepIndex(Math.min(totalSteps - 1, currentStepIndex + 1))} />
+            </div>
+          )}
+
+          {/* Time */}
+          {viewMode === 'cinematic' && (
+            <span className="text-[11px] text-text-3 tabular-nums shrink-0">
+              {Math.round(steps.slice(0, currentStepIndex).reduce((s, st) => s + Math.max(2000, st.voiceoverDurationMs || 3500), 0) / 1000)}s
+              {' / '}
+              {Math.round(steps.reduce((s, st) => s + Math.max(2000, st.voiceoverDurationMs || 3500), 0) / 1000)}s
+              <span className="ml-2 text-text-3/60">{currentStepIndex + 1}/{totalSteps}</span>
+            </span>
+          )}
+
+          <div className="flex-1" />
+
+          {/* Speed (cinematic only) */}
+          {viewMode === 'cinematic' && (
+            <>
+              <div className="flex items-center bg-surface-2 rounded-sm p-0.5 shrink-0">
+                {[1, 1.5, 2].map((speed) => (
+                  <button
+                    key={speed}
+                    onClick={() => useStudioStore.getState().setPlaybackRate(speed)}
+                    className={cn(
+                      'px-2.5 h-6 rounded-sm text-[11px] font-bold transition-all',
+                      playbackRate === speed ? 'bg-white shadow-sm text-primary' : 'text-text-3 hover:text-text-2',
+                    )}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+              <div className="h-4 w-px bg-border shrink-0" />
+            </>
+          )}
+
+          {/* View toggle */}
+          <div className="flex items-center bg-surface-2 rounded-sm p-0.5 shrink-0">
+            {(['cinematic', 'raw'] as ViewMode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setViewMode(m)}
                 className={cn(
-                  "px-2.5 h-7 rounded-sm text-[11px] font-bold transition-all",
-                  playbackRate === speed ? "bg-white shadow-sm text-primary" : "text-text-3 hover:text-text-2"
+                  'px-3 h-6 rounded-sm text-[11px] font-semibold capitalize transition-all',
+                  viewMode === m ? 'bg-white shadow-sm text-primary' : 'text-text-3 hover:text-text-2',
                 )}
               >
-                {speed}x
+                {m === 'cinematic' ? '✦ Cinematic' : '▶ Raw'}
               </button>
             ))}
           </div>
-          <div className="h-4 w-px bg-border" />
-          
-          <div className="flex items-center gap-2">
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              icon={I.Download} 
-              className="text-text-2 hover:text-primary"
-              onClick={() => {
-                if (rawVideoUrl) {
-                  const a = document.createElement('a');
-                  a.href = rawVideoUrl;
-                  a.download = `raw-capture-${session.sessionId}.webm`;
-                  a.click();
-                }
-              }}
-            >
-              Raw
-            </Button>
-            <Button 
-              variant="primary" 
-              size="sm" 
-              icon={I.Video} 
-              disabled={isExporting}
-              onClick={() => handleSOPVideoExport({ session, theme: brand, renderMode: useStudioStore.getState().renderMode })}
-            >
-              {isExporting ? 'Exporting...' : 'Export Cinematic'}
-            </Button>
-          </div>
 
-          <div className="h-4 w-px bg-border" />
-          <Button variant="ghost" size="sm" icon={I.Maximize} />
+          <div className="h-4 w-px bg-border shrink-0" />
+
+          {/* Export */}
+          <Button
+            variant="ghost" size="sm" icon={I.Download}
+            className="text-text-2 hover:text-primary shrink-0"
+            onClick={() => {
+              if (rawVideoUrl) {
+                Object.assign(document.createElement('a'), {
+                  href: rawVideoUrl,
+                  download: `raw-${session.sessionId}.webm`,
+                }).click();
+              }
+            }}
+          >
+            Raw
+          </Button>
+          <Button
+            variant="ghost" size="sm" icon={I.Code2}
+            className="shrink-0"
+            onClick={() => setEmbedOpen(true)}
+          >
+            Embed
+          </Button>
+          <Button
+            variant="primary" size="sm" icon={I.Video}
+            disabled={isExporting}
+            className="shrink-0"
+            onClick={() => handleSOPVideoExport({ session, theme: brand, renderMode: 'slideshow' })}
+          >
+            {isExporting ? 'Exporting…' : 'Export'}
+          </Button>
         </div>
       </div>
+      <EmbedModal open={embedOpen} onClose={() => setEmbedOpen(false)} />
     </div>
   );
 };
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const rnd   = (n: number)  => Math.floor(Math.random() * n);

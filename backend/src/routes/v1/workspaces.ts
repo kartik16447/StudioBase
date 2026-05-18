@@ -9,6 +9,7 @@ import {
   JoinWorkspaceSchema 
 } from '../../schemas/workspaces';
 import { WorkspaceController } from '../../controllers/WorkspaceController';
+import { planGate } from '../../middlewares/plan';
 
 const workspaces = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -34,8 +35,27 @@ wsRoutes.get('/settings', async (c) => {
   return c.json({ settings: row || { workspaceId: ws.id, ssoEnabled: 0, dataRegion: 'global', retentionDays: 90 } });
 });
 
-// 4. Create Invite
-wsRoutes.post('/invites', requirePermission('member:invite'), zValidator('json', CreateInviteSchema), WorkspaceController.createInvite);
+// 4. List Pending Invites
+wsRoutes.get('/invites', requirePermission('member:invite'), async (c) => {
+  const ws = c.get('workspace');
+  const now = Date.now();
+  const rows = await c.env.DB
+    .prepare(`
+      SELECT i.id, i.token, i.role, i.createdAt, i.expiresAt
+      FROM invites i
+      WHERE i.workspaceId = ?
+        AND i.revokedAt IS NULL
+        AND (i.expiresAt IS NULL OR i.expiresAt > ?)
+      ORDER BY i.createdAt DESC
+      LIMIT 50
+    `)
+    .bind(ws.id, now)
+    .all<{ id: string; token: string; role: string; createdAt: number; expiresAt: number | null }>();
+  return c.json({ invites: rows.results });
+});
+
+// 4b. Create Invite
+wsRoutes.post('/invites', requirePermission('member:invite'), planGate('seat'), zValidator('json', CreateInviteSchema), WorkspaceController.createInvite);
 
 // 5. Revoke Invite
 wsRoutes.post('/invites/:inviteId/revoke', requirePermission('workspace:admin'), WorkspaceController.revokeInvite);

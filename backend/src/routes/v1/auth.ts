@@ -7,14 +7,15 @@ import { HTTPException } from 'hono/http-exception';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// 1. Google Auth (Exchange Google token for internal JWT)
+// 1. Google Auth (Exchange Google token or auth code for internal JWT)
 auth.post('/google', zValidator('json', GoogleAuthSchema), async (c) => {
-  const { accessToken } = c.req.valid('json');
+  const body = c.req.valid('json');
   const service = new AuthService(c.env, c.executionCtx);
 
   try {
-    // 1. Verify and Resolve User via Service
-    const googleUser = await service.verifyGoogleToken(accessToken);
+    const googleUser = 'code' in body
+      ? await service.exchangeCode(body.code, body.codeVerifier, body.redirectUri)
+      : await service.verifyGoogleToken(body.accessToken);
     const user = await service.resolveUser(googleUser);
     
     // 2. Sign internal JWT

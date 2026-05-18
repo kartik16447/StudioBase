@@ -15,9 +15,8 @@
       "head_sampling_rate": 1,
     },
   },
-  "vars": {
-    "ENABLE_TEXT_GEN": "true",
-    "ENABLE_TTS": "false",
+  "ai": {
+    "binding": "AI",
   },
   "main": "src/index.ts",
   "compatibility_date": "2026-05-03",

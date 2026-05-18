@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import type { SessionEnvelope, Step } from '../../../shared/types/session';
-import { apiClient } from '../lib/apiClient';
+import { apiClient, type CommentItem, type NotificationItem } from '../lib/apiClient';
 
-export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team';
+export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team' | 'analytics';
 
 interface Route {
   name: RouteName;
@@ -21,6 +21,7 @@ interface BrandState {
 interface StudioState {
   route: Route;
   session: SessionEnvelope | null;
+  sessionStatus: string | null;
   activeTab: string;
   isPanelOpen: boolean;
   activeView: 'sop' | 'video' | 'demo';
@@ -38,6 +39,8 @@ interface StudioState {
   scrollTrigger: number;
   sessionError: string | null;
   renderMode: 'hybrid' | 'slideshow';
+  hybridStepIndex: number;
+  slideshowStepIndex: number;
   isExporting: boolean;
   exportTrigger: number;
   exportStatus: 'idle' | 'checking' | 'exporting' | 'finishing' | 'failed' | 'completed';
@@ -73,11 +76,50 @@ interface StudioState {
   setExportProgress: (progress: number) => void;
   triggerExport: () => void;
   fetchSession: (sessionId: string) => Promise<void>;
+  
+  // Phase 5 SOP Editor additions
+  sopStatus: 'draft' | 'review' | 'published' | null;
+  setSopStatus: (status: 'draft' | 'review' | 'published' | null) => void;
+  saveStep: (stepId: string, updates: { textOverride?: string; annotations?: any[] }) => Promise<void>;
+  saveAnimationTarget: (stepId: string, animationTarget: any) => Promise<void>;
+  publishSOP: (sopId: string, status: 'review' | 'published') => Promise<void>;
+  forkSOP: (sopId: string) => Promise<string>; // returns new sopId
+
+  // Phase 6 — Comments
+  comments: CommentItem[];
+  commentsLoading: boolean;
+  commentsPanelOpen: boolean;
+  fetchComments: (sopId: string) => Promise<void>;
+  addComment: (sopId: string, stepId: string | null, body: string) => Promise<void>;
+  resolveComment: (commentId: string) => Promise<void>;
+  deleteComment: (commentId: string) => Promise<void>;
+  setCommentsPanelOpen: (open: boolean) => void;
+
+  // Phase 6 — Notifications
+  notifications: NotificationItem[];
+  unreadCount: number;
+  fetchNotifications: () => Promise<void>;
+  markNotificationRead: (notifId: string) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
 }
 
-export const useStudioStore = create<StudioState>((set) => ({
-  route: { name: 'home', params: {} },
+// const RESTORABLE_ROUTES: RouteName[] = ['home', 'brand', 'templates', 'team', 'analytics'];
+const RESTORABLE_ROUTES_STR = ['home', 'brand', 'templates', 'team', 'audit-logs', 'admin', 'analytics'];
+
+function getInitialRoute(): { name: RouteName; params: Record<string, any> } {
+  try {
+    const saved = localStorage.getItem('sb_last_route');
+    if (saved && RESTORABLE_ROUTES_STR.includes(saved)) {
+      return { name: saved as RouteName, params: {} };
+    }
+  } catch {}
+  return { name: 'home', params: {} };
+}
+
+export const useStudioStore = create<StudioState>((set, get) => ({
+  route: getInitialRoute(),
   session: null,
+  sessionStatus: null,
   activeTab: 'script',
   isPanelOpen: true,
   activeView: 'video',
@@ -94,6 +136,8 @@ export const useStudioStore = create<StudioState>((set) => ({
   scrollTrigger: 0,
   sessionError: null,
   renderMode: 'hybrid',
+  hybridStepIndex: 0,
+  slideshowStepIndex: 0,
   isExporting: false,
   exportTrigger: 0,
   exportStatus: 'idle',
@@ -163,7 +207,7 @@ export const useStudioStore = create<StudioState>((set) => ({
         console.log('[fetchSession] Fetching full JSON from R2:', data.sessionJsonUrl);
         const jsonContent = await apiClient.get<any>(data.sessionJsonUrl);
         if (jsonContent) {
-          sessionData = { ...sessionData, ...jsonContent };
+          sessionData = { ...sessionData, ...jsonContent, sessionId: data.id || data.sessionId };
         }
       }
 
@@ -177,7 +221,8 @@ export const useStudioStore = create<StudioState>((set) => ({
         let currentContext: 'browser' | 'desktop' = 'browser';
         const steps: Step[] = [];
 
-        for (const evt of rawEvents) {
+        for (let i = 0; i < rawEvents.length; i++) {
+          const evt = rawEvents[i];
           if (evt.type === 'context_switch') {
             currentContext = evt.data?.context || 'browser';
             continue;
@@ -199,7 +244,7 @@ export const useStudioStore = create<StudioState>((set) => ({
             elementType: evt.data?.elementType || null,
             inputValue: evt.data?.inputValue || null,
             coordinates: evt.data?.coordinates || null,
-            screenshotKey: screenshotByIndex.get(rawEvents.indexOf(evt)) ?? evt.data?.screenshotKey ?? "",
+            screenshotKey: screenshotByIndex.get(i) ?? evt.data?.screenshotKey ?? null,
             generatedText: evt.data?.generatedText || (evt.type === 'desktop_anchor' ? 'Desktop Activity' : null),
             textOverride: evt.data?.textOverride || null,
             voiceoverKey: evt.data?.voiceoverKey || null,
@@ -239,7 +284,7 @@ export const useStudioStore = create<StudioState>((set) => ({
         };
         const msg = terminalFailures[data.status]
           ?? `Session is still uploading or processing (status: ${data.status}).`;
-        set({ sessionError: msg });
+        set({ sessionError: msg, sessionStatus: data.status ?? null });
         return;
       }
 
@@ -257,22 +302,7 @@ export const useStudioStore = create<StudioState>((set) => ({
         sessionData.videoKey = (sessionData as any).r2VideoKey;
       }
 
-      // Build assets map
-      if (!sessionData.assets || Object.keys(sessionData.assets).length === 0) {
-        const assets: Record<string, string> = {};
-        for (const step of sessionData.steps || []) {
-          if (step.screenshotKey) {
-            assets[step.screenshotKey] = apiClient.getUrl(`/assets/${step.screenshotKey}`);
-          }
-          if (step.voiceoverKey) {
-            assets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`);
-          }
-        }
-        if (sessionData.videoKey) {
-          assets[sessionData.videoKey] = apiClient.getUrl(`/assets/${sessionData.videoKey}`);
-        }
-        sessionData.assets = assets;
-      }
+      // (Assets will be built after step flattening below)
 
       if (sessionData.brand) {
         set((state) => ({
@@ -288,9 +318,72 @@ export const useStudioStore = create<StudioState>((set) => ({
         }));
       }
 
-      set({ session: sessionData });
+      // Final safety checks, step ID enforcement, and flattening D1 content
+      if (sessionData.steps) {
+        // Map screenshots by index if they exist in a separate array (common in legacy R2 JSON)
+        const screenshotByIndex = new Map<number, string>(
+          ((sessionData as any).screenshots || []).map((s: any) => [s.stepIndex, s.r2Key])
+        );
+
+        // ─── TIMING NORMALIZATION ───
+        // We prioritize startedAt (recording start) over capturedAt (db creation)
+        // to eliminate the 1-3s initialization lag.
+        const sessionStartTime = (sessionData as any).startedAt 
+          ? new Date((sessionData as any).startedAt).getTime() 
+          : sessionData.capturedAt 
+            ? new Date(sessionData.capturedAt).getTime() 
+            : (sessionData.steps[0]?.timestamp || 0);
+
+        sessionData.steps = sessionData.steps.map((s: any, i) => {
+          const content = s.content || {};
+          const rawTimestamp = s.timestamp || content.timestamp || 0;
+          
+          // Absolute epoch timestamps for years 2020–2035 are in [1.58T, 2.05T] ms range.
+          // Use 1_000_000_000_000 (year 2001) as the floor — anything above this is epoch ms.
+          const EPOCH_FLOOR = 1_000_000_000_000;
+          const normalizedTimestamp = rawTimestamp > EPOCH_FLOOR 
+            ? Math.max(0, rawTimestamp - sessionStartTime) 
+            : rawTimestamp;
+
+          return {
+            ...s,
+            ...content, // Flatten the nested JSON blob to root level properties
+            timestamp: normalizedTimestamp,
+            screenshotKey: s.screenshotKey || content?.screenshotKey || screenshotByIndex.get(i) || null,
+            // Promote animationTarget: manual override from stepOverrides wins, then root, then legacy locations
+            animationTarget: ((sessionData.metadata as any)?.stepOverrides?.[s.id || `step-${i}`]?.animationTarget)
+              || s.animationTarget || content?.animationTarget || s.data?.animationTarget || null,
+            id: s.id || `step-${i}`,
+            sequence: s.sequence || i + 1,
+          };
+        });
+      }
+
+      // ─── Asset Mapping ───
+      // We must build the assets map AFTER flattening so that screenshotKey is available at the root
+      const assets: Record<string, string> = { ...(sessionData.assets || {}) };
+      
+      if (sessionData.videoKey && !assets[sessionData.videoKey]) {
+        assets[sessionData.videoKey] = apiClient.getUrl(`/assets/${sessionData.videoKey}`);
+      }
+
+      for (const step of sessionData.steps || []) {
+        if (step.screenshotKey && !assets[step.screenshotKey]) {
+          assets[step.screenshotKey] = apiClient.getUrl(`/assets/${step.screenshotKey}`);
+        }
+        if (step.voiceoverKey && !assets[step.voiceoverKey]) {
+          assets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`);
+        }
+      }
+      sessionData.assets = assets;
+
+      set({ session: sessionData, sessionStatus: (data as any).status ?? null });
       if (sessionData.steps?.length > 0) {
         set({ focusedStepId: sessionData.steps[0].id, focusedStepIndex: 0 });
+      }
+      // Initialise sopStatus from the backend response (sopStatus lives on the SOP row, not R2 envelope)
+      if (data.sopStatus) {
+        set({ sopStatus: data.sopStatus as 'draft' | 'review' | 'published' });
       }
     } catch (err: any) {
       console.error('[fetchSession] error:', err.message);
@@ -336,10 +429,158 @@ export const useStudioStore = create<StudioState>((set) => ({
     };
   }),
   triggerScroll: () => set((state) => ({ scrollTrigger: state.scrollTrigger + 1 })),
-  setRenderMode: (mode) => set({ renderMode: mode }),
+  setRenderMode: (mode) => set((state) => {
+    const savedKey = state.renderMode === 'hybrid'
+      ? { hybridStepIndex: state.currentStepIndex }
+      : { slideshowStepIndex: state.currentStepIndex };
+    const restoreStep = mode === 'hybrid' ? state.hybridStepIndex : state.slideshowStepIndex;
+    const stepId = state.session?.steps[restoreStep]?.id ?? null;
+    return {
+      ...savedKey,
+      renderMode: mode,
+      currentStepIndex: restoreStep,
+      focusedStepId: stepId,
+      focusedStepIndex: restoreStep,
+      isPlaying: false,
+    };
+  }),
   setIsExporting: (exporting) => set({ isExporting: exporting }),
   setExportStatus: (status) => set({ exportStatus: status }),
   setExportError: (error) => set({ exportError: error }),
   setExportProgress: (progress) => set({ exportProgress: progress }),
   triggerExport: () => set((state) => ({ exportTrigger: state.exportTrigger + 1 })),
+
+  // Phase 5 SOP Editor body
+  sopStatus: null,
+  setSopStatus: (status) => set({ sopStatus: status }),
+
+  // Phase 6 — Comments
+  comments: [],
+  commentsLoading: false,
+  commentsPanelOpen: false,
+
+  fetchComments: async (sopId) => {
+    set({ commentsLoading: true });
+    try {
+      const res = await apiClient.comments.list(sopId);
+      set({ comments: res.comments });
+    } catch (e) {
+      console.error('[fetchComments]', e);
+    } finally {
+      set({ commentsLoading: false });
+    }
+  },
+
+  addComment: async (sopId, stepId, body) => {
+    const comment = await apiClient.comments.create(sopId, body, stepId);
+    set((state) => ({ comments: [...state.comments, comment] }));
+  },
+
+  resolveComment: async (commentId) => {
+    const updated = await apiClient.comments.resolve(commentId);
+    set((state) => ({
+      comments: state.comments.map((c) => (c.id === commentId ? updated : c)),
+    }));
+  },
+
+  deleteComment: async (commentId) => {
+    await apiClient.comments.remove(commentId);
+    set((state) => ({ comments: state.comments.filter((c) => c.id !== commentId) }));
+  },
+
+  setCommentsPanelOpen: (open) => set({ commentsPanelOpen: open }),
+
+  // Phase 6 — Notifications
+  notifications: [],
+  unreadCount: 0,
+
+  fetchNotifications: async () => {
+    try {
+      const res = await apiClient.notifications.list();
+      set({ notifications: res.notifications, unreadCount: res.unreadCount });
+    } catch (e) {
+      console.error('[fetchNotifications]', e);
+    }
+  },
+
+  markNotificationRead: async (notifId) => {
+    await apiClient.notifications.markRead(notifId);
+    set((state) => ({
+      notifications: state.notifications.map((n) =>
+        n.id === notifId ? { ...n, readAt: Date.now() } : n,
+      ),
+      unreadCount: Math.max(0, state.unreadCount - 1),
+    }));
+  },
+
+  markAllNotificationsRead: async () => {
+    await apiClient.notifications.markAllRead();
+    set((state) => ({
+      notifications: state.notifications.map((n) => ({ ...n, readAt: n.readAt ?? Date.now() })),
+      unreadCount: 0,
+    }));
+  },
+
+  saveStep: async (stepId, updates) => {
+    const { session, updateStep } = get();
+    if (!session) return;
+    const sopId = (session as any).sopId;
+    const workspaceId = (session as any).workspaceId;
+    if (!sopId || !workspaceId) return;
+
+    await apiClient.request(`/workspaces/${workspaceId}/sops/${sopId}/steps/${stepId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+
+    // Optimistic update in local store
+    updateStep(stepId, updates);
+  },
+
+  saveAnimationTarget: async (stepId, animationTarget) => {
+    const { session, updateStep } = get();
+    if (!session) return;
+    const sessionId = (session as any).id || (session as any).sessionId;
+    const workspaceId = (session as any).workspaceId;
+    if (!sessionId || !workspaceId) return;
+
+    // Merge into session metadata.stepOverrides so it survives page refresh
+    const existing = (session as any).metadata || {};
+    const stepOverrides = { ...(existing.stepOverrides || {}), [stepId]: { animationTarget } };
+
+    await apiClient.request(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ metadata: { ...existing, stepOverrides } }),
+    }).catch(err => console.warn('[saveAnimationTarget] PATCH failed:', err));
+
+    // Always apply optimistically so preview reflects the change immediately
+    updateStep(stepId, { animationTarget });
+  },
+
+  publishSOP: async (sopId, status) => {
+    const { session } = get();
+    const workspaceId = session?.workspaceId ?? (session as any)?.workspaceId;
+    if (!workspaceId) throw new Error('No workspaceId');
+
+    await apiClient.request(`/workspaces/${workspaceId}/sops/${sopId}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    set({ sopStatus: status });
+  },
+
+  forkSOP: async (sopId) => {
+    const { session } = get();
+    const workspaceId = (session as any)?.workspaceId;
+    if (!workspaceId) throw new Error('No workspaceId');
+
+    const result = await apiClient.request<{ id: string }>(
+      `/workspaces/${workspaceId}/sops/${sopId}/fork`,
+      { method: 'POST' }
+    );
+    return result.id;
+  },
 }));

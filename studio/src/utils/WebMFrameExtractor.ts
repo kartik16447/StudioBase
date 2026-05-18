@@ -17,7 +17,7 @@ export class WebMFrameExtractor implements IFrameExtractor {
   private lastRequestedIndex: number = -1; 
   private lastFedIndex: number = -1;       
   private isInitialized: boolean = false;
-  private videoBuffer: ArrayBuffer | null = null;
+  private videoBlob: Blob | null = null;
   private consecutiveTimeouts: number = 0;
   private activeConfig: VideoDecoderConfig | null = null;
   
@@ -31,8 +31,7 @@ export class WebMFrameExtractor implements IFrameExtractor {
   async init(blob: Blob): Promise<void> {
     this.indexer = new WebMIndexer(blob);
     await this.indexer.init();
-    
-    this.videoBuffer = await blob.arrayBuffer();
+    this.videoBlob = blob;
     
     const config = this.indexer.getConfig();
     if (!config) throw new Error("🎬 [Extractor] Failed to extract codec config.");
@@ -42,7 +41,9 @@ export class WebMFrameExtractor implements IFrameExtractor {
       codedWidth: config.width,
       codedHeight: config.height,
       description: config.description, // Pass extracted CodecPrivate
-      hardwareAcceleration: "prefer-software" 
+      // "no-preference" lets the browser pick GPU if available.
+      // "prefer-software" was the old value and was the main source of slow decode.
+      hardwareAcceleration: "no-preference"
     };
 
     // --- METADATA SYNTHESIS ---
@@ -69,19 +70,9 @@ export class WebMFrameExtractor implements IFrameExtractor {
     this.activeConfig = decoderConfig;
 
     this.decoder = new VideoDecoder({
-      output: async (frame) => {
-        // --- DIAGNOSTIC RASTER CHECK ---
-        // Verify if the frame is actually valid and contains pixel data
-        try {
-          const bitmap = await createImageBitmap(frame);
-          if (bitmap.width === 0 || bitmap.height === 0) {
-            console.error(`🔍 [Extractor] Raster Check FAILED: 0x0 frame emitted.`);
-          }
-          bitmap.close();
-        } catch (e) {
-          console.error("🔍 [Extractor] Raster Check Exception:", e);
-        }
-
+      output: (frame) => {
+        // Raster check removed — it created an ImageBitmap for every decoded
+        // frame (double GPU work) and was a primary cause of slow exports.
         this.handleOutput(frame);
       },
       error: (e) => console.error("🎬 [Extractor] Decoder Error (Fatal):", e)
@@ -145,7 +136,7 @@ export class WebMFrameExtractor implements IFrameExtractor {
       setTimeout(() => {
         if (this.frameResolvers.has(targetIndex)) {
           this.consecutiveTimeouts++;
-          console.warn(`🎬 [Extractor] Timeout: Req ${targetIndex}, Fed ${this.lastFedIndex}. Hardware Stall?`);
+          console.warn(`🎬 [Extractor] Timeout: Req ${targetIndex}, Fed ${this.lastFedIndex}.`);
           this.frameResolvers.delete(targetIndex);
           
           // Atomic Recovery: Consistently restart state machine
@@ -160,7 +151,8 @@ export class WebMFrameExtractor implements IFrameExtractor {
           }
           resolve(null);
         }
-      }, 2500);
+      // 800 ms timeout: enough for a slow decoder, fast enough to not stall exports.
+      }, 800);
     });
 
     // 4. Pressure Bursts
@@ -188,10 +180,13 @@ export class WebMFrameExtractor implements IFrameExtractor {
         }
         */
 
+        const frameSlice = this.videoBlob!.slice(entry.offset, entry.offset + entry.size);
+        const frameBuffer = await frameSlice.arrayBuffer();
+
         const chunk = new EncodedVideoChunk({
           type: entry.isKeyframe ? 'key' : 'delta',
           timestamp: entry.timestamp * 1000, // Microseconds
-          data: new Uint8Array(this.videoBuffer!, entry.offset, entry.size)
+          data: new Uint8Array(frameBuffer)
         });
         
         try {
@@ -281,7 +276,7 @@ export class WebMFrameExtractor implements IFrameExtractor {
     if (this.decoder && this.decoder.state !== "closed") {
       this.decoder.close();
     }
-    this.videoBuffer = null;
+    this.videoBlob = null;
     this.isInitialized = false;
   }
 }

@@ -17,7 +17,7 @@ import { GlobalToastContainer } from './components/GlobalToast';
 import { sessionManager } from './lib/auth/sessionManager';
 
 function App() {
-  const { isEmbed, mode } = useIsEmbed();
+  const { isEmbed } = useIsEmbed();
 
   // If the user already has a valid JWT, show the app immediately (no flash).
   // If they need a token exchange (missing or stale token), show a loading screen

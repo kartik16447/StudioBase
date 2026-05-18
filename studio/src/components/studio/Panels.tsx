@@ -83,7 +83,7 @@ export const ScriptPanel: React.FC = () => {
         <div className="h-full scroll-y p-2 space-y-1">
           {steps.map((step, idx) => (
             <ScriptStepRow 
-              key={step.id} 
+              key={`${step.id}-${idx}`} 
               step={step} 
               active={focusedStepId === step.id} 
               isPlaying={currentStepIndex === idx}
@@ -523,22 +523,29 @@ export const ZoomsPanel: React.FC = () => {
   const session = useStudioStore(state => state.session);
   const focusedStepIndex = useStudioStore(state => state.focusedStepIndex);
   const updateStep = useStudioStore(state => state.updateStep);
+  const saveAnimationTarget = useStudioStore(state => state.saveAnimationTarget);
   const currentStep = session?.steps[focusedStepIndex];
+  const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   if (!session || !currentStep) return null;
 
   const target = currentStep.animationTarget || {
     centerX: 50,
     centerY: 50,
-    zoomScale: 1,
+    zoomScale: 1.55,
     transitionType: 'zoom',
     transitionDurationMs: 800
   };
 
   const updateTarget = (updates: Partial<typeof target>) => {
-    updateStep(currentStep.id, {
-      animationTarget: { ...target, ...updates }
-    });
+    const next = { ...target, ...updates };
+    // Immediate in-memory update so preview responds instantly
+    updateStep(currentStep.id, { animationTarget: next });
+    // Debounced API persist
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveAnimationTarget(currentStep.id, next);
+    }, 800);
   };
 
   return (

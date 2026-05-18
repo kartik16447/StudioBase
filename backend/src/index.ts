@@ -17,6 +17,11 @@ import usageRoutes from './routes/v1/usage';
 import adminRoutes from './routes/v1/admin';
 import auditLogRoutes from './routes/v1/audit-logs';
 import ssoRoutes from './routes/v1/sso';
+import { sops } from './routes/v1/sops';
+import { comments } from './routes/v1/comments';
+import { notifications } from './routes/v1/notifications';
+import analyticsRoutes from './routes/v1/analytics';
+import billingRoutes from './routes/v1/billing';
 
 import { handleScheduled } from './handlers/scheduled';
 import { handleQueue } from './handlers/queue';
@@ -40,6 +45,11 @@ v1.route('/usage', usageRoutes);
 v1.route('/admin', adminRoutes);
 v1.route('/audit-logs', auditLogRoutes);
 v1.route('/sso', ssoRoutes);
+v1.route('/workspaces/:workspaceId/sops', sops);
+v1.route('/comments', comments);
+v1.route('/notifications', notifications);
+v1.route('/analytics', analyticsRoutes);
+v1.route('/billing', billingRoutes);
 
 // Maintenance & Recovery (Governance hardened)
 v1.get('/maintenance/recovery', authMiddleware(), async (c) => {

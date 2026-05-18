@@ -32,42 +32,66 @@ export class AuditService {
 
     // 3. Emit to Cloudflare Analytics Engine (high-volume aggregation)
     if (this.env.ANALYTICS) {
-      try {
-        const datapoint = {
-          indexes: [workspaceId || 'anonymous'],
-          blobs: [
-            eventName,
-            userId || 'anonymous',
-            sessionId || 'none',
-            JSON.stringify(properties || {}),
-            '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
-          ],
-          doubles: [
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          ],
-        };
+      // WAE index limit is 96 bytes — truncate to be safe.
+      const waeIndex = (workspaceId || 'anonymous').slice(0, 96);
+      const datapoint = {
+        indexes: [waeIndex],
+        blobs: [
+          eventName,
+          userId || 'anonymous',
+          sessionId || 'none',
+          JSON.stringify(properties || {}),
+          '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
+        ],
+        doubles: [
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ],
+      };
 
-        if (this.executionCtx) {
-          // Run both the D1 write and the AE write non-blocking so they don't
-          // delay the primary request. waitUntil keeps the Worker alive until done.
-          this.executionCtx.waitUntil(
-            Promise.all([
-              writeD1,
-              Promise.resolve(this.env.ANALYTICS.writeDataPoint(datapoint)),
-            ])
-          );
-        } else {
-          // Synchronous context (e.g. queue handler) — await both.
-          await writeD1;
-          this.env.ANALYTICS.writeDataPoint(datapoint);
+      const safeWriteWAE = () => {
+        try {
+          const result: unknown = this.env.ANALYTICS.writeDataPoint(datapoint);
+          // Swallow async rejections too (writeDataPoint may return a Promise)
+          if (result != null && typeof (result as any).then === 'function') {
+            (result as Promise<void>).catch((e: unknown) => {
+              console.error('[AUDIT] WAE async error:', e);
+            });
+          }
+        } catch (e) {
+          console.error('[AUDIT] WAE sync error:', e);
         }
-        return; // D1 write is handled inside the waitUntil branch above.
-      } catch (err) {
-        console.error('[AUDIT] Analytics Engine error:', err);
+      };
+
+      if (this.executionCtx) {
+        this.executionCtx.waitUntil(
+          writeD1.then(() => safeWriteWAE()).catch((e: unknown) => {
+            console.error('[AUDIT] waitUntil error:', e);
+          })
+        );
+        return;
+      } else {
+        await writeD1;
+        safeWriteWAE();
+        return;
       }
     }
 
     // Fallback: if ANALYTICS binding is absent, still ensure D1 is written.
     await writeD1;
+  }
+
+  static async record(env: Env, event: {
+    actorId: string;
+    workspaceId: string;
+    event: string;
+    metadata?: Record<string, any>;
+  }) {
+    const service = new AuditService(env);
+    await service.record({
+      eventName: event.event,
+      userId: event.actorId,
+      workspaceId: event.workspaceId,
+      properties: event.metadata,
+    });
   }
 }

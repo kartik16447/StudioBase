@@ -390,8 +390,12 @@ export const ScreenshotPlaceholder: React.FC<{
   if (mode === 'blueprint') {
     return (
       <div
-        className={cn(rounded, 'relative overflow-hidden shadow-card bg-[#070709]', className)}
-        style={{ aspectRatio: adaptiveRatio, boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }}
+        className={cn(rounded, 'relative overflow-hidden shadow-card', className)}
+        style={{
+          aspectRatio: adaptiveRatio,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+          background: `radial-gradient(ellipse at 30% 30%, hsl(${hue} 60% 14%) 0%, hsl(${hue} 40% 8%) 60%, #111120 100%)`,
+        }}
       >
         {realUrl ? (
           <canvas 

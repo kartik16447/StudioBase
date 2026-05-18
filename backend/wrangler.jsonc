@@ -28,6 +28,9 @@
 			// "preview_bucket_name": "studiobase-assets-preview",
 		},
 	],
+	"ai": {
+		"binding": "AI",
+	},
 	"queues": {
 		"producers": [
 			{

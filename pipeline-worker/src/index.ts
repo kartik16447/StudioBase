@@ -1,34 +1,18 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { SessionEnvelope, Step } from "../../shared/types/session";
+import type { SessionEnvelope } from "../../shared/types/session";
+import { AuditService } from "./services/AuditService";
 
 interface Env {
+  AI: Ai;
   R2: R2Bucket;
   DB: D1Database;
-  GEMINI_API_KEY: string;
-  ENABLE_TEXT_GEN: string; // "true" | "false"
-  ENABLE_TTS: string; // "true" | "false"
+  ANALYTICS: AnalyticsEngineDataset;
 }
-
-interface TTSResponse {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{
-        inlineData?: {
-          mimeType: string;
-          data: string;
-        };
-      }>;
-    };
-  }>;
-}
-
-import { AuditService } from "./services/AuditService";
 
 interface PipelineMessage {
   sessionId: string;
   userId: string;
   r2JsonKey: string;
-  workspaceId: string;
+  workspaceId?: string;
   requestedOutputs?: {
     sop?: boolean;
     demo?: boolean;
@@ -36,277 +20,224 @@ interface PipelineMessage {
   };
 }
 
+// ─── AI response schema ───────────────────────────────────────────────────────
+
+const SOP_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    summary: { type: "string" },
+    tags: { type: "array", items: { type: "string" } },
+    steps: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          stepTitle: { type: "string" },
+          generatedText: { type: "string" },
+        },
+        required: ["id", "stepTitle", "generatedText"],
+      },
+    },
+    chapterBreaks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          afterStepId: { type: "string" },
+          chapterTitle: { type: "string" },
+        },
+        required: ["afterStepId", "chapterTitle"],
+      },
+    },
+  },
+  required: ["title", "summary", "tags", "steps", "chapterBreaks"],
+};
+
+const SYSTEM_PROMPT = `You are an expert SOP (Standard Operating Procedure) writer. Given a sequence of raw user actions from a screen recording session, produce polished, professional documentation that a new employee could follow without any technical knowledge.
+
+Output fields:
+- title: A clear, action-oriented title describing the overall goal (e.g. "Navigating and Opening Documents in the Application"). Do not start with "How to".
+- summary: 2–3 sentences describing what this procedure accomplishes, when someone would use it, and what they will achieve by the end. Write in third person (e.g. "This process walks you through...").
+- tags: 2–5 lowercase keywords relevant to the workflow domain.
+- steps: For each input step produce:
+    - stepTitle: A short noun phrase naming the goal of this step (e.g. "Open the Main Application Screen", "Locate the Primary Navigation Area"). Capitalize each word. Do not include a step number.
+    - generatedText: 1–3 sentences describing what the user does and WHY — focus on the user's intent and what they are accomplishing, not the raw mechanics. Write in second person imperative (e.g. "Begin by navigating to the main application screen where your work area and options are displayed."). If the action involves a form field or input, mention what value was entered and why.
+- chapterBreaks: Group steps into 2–5 logical workflow phases. afterStepId must be an id from the input. Place breaks at natural transitions between distinct stages of the workflow.
+
+Critical rules:
+- Every step id must be preserved exactly as given — do not add, remove, or rename any.
+- Do NOT mention raw technical details like CSS selectors, DOM roles, or coordinates.
+- Write as if explaining to a non-technical new hire. Avoid jargon.
+- Output valid JSON only — no markdown fences, no commentary.`;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function buildStepPayload(steps: any[]) {
+  return steps.map((s) => ({
+    id: s.id,
+    action: s.action || s.type || "click",
+    elementText: s.elementText || s.data?.elementText || null,
+    elementRole: s.elementRole || s.data?.elementRole || null,
+    inputValue: s.inputValue || s.data?.inputValue || null,
+    pageTitle: s.pageTitle || s.data?.pageTitle || "",
+    url: s.url || s.data?.url || s.data?.frameUrl || "",
+    selector: s.selector || s.data?.selector || null,
+  }));
+}
+
+function computeAnimationTarget(step: any) {
+  const vw = step.coordinates?.viewportWidth ?? 1280;
+  const vh = step.coordinates?.viewportHeight ?? 720;
+  const rawX = step.coordinates?.x ?? vw / 2;
+  const rawY = step.coordinates?.y ?? vh / 2;
+  return {
+    centerX: (rawX / vw) * 100,
+    centerY: (rawY / vh) * 100,
+    zoomScale: 2.5,
+    transitionType: "fade",
+    transitionDurationMs: 400,
+  };
+}
+
+// ─── Queue handler ────────────────────────────────────────────────────────────
+
 export default {
   async queue(batch: MessageBatch<PipelineMessage>, env: Env): Promise<void> {
     const audit = new AuditService(env);
+
     for (const msg of batch.messages) {
       const job = msg.body;
+      const startTime = Date.now();
+
+      console.log(`[PIPELINE] Starting — sessionId:${job.sessionId} r2Key:${job.r2JsonKey}`);
+
       try {
         await audit.record({
-          eventName: 'pipeline.started',
+          eventName: "pipeline.started",
           userId: job.userId,
           sessionId: job.sessionId,
-          properties: { ...job.requestedOutputs }
+          properties: { ...job.requestedOutputs },
         });
 
-        const startTime = Date.now();
-        await processSession(job, env);
+        await env.DB.prepare("UPDATE sessions SET status = ?, updatedAt = ? WHERE id = ?")
+          .bind("processing", Date.now(), job.sessionId)
+          .run();
+
+        // ── Load session from R2 ──────────────────────────────────────────────
+        const obj = await env.R2.get(job.r2JsonKey);
+        if (!obj) throw new Error(`R2 key not found: ${job.r2JsonKey}`);
+        const session = await obj.json() as SessionEnvelope;
+
+        // Normalise: extension may upload events instead of steps
+        const steps: any[] = (session as any).steps ?? (session as any).events ?? [];
+        if (!(session as any).steps) (session as any).steps = steps;
+
+        console.log(`[PIPELINE] Loaded session — steps:${steps.length} sessionType:${(session as any).sessionType}`);
+
+        // ── Compute animationTarget per step (no AI needed) ───────────────────
+        for (const step of steps) {
+          const coords = step.coordinates || step.data?.coordinates;
+          if (coords && !step.coordinates) step.coordinates = coords;
+          step.animationTarget = computeAnimationTarget(step);
+        }
+
+        // ── SOP generation via Workers AI (single call) ───────────────────────
+        if (steps.length > 0) {
+          const payload = buildStepPayload(steps);
+          console.log(`[PIPELINE] Calling Workers AI — steps:${steps.length} inputChars:${JSON.stringify(payload).length}`);
+
+          const aiResponse = await (env.AI.run as any)(
+            "@cf/meta/llama-4-scout-17b-16e-instruct",
+            {
+              messages: [
+                { role: "system", content: SYSTEM_PROMPT },
+                { role: "user", content: JSON.stringify(payload) },
+              ],
+              response_format: { type: "json_schema", json_schema: SOP_JSON_SCHEMA },
+              max_tokens: 8192,
+            }
+          ) as { response: string | object };
+
+          const rawResponse = aiResponse?.response;
+          const generated = (typeof rawResponse === 'string' ? JSON.parse(rawResponse) : rawResponse) as {
+            title: string;
+            summary: string;
+            tags: string[];
+            steps: { id: string; stepTitle: string; generatedText: string }[];
+            chapterBreaks: { afterStepId: string; chapterTitle: string }[];
+          };
+
+          const aiStepMap = new Map(generated.steps.map((s) => [s.id, s]));
+
+          for (const step of steps) {
+            const ai = aiStepMap.get(step.id);
+            if (ai) {
+              step.stepTitle = ai.stepTitle;
+              step.generatedText = ai.generatedText;
+            } else {
+              step.generatedText = step.generatedText || step.elementText || step.data?.elementText || "Completed action";
+            }
+          }
+
+          session.aiOutputs = {
+            title: generated.title,
+            summary: generated.summary,
+            tags: generated.tags,
+          };
+
+          session.metadata = {
+            ...(session.metadata ?? {}),
+            stepCount: steps.length,
+            durationMs: session.metadata?.durationMs ?? 0,
+            chapterBreaks: generated.chapterBreaks,
+          };
+
+          console.log(`[PIPELINE] Generated title: "${generated.title}"`);
+        }
+
+        // ── Write enriched session back to R2 ─────────────────────────────────
+        await env.R2.put(job.r2JsonKey, JSON.stringify(session), {
+          httpMetadata: { contentType: "application/json" },
+        });
+
+        // ── Mark session ready in D1 ──────────────────────────────────────────
+        await env.DB.prepare("UPDATE sessions SET status = ?, pipelinePath = ?, updatedAt = ? WHERE id = ?")
+          .bind("ready", "cloud", Date.now(), job.sessionId)
+          .run();
 
         await audit.record({
-          eventName: 'pipeline.completed',
+          eventName: "pipeline.completed",
           userId: job.userId,
           sessionId: job.sessionId,
-          properties: { durationMs: Date.now() - startTime }
+          properties: { durationMs: Date.now() - startTime },
         });
 
+        console.log(`[PIPELINE] Done — sessionId:${job.sessionId} durationMs:${Date.now() - startTime}`);
         msg.ack();
+
       } catch (err: any) {
-        console.error("Pipeline error:", err);
+        console.error(`[PIPELINE] Failed — sessionId:${job.sessionId} error:${err.message}`);
+
+        await env.DB.prepare("UPDATE sessions SET status = ?, errorReason = ?, updatedAt = ? WHERE id = ?")
+          .bind("failed", err.message, Date.now(), job.sessionId)
+          .run();
+
         await audit.record({
-          eventName: 'pipeline.failed',
+          eventName: "pipeline.failed",
           userId: job.userId,
           sessionId: job.sessionId,
-          properties: { error: err.message }
+          properties: { error: err.message },
         });
-        msg.retry();
+
+        if (msg.attempts >= 3) {
+          console.error(`[PIPELINE] Max retries reached — acking to remove from queue`);
+          msg.ack();
+        } else {
+          msg.retry();
+        }
       }
     }
   },
 };
-
-async function processSession(msg: PipelineMessage, env: Env) {
-  const { sessionId, r2JsonKey, workspaceId } = msg;
-
-  // Step 1 — Read session JSON from R2
-  const obj = await env.R2.get(r2JsonKey);
-  if (!obj) throw new Error(`R2 key not found: ${r2JsonKey}`);
-  const session: SessionEnvelope = await obj.json();
-
-  // Step 2 — Init Gemini
-  const genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-  // The extension uploads Session.events; SessionEnvelope uses steps — normalise here
-  const steps = (session as any).steps ?? (session as any).events ?? [];
-  if (!session.steps) (session as any).steps = steps;
-
-  // Step 3 — Per-step: generate text + voiceover sequentially
-  for (const step of steps) {
-    // Normalise: extension uploads events with fields nested in `data`
-    const elementText = step.elementText || step.data?.elementText || "";
-    const stepUrl = step.url || step.data?.url || step.data?.frameUrl || "";
-    const stepAction = step.action || step.data?.action || step.type || "click";
-    const stepSelector = step.selector || step.data?.selector || "";
-    const stepCoords = step.coordinates || step.data?.coordinates;
-    if (stepCoords && !step.coordinates) step.coordinates = stepCoords;
-
-    // 3a. Generate step text with Gemini
-    let generatedText = "";
-    if (env.ENABLE_TEXT_GEN !== "true" || !elementText.trim()) {
-      generatedText = elementText || "Clicked element";
-      step.generatedText = generatedText;
-    } else
-      try {
-        const prompt = `You are writing step-by-step instructions for a software walkthrough guide.
-
-Context:
-- Page URL: ${stepUrl}
-- Element clicked: ${elementText}
-- CSS selector: ${stepSelector}
-- Action type: ${stepAction}
-
-Write ONE clear, concise instruction sentence (max 20 words) describing what the user did.
-Start with an action verb. Be specific about the element name.
-Return only the sentence, no punctuation at end, no quotes.`;
-
-        const result = await model.generateContent(prompt);
-        generatedText = result.response.text().trim();
-      } catch (err) {
-        console.error(`Gemini failed for step ${step.id}:`, err);
-        generatedText = elementText || "Clicked element";
-      }
-    step.generatedText = generatedText;
-
-    console.log(`[${step.id}] generatedText: "${generatedText}"`);
-
-    // 3b. Generate voiceover using Gemini TTS
-    const audio =
-      env.ENABLE_TTS === "true"
-        ? await synthesizeSpeech(generatedText, env)
-        : null;
-
-    // 3c. If audio returned, upload to R2
-    if (audio) {
-      const voiceKey = `voiceovers/${workspaceId}/${sessionId}/${step.id}.wav`;
-      await env.R2.put(voiceKey, audio, {
-        httpMetadata: { contentType: "audio/wav" },
-      });
-      step.voiceoverKey = voiceKey;
-    } else {
-      step.voiceoverKey = null;
-    }
-
-    // Step 4 — Compute animationTarget per step
-    // coordinates x/y are raw pixels; convert to % so studio can apply
-    // translateX = (50 - centerX) * scale without flying off screen.
-    const vw = step.coordinates?.viewportWidth ?? 1280;
-    const vh = step.coordinates?.viewportHeight ?? 720;
-    const rawX = step.coordinates?.x ?? vw / 2;
-    const rawY = step.coordinates?.y ?? vh / 2;
-    step.animationTarget = {
-      centerX: (rawX / vw) * 100,
-      centerY: (rawY / vh) * 100,
-      zoomScale: 2.5,
-      transitionType: "fade",
-      transitionDurationMs: 400,
-    };
-
-    // 3d. Rate limiting / courtesy sleep
-    await sleep(200);
-  }
-
-  // Step 5 — Generate session-level AI outputs (one Gemini call)
-  try {
-    const sessionPrompt = `Given these step instructions:
-${steps.map((s: any, i: number) => `${i + 1}. ${s.generatedText}`).join("\n")}
-
-Return a JSON object with:
-- title: string (5-8 words, describes what this walkthrough accomplishes)
-- summary: string (1-2 sentences, what user will learn)
-- tags: string[] (3-5 relevant keywords)
-
-Return only valid JSON, no markdown.`;
-
-    const result = await model.generateContent(sessionPrompt);
-    const jsonStr = result.response
-      .text()
-      .replace(/```json|```/g, "")
-      .trim();
-    const aiData = JSON.parse(jsonStr);
-
-    session.aiOutputs = {
-      title: aiData.title || "Untitled Walkthrough",
-      summary: aiData.summary || "",
-      tags: aiData.tags || [],
-    };
-  } catch (err) {
-    console.error("Session-level AI failed:", err);
-    session.aiOutputs = {
-      title: "Untitled Walkthrough",
-      summary: "",
-      tags: [],
-    };
-  }
-
-  // Step 6 — Write enriched session JSON back to R2
-  await env.R2.put(r2JsonKey, JSON.stringify(session), {
-    httpMetadata: { contentType: "application/json" },
-  });
-
-  // Step 7 — Update D1 status
-  await env.DB.prepare(
-    "UPDATE sessions SET status = ?, updatedAt = ? WHERE id = ?",
-  )
-    .bind("ready", Date.now(), sessionId)
-    .run();
-}
-
-async function synthesizeSpeech(
-  text: string,
-  env: Env,
-): Promise<ArrayBuffer | null> {
-  try {
-    const safeText = text.length > 200 ? text.slice(0, 197) + "..." : text;
-    if (!safeText.trim()) return null;
-
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent?key=${env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: safeText }] }],
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: "Aoede" },
-              },
-            },
-          },
-        }),
-      },
-    );
-
-    if (!res.ok) {
-      console.error("Gemini TTS error:", await res.text());
-      return null;
-    }
-
-    const data = (await res.json()) as TTSResponse;
-    const part = data.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-    if (!part?.data) return null;
-
-    const mimeType = part.mimeType ?? "";
-    console.log("TTS mimeType:", mimeType);
-
-    const binary = atob(part.data);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-
-    // If already WAV (starts with RIFF), return as-is
-    if (
-      bytes[0] === 0x52 &&
-      bytes[1] === 0x49 &&
-      bytes[2] === 0x46 &&
-      bytes[3] === 0x46
-    ) {
-      return bytes.buffer;
-    }
-
-    // Raw PCM — wrap with WAV header (24000 Hz, mono, 16-bit)
-    return buildWav(bytes, 24000, 1, 16);
-  } catch (err) {
-    console.error("TTS failed silently:", err);
-    return null;
-  }
-}
-
-function buildWav(
-  pcm: Uint8Array,
-  sampleRate: number,
-  channels: number,
-  bitDepth: number,
-): ArrayBuffer {
-  const byteRate = sampleRate * channels * (bitDepth / 8);
-  const blockAlign = channels * (bitDepth / 8);
-  const dataSize = pcm.byteLength;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  const enc = (offset: number, str: string) => {
-    for (let i = 0; i < str.length; i++)
-      view.setUint8(offset + i, str.charCodeAt(i));
-  };
-
-  enc(0, "RIFF");
-  view.setUint32(4, 36 + dataSize, true);
-  enc(8, "WAVE");
-  enc(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, channels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bitDepth, true);
-  enc(36, "data");
-  view.setUint32(40, dataSize, true);
-  new Uint8Array(buffer, 44).set(pcm);
-
-  return buffer;
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

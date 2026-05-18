@@ -27,9 +27,16 @@ export const workspaceMiddleware = () => {
     const user = c.get('user');
     if (!user) throw new HTTPException(401, { message: 'Authentication required' });
 
-    // 1. Extract workspaceId from multiple possible sources (STRICT)
-    const workspaceId = 
-      c.req.query('workspaceId') || 
+    // 1. Extract workspaceId — path param first, then URL regex fallback (c.req.param() may not
+    //    resolve when middleware is invoked via factory chain before Hono binds route params),
+    //    then query param, then header.
+    // UUID-only regex — prevents path segments like "members", "settings", "invites"
+    // from being mistaken for a workspaceId when sub-routes share the /workspaces prefix.
+    const urlWorkspaceMatch = c.req.url.match(/\/workspaces\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    const workspaceId =
+      c.req.param('workspaceId') ||
+      urlWorkspaceMatch?.[1] ||
+      c.req.query('workspaceId') ||
       c.req.header('x-workspace-id');
 
     if (!workspaceId) {

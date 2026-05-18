@@ -130,7 +130,10 @@ export const HomePage: React.FC = () => {
   }, [filter, search, sessions]);
 
   const openSession = (s: SessionEnvelope) => {
-    setSession(s);
+    // Clear any stale session so StudioPage shows "Loading..." while fetchSession runs.
+    // Pre-populating with the library card stub (steps: []) triggers the "No steps captured"
+    // guard before the real data arrives.
+    setSession(null);
     navigate('studio', { sessionId: s.sessionId });
   };
 

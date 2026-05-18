@@ -3,42 +3,44 @@ import { BackendUser } from "../types";
 import { getScreenshots, getChunks, Session } from "./session-manager";
 import { sbLog } from "../logger";
 
-/**
- * Uploads a completed session and its associated screenshots to R2.
- * Returns the backend-assigned sessionId.
- */
-export async function uploadSession(
-  session: Session,
-  onProgress?: (pct: number) => void,
-  includeVideo?: boolean,
-): Promise<string> {
-  // 1. Fetch the authenticated user and workspace
+interface AuthContext {
+  token: string;
+  resolvedWorkspaceId: string;
+}
+
+async function getAuthContext(): Promise<AuthContext> {
   const { sb_user, workspaceId } = (await chrome.storage.local.get([
     "sb_user",
     "workspaceId",
-  ])) as {
-    sb_user: BackendUser;
-    workspaceId: string;
-  };
+  ])) as { sb_user: BackendUser; workspaceId: string };
 
-  if (!sb_user || !sb_user.accessToken) {
-    throw new Error(
-      "Authentication required: Please sign in via the extension popup.",
-    );
+  if (!sb_user?.accessToken) {
+    throw new Error("Authentication required: Please sign in via the extension popup.");
   }
 
-  const token = sb_user.accessToken;
+  return {
+    token: sb_user.accessToken,
+    resolvedWorkspaceId: workspaceId || sb_user.workspaceId,
+  };
+}
 
-  // 2. Initialize the session on the backend
-  const initRes = await fetch(`${BACKEND_URL}/sessions`, {
+/**
+ * Step 1: Creates the session on the backend and returns the session ID immediately.
+ * Call this first so the link can be shown to the user without waiting for uploads.
+ */
+export async function initSession(session: Session): Promise<{ activeSessionId: string } & AuthContext> {
+  const auth = await getAuthContext();
+
+  const initRes = await fetch(`${BACKEND_URL}/v1/sessions`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${auth.token}`,
+      "x-workspace-id": auth.resolvedWorkspaceId,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       sessionId: session.sessionId,
-      workspaceId: workspaceId || sb_user.workspaceId,
+      workspaceId: auth.resolvedWorkspaceId,
       tabUrl: session.tabUrl,
       startedAt: session.startedAt,
       endedAt: session.endedAt,
@@ -48,155 +50,144 @@ export async function uploadSession(
 
   if (!initRes.ok) {
     const errorBody = await initRes.text();
-    throw new Error(
-      `[StudioBase] Session initialization failed: ${initRes.status} ${errorBody}`,
-    );
+    throw new Error(`[StudioBase] Session initialization failed: ${initRes.status} ${errorBody}`);
   }
 
   const { id: backendSessionId } = await initRes.json();
-  const activeSessionId = backendSessionId || session.sessionId;
+  return { activeSessionId: backendSessionId || session.sessionId, ...auth };
+}
 
-  if (onProgress) onProgress(10);
+/**
+ * Step 2: Upload all assets in the background.
+ * Screenshots are batch-presigned and uploaded in parallel.
+ * Video uses multipart upload. Finalizes the session when done.
+ */
+export async function uploadSessionAssets(
+  session: Session,
+  activeSessionId: string,
+  auth: AuthContext,
+  onProgress?: (pct: number) => void,
+  includeVideo?: boolean,
+): Promise<void> {
+  const { token, resolvedWorkspaceId } = auth;
 
-  // 3. Upload each screenshot captured during the session
+  // ── Screenshots: batch presign + parallel upload ──────────────
   const screenshots = await getScreenshots(session.sessionId);
   const screenshotMetadata: { stepIndex: number; r2Key: string }[] = [];
 
-  for (const { stepIndex, blob } of screenshots) {
-    const key = `screenshots/${activeSessionId}/${stepIndex}.jpg`;
+  if (screenshots.length > 0) {
+    const files = screenshots.map(({ stepIndex }) => ({
+      key: `screenshots/${activeSessionId}/${stepIndex}.jpg`,
+      contentType: "image/jpeg",
+    }));
 
-    // Request a presigned URL for the screenshot
-    const presignRes = await fetch(`${BACKEND_URL}/assets/upload/presign`, {
+    // One round trip to presign all screenshots at once
+    const presignRes = await fetch(`${BACKEND_URL}/v1/assets/upload/presign`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
+        "x-workspace-id": resolvedWorkspaceId,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        sessionId: activeSessionId,
-        files: [{ key, contentType: "image/jpeg" }],
-      }),
+      body: JSON.stringify({ sessionId: activeSessionId, files }),
     });
 
     if (!presignRes.ok) {
-      const errorBody = await presignRes.text();
-      throw new Error(
-        `[StudioBase] Screenshot presign failed: ${presignRes.status} ${errorBody}`,
-      );
+      throw new Error(`[StudioBase] Batch screenshot presign failed: ${presignRes.status}`);
     }
 
-    const presignData = await presignRes.json();
-    const uploadUrl = presignData.files?.[0]?.uploadUrl;
-    if (!uploadUrl) {
-      throw new Error(
-        `[StudioBase] Presign response missing uploadUrl for screenshot ${stepIndex}`,
-      );
-    }
+    const { files: presignedFiles } = await presignRes.json();
 
-    // Upload the blob directly to R2 via worker proxy
-    const putRes = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "image/jpeg",
-        Authorization: `Bearer ${token}`,
-      },
-      body: blob,
-    });
+    // Upload all screenshots in parallel
+    await Promise.all(
+      screenshots.map(async ({ stepIndex, blob }, i) => {
+        const uploadUrl = presignedFiles[i]?.uploadUrl;
+        if (!uploadUrl) throw new Error(`[StudioBase] Missing uploadUrl for screenshot ${stepIndex}`);
 
-    if (!putRes.ok) {
-      const errorBody = await putRes.text();
-      throw new Error(
-        `[StudioBase] Screenshot R2 upload failed: ${putRes.status} ${errorBody}`,
-      );
-    }
+        const putRes = await fetch(uploadUrl, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "image/jpeg",
+            Authorization: `Bearer ${token}`,
+            "x-workspace-id": resolvedWorkspaceId,
+          },
+          body: blob,
+        });
 
-    screenshotMetadata.push({ stepIndex, r2Key: key });
+        if (!putRes.ok) {
+          throw new Error(`[StudioBase] Screenshot upload failed: ${putRes.status}`);
+        }
+
+        screenshotMetadata.push({ stepIndex, r2Key: files[i].key });
+      })
+    );
   }
 
   if (onProgress) onProgress(50);
 
+  // ── Video: multipart upload ───────────────────────────────────
   let videoKey: string | null = null;
   if (includeVideo) {
     try {
       videoKey = `videos/${activeSessionId}/screen-recording.webm`;
       console.log("📤 [Uploader] Starting multipart video upload for:", videoKey);
 
-      // 1. Initialize Multipart Upload
-      const initRes = await fetch(`${BACKEND_URL}/assets/upload/multipart/init`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: videoKey })
+      const initRes = await fetch(`${BACKEND_URL}/v1/assets/upload/multipart/init`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "x-workspace-id": resolvedWorkspaceId, "Content-Type": "application/json" },
+        body: JSON.stringify({ key: videoKey }),
       });
       if (!initRes.ok) throw new Error("Multipart init failed");
       const { uploadId } = await initRes.json() as any;
 
-      // 2. Fetch and Re-slice chunks to meet S3/R2 5MB minimum part size
       const dbChunks = await getChunks(session.sessionId);
       if (dbChunks.length === 0) {
         console.warn("📤 [Uploader] No video chunks found in IndexedDB.");
         videoKey = null;
       } else {
-        // Stitch into a single blob and slice into 5MB parts
-        const fullVideoBlob = new Blob(dbChunks.map(c => c.blob), { type: 'video/webm' });
-        const PART_SIZE = 5 * 1024 * 1024; 
+        const fullVideoBlob = new Blob(dbChunks.map(c => c.blob), { type: "video/webm" });
+        const PART_SIZE = 5 * 1024 * 1024;
         const slicedParts: Blob[] = [];
         for (let i = 0; i < fullVideoBlob.size; i += PART_SIZE) {
           slicedParts.push(fullVideoBlob.slice(i, i + PART_SIZE));
         }
 
         const parts: { partNumber: number; etag: string }[] = [];
-        
-        // 3. Upload each 5MB part
-        for (let i = 0; i < slicedParts.length; i++) {
-          const partBlob = slicedParts[i];
-          const partNumber = i + 1;
-          
-          if (onProgress) {
-            const uploadProgress = 50 + Math.floor((i / slicedParts.length) * 35);
-            onProgress(uploadProgress);
-          }
 
-          // Get presigned URL for this part
-          const partRes = await fetch(`${BACKEND_URL}/assets/upload/multipart/presign-part`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: videoKey, uploadId, partNumber })
+        for (let i = 0; i < slicedParts.length; i++) {
+          const partNumber = i + 1;
+          if (onProgress) onProgress(50 + Math.floor((i / slicedParts.length) * 35));
+
+          const partRes = await fetch(`${BACKEND_URL}/v1/assets/upload/multipart/presign-part`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "x-workspace-id": resolvedWorkspaceId, "Content-Type": "application/json" },
+            body: JSON.stringify({ key: videoKey, uploadId, partNumber }),
           });
           if (!partRes.ok) throw new Error(`Presign failed for part ${partNumber}`);
           const { uploadUrl } = await partRes.json() as any;
 
-          // Upload the binary part
           const putRes = await fetch(uploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'video/webm', 'Authorization': `Bearer ${token}` },
-            body: partBlob
+            method: "PUT",
+            headers: { "Content-Type": "video/webm", Authorization: `Bearer ${token}`, "x-workspace-id": resolvedWorkspaceId },
+            body: slicedParts[i],
           });
           if (!putRes.ok) throw new Error(`Upload failed for part ${partNumber}`);
-          
-          // 1. Parse the JSON response from your Cloudflare Worker
+
           const responseData = await putRes.json() as any;
           console.log(`🔍 [Uploader] Part ${partNumber} Worker Response:`, responseData);
 
-          // 2. Grab the ETag from the JSON body
           let etag = responseData.etag;
-
-          if (!etag) {
-            throw new Error("FATAL: ETag is missing from the Worker's JSON response.");
-          }
-
-          // 3. Strip quotes (just in case) and push to the array
-          etag = etag.replace(/"/g, ''); 
+          if (!etag) throw new Error("FATAL: ETag is missing from the Worker's JSON response.");
+          etag = etag.replace(/"/g, "");
           parts.push({ partNumber, etag });
         }
 
-        // 4. Complete Multipart Upload
-        const completeRes = await fetch(`${BACKEND_URL}/assets/upload/multipart/complete`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: videoKey, uploadId, parts })
+        const completeRes = await fetch(`${BACKEND_URL}/v1/assets/upload/multipart/complete`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "x-workspace-id": resolvedWorkspaceId, "Content-Type": "application/json" },
+          body: JSON.stringify({ key: videoKey, uploadId, parts }),
         });
         if (!completeRes.ok) throw new Error("Multipart completion failed");
-        
         console.log("📤 [Uploader] Multipart upload finalized successfully.");
       }
     } catch (err) {
@@ -205,95 +196,78 @@ export async function uploadSession(
     }
   }
 
-  // 4. Assemble the final session envelope
+  // ── Session JSON ──────────────────────────────────────────────
+  const { events: rawEvents, ...sessionWithoutEvents } = session;
   const finalEnvelope = {
-    ...session,
+    ...((!session.steps || session.steps.length === 0) ? { events: rawEvents } : {}),
+    ...sessionWithoutEvents,
     screenshots: screenshotMetadata,
     videoKey: videoKey || null,
   };
 
-  // 5. Upload the final session JSON
   const jsonKey = `sessions/${activeSessionId}/session.json`;
-  const jsonPresignRes = await fetch(`${BACKEND_URL}/assets/upload/presign`, {
+  const jsonPresignRes = await fetch(`${BACKEND_URL}/v1/assets/upload/presign`, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      sessionId: activeSessionId,
-      files: [{ key: jsonKey, contentType: "application/json" }],
-    }),
+    headers: { Authorization: `Bearer ${token}`, "x-workspace-id": resolvedWorkspaceId, "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: activeSessionId, files: [{ key: jsonKey, contentType: "application/json" }] }),
   });
 
   if (!jsonPresignRes.ok) {
-    const errorBody = await jsonPresignRes.text();
-    throw new Error(
-      `[StudioBase] Session JSON presign failed: ${jsonPresignRes.status} ${errorBody}`,
-    );
+    throw new Error(`[StudioBase] Session JSON presign failed: ${jsonPresignRes.status}`);
   }
 
-  const jsonPresignData = await jsonPresignRes.json();
-  const jsonUploadUrl = jsonPresignData.files?.[0]?.uploadUrl;
-  if (!jsonUploadUrl) {
-    throw new Error(
-      "[StudioBase] Presign response missing uploadUrl for session JSON",
-    );
-  }
+  const { files: jsonFiles } = await jsonPresignRes.json();
+  const jsonUploadUrl = jsonFiles?.[0]?.uploadUrl;
+  if (!jsonUploadUrl) throw new Error("[StudioBase] Missing uploadUrl for session JSON");
 
   const jsonPutRes = await fetch(jsonUploadUrl, {
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "x-workspace-id": resolvedWorkspaceId },
     body: JSON.stringify(finalEnvelope),
   });
 
   if (!jsonPutRes.ok) {
-    const errorBody = await jsonPutRes.text();
-    throw new Error(
-      `[StudioBase] Session JSON R2 upload failed: ${jsonPutRes.status} ${errorBody}`,
-    );
+    throw new Error(`[StudioBase] Session JSON upload failed: ${jsonPutRes.status}`);
   }
 
   if (onProgress) onProgress(90);
 
-  // 6. Finalize the session on the backend
+  // ── Finalize ──────────────────────────────────────────────────
   const stepCount = session.events?.length || 0;
-  const durationMs =
-    session.endedAt && session.startedAt
-      ? new Date(session.endedAt).getTime() -
-        new Date(session.startedAt).getTime()
-      : 0;
+  const durationMs = session.endedAt && session.startedAt
+    ? new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()
+    : 0;
 
-  const finalizeRes = await fetch(
-    `${BACKEND_URL}/sessions/${activeSessionId}`,
-    {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        status: "uploaded",
-        r2JsonKey: jsonKey,
-        r2VideoKey: videoKey || undefined,
-        stepCount,
-        durationMs,
-      }),
-    },
-  );
+  const finalizeRes = await fetch(`${BACKEND_URL}/v1/sessions/${activeSessionId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "x-workspace-id": resolvedWorkspaceId, "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "queued", r2JsonKey: jsonKey, r2VideoKey: videoKey || undefined, stepCount, durationMs }),
+  });
 
   if (!finalizeRes.ok) {
-    const errorText = await finalizeRes.text();
-    throw new Error(
-      `[StudioBase] Session finalization failed: ${finalizeRes.status} ${errorText}`,
-    );
+    throw new Error(`[StudioBase] Session finalization failed: ${finalizeRes.status}`);
   }
 
-  if (onProgress) onProgress(100);
+  // Trigger pipeline (fire and forget)
+  fetch(`${BACKEND_URL}/v1/pipeline/trigger`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "x-workspace-id": resolvedWorkspaceId, "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: activeSessionId }),
+  }).catch(err => console.warn("[StudioBase] Pipeline trigger failed:", err));
 
+  if (onProgress) onProgress(100);
   sbLog("UPLOAD_COMPLETE", { sessionId: activeSessionId });
+}
+
+/**
+ * Convenience wrapper used by retryUpload — runs init + upload sequentially.
+ */
+export async function uploadSession(
+  session: Session,
+  onProgress?: (pct: number) => void,
+  includeVideo?: boolean,
+): Promise<string> {
+  const { activeSessionId, ...auth } = await initSession(session);
+  await uploadSessionAssets(session, activeSessionId, auth, onProgress, includeVideo);
   return activeSessionId;
 }

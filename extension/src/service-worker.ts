@@ -11,11 +11,17 @@ import {
   saveChunk,
   getChunks,
 } from "./background/session-manager";
-import { uploadSession } from "./background/r2-uploader";
+import { initSession, uploadSessionAssets, uploadSession } from "./background/r2-uploader";
+import { initKeepalive } from "./background/keepalive";
 
 // ─── State ───────────────────────────────────────────────────
 
 let state: AppState = { status: "idle" };
+// Resolved once init() has rehydrated state from storage. Gate all handlers
+// that check state.status behind this promise so a restarted SW never drops
+// the first CAPTURE_STEP that arrives before the async read completes.
+let initResolve!: () => void;
+const initPromise = new Promise<void>((res) => { initResolve = res; });
 
 let isOffscreenReady = false;
 const ENABLE_OFFSCREEN_CAPTURE = true;
@@ -44,6 +50,7 @@ function queueEvent(task: () => Promise<void>, dedupeKey?: string) {
 
 async function init() {
   try {
+    initKeepalive();
     const result = await chrome.storage.local.get(["sb_state"]);
     const stored = result as StorageSchema;
     if (stored.sb_state) state = stored.sb_state;
@@ -51,6 +58,8 @@ async function init() {
     sbLog("STATE_REHYDRATED", { status: state.status });
   } catch (err) {
     console.warn("Extension initialization warning:", err);
+  } finally {
+    initResolve();
   }
 }
 
@@ -117,6 +126,21 @@ chrome.runtime.onMessage.addListener(
       return false;
     }
 
+    // GET_FRESH_TOKEN — used by the studio content script to get a guaranteed-live
+    // Google access token. chrome.identity.getAuthToken handles the OAuth refresh
+    // automatically so the returned token is always valid (never expired).
+    if (msg.type === "GET_FRESH_TOKEN") {
+      chrome.identity.getAuthToken({ interactive: false }, (token) => {
+        if (chrome.runtime.lastError || !token) {
+          sendResponse({ token: null });
+          return;
+        }
+        const t = typeof token === "string" ? token : (token as any).token;
+        sendResponse({ token: t || null });
+      });
+      return true; // keep channel open for async response
+    }
+
     if (msg.type === 'OFFSCREEN_READY') {
       console.log("🚀 [ServiceWorker] Offscreen is ready for frame capture.");
       isOffscreenReady = true;
@@ -124,11 +148,12 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg.type === 'SAVE_DESKTOP_EVENT') {
-      if (state.status === 'recording' && state.sessionId) {
+      initPromise.then(() => {
+        if (state.status !== 'recording' || !state.sessionId) return;
         const { eventType, payload, blob } = msg;
-        
+
         // Suppress redundant desktop_focus_lost in favor of explicit anchors
-        if (eventType === 'desktop_focus_lost') return false;
+        if (eventType === 'desktop_focus_lost') return;
 
         queueEvent(async () => {
           if (!state.sessionId) return;
@@ -137,8 +162,7 @@ chrome.runtime.onMessage.addListener(
             hasBlob: !!blob,
             blobSize: blob?.size
           });
-          
-          // 1. Handle Screenshot if present
+
           const handleCapture = async () => {
             if (blob && state.sessionId) {
               const session = await getSession(state.sessionId);
@@ -154,14 +178,14 @@ chrome.runtime.onMessage.addListener(
             type: eventType,
             timestamp: payload.timestamp || Date.now(),
             selector: "",
-            data: { 
-              ...payload, 
+            data: {
+              ...payload,
               screenshotKey: screenshotKey || payload.screenshotKey,
               context: payload.context || 'desktop'
             },
           });
         }, eventType);
-      }
+      });
       return false;
     }
 
@@ -185,7 +209,10 @@ chrome.runtime.onMessage.addListener(
         retryUpload();
         break;
       case "CAPTURE_STEP":
-        if (state.status === "recording" && state.sessionId) {
+        // Await init() before checking state — a restarted SW may not have
+        // rehydrated state yet when the first click message arrives.
+        initPromise.then(() => {
+          if (state.status !== "recording" || !state.sessionId) return;
           const p = msg.payload;
           const sessionId = state.sessionId;
           appendEvent(sessionId, {
@@ -206,7 +233,7 @@ chrome.runtime.onMessage.addListener(
             .catch((err) =>
               console.warn("[StudioBase] appendEvent failed:", err),
             );
-        }
+        });
         break;
       case "LOG": {
         const { tag, data } = msg.logMessage;
@@ -348,6 +375,28 @@ async function startRecording(target: CaptureTarget) {
     }
 
     sbLog("RECORDING_STARTED", { sessionId, target });
+
+    chrome.storage.local.get(["sb_user", "workspaceId"]).then((stored: any) => {
+      const token = stored.sb_user?.accessToken;
+      const wsId = stored.workspaceId || stored.sb_user?.workspaceId;
+      if (token && wsId) {
+        fetch(`${BACKEND_URL}/v1/audit-logs`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "x-workspace-id": wsId,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            action: 'session.capture_started',
+            workspaceId: wsId,
+            targetId: sessionId,
+            metadata: { source: 'extension' }
+          })
+        }).catch(console.warn);
+      }
+    });
+
   } catch (err: any) {
     updateState({ status: "error", errorMessage: err.message });
   }
@@ -372,45 +421,55 @@ async function stopRecording() {
   if (state.status !== "recording") return;
 
   const sessionId = state.sessionId!;
+  const includeVideo = state.includeVideo;
 
   if (state.target?.tabId) {
-    chrome.tabs
-      .sendMessage(state.target.tabId, { type: "STOP_CAPTURE" })
-      .catch(() => {});
+    chrome.tabs.sendMessage(state.target.tabId, { type: "STOP_CAPTURE" }).catch(() => {});
   }
 
   await updateState({ status: "uploading", uploadProgress: 0 });
 
   try {
-    // Bug 3 fix: mark endedAt BEFORE reading session for upload
     await stopSession(sessionId);
 
     const session = await getSession(sessionId);
-    if (!session) {
-      throw new Error(
-        `[StudioBase] Local session data not found for ${sessionId}`,
-      );
+    if (!session) throw new Error(`[StudioBase] Local session data not found for ${sessionId}`);
+
+    // Signal offscreen to stop — don't await, give it 600ms to flush the final chunk
+    if (includeVideo) {
+      chrome.runtime.sendMessage({ type: 'STOP_VIDEO_RECORDING' }).catch(() => {});
+      await new Promise(res => setTimeout(res, 600));
     }
 
-    if (state.includeVideo) {
-      try {
-        await chrome.runtime.sendMessage({ type: 'STOP_VIDEO_RECORDING' });
-      } catch (err) {
-        console.warn("[StudioBase] Failed to stop offscreen recording:", err);
-      }
-    }
+    // ── Init session on backend — this is the only blocking call ──
+    // As soon as we have the ID we show the link to the user.
+    const { activeSessionId, ...auth } = await initSession(session);
 
-    const backendSessionId = await uploadSession(session, (pct) => {
-      updateState({ uploadProgress: pct });
-    }, state.includeVideo);
+    await updateState({ status: "ready", sessionId: activeSessionId, uploadProgress: 100 });
+    sbLog("RECORDING_FINISHED", { sessionId: activeSessionId });
 
-    await updateState({
-      status: "ready",
-      sessionId: backendSessionId,
-      uploadProgress: 100,
-    });
+    // ── Upload everything in the background ───────────────────────
+    uploadSessionAssets(session, activeSessionId, auth, undefined, includeVideo)
+      .then(() => {
+        chrome.storage.local.get(["sb_user", "workspaceId"]).then((stored: any) => {
+          const token = stored.sb_user?.accessToken;
+          const wsId = stored.workspaceId || stored.sb_user?.workspaceId;
+          if (token && wsId) {
+            fetch(`${BACKEND_URL}/v1/audit-logs`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}`, "x-workspace-id": wsId, "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: 'session.capture_completed',
+                workspaceId: wsId,
+                targetId: activeSessionId,
+                metadata: { source: 'extension', hasVideo: !!includeVideo }
+              })
+            }).catch(console.warn);
+          }
+        });
+      })
+      .catch(err => console.error("[StudioBase] Background upload failed:", err));
 
-    sbLog("RECORDING_FINISHED", { sessionId: backendSessionId });
   } catch (err: any) {
     console.error("Upload failed:", err);
     updateState({ status: "failed_enrichment", errorMessage: err.message });

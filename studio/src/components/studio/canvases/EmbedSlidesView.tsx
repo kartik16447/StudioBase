@@ -192,9 +192,14 @@ export const EmbedSlidesView: React.FC = () => {
           <motion.div
             key={step?.id ?? idx}
             custom={dirRef.current}
-            initial={(dir: number) => ({ opacity: 0, x: dir * 60 })}
-            animate={{ opacity: 1, x: 0 }}
-            exit={(dir: number) => ({ opacity: 0, x: dir * -60 })}
+            variants={{
+              enter: (dir: number) => ({ opacity: 0, x: dir * 60 }),
+              center: { opacity: 1, x: 0 },
+              exit: (dir: number) => ({ opacity: 0, x: dir * -60 }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
             transition={{ type: 'spring', stiffness: 300, damping: 32 }}
             className="absolute inset-0 flex items-center justify-center"
           >

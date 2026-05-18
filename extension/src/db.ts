@@ -1,6 +1,6 @@
 import { sbLog } from './logger';
 
-const DB_NAME = 'screenvault';
+const DB_NAME = 'studiobase';
 const DB_VERSION = 1;
 const STORE_NAME = 'chunks';
 

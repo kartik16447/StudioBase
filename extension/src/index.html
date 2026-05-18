@@ -255,7 +255,6 @@
       <span id="toast-msg">Link copied to clipboard!</span>
     </div>
 
-    <script src="playback.js"></script>
     <script>
       // Set today's date dynamically
       document.getElementById("date-display").textContent =
@@ -422,7 +421,7 @@
             videoWrapper.classList.remove("hidden");
 
             // 1. Fetch Metadata
-            let metaUrl = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/meta?id=${fileId}&sid=${sessionId}`;
+            let metaUrl = `https://studiobase-proxy.karthik-upadhyay98.workers.dev/meta?id=${fileId}&sid=${sessionId}`;
             const metaRes = await fetch(metaUrl).catch(() => null);
             if (metaRes && metaRes.ok) {
               const data = await metaRes.json();
@@ -435,7 +434,7 @@
             if (window.SV && typeof window.SV.getPlayableUrl === "function") {
               streamUrl = await window.SV.getPlayableUrl(fileId, sessionId);
             } else {
-              streamUrl = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/?id=${fileId}&sid=${sessionId}`;
+              streamUrl = `https://studiobase-proxy.karthik-upadhyay98.workers.dev/?id=${fileId}&sid=${sessionId}`;
             }
             video.src = streamUrl;
             video.load();
@@ -494,7 +493,6 @@
         let speedIdx = 0;
         speedBtn.addEventListener("click", () => {
           speedIdx = (speedIdx + 1) % speeds.length;
-          video.playbackRate = speeds[speedIdx];
           speedBtn.textContent = speeds[speedIdx] + "x";
         });
 
@@ -574,7 +572,7 @@
             setTimeout(() => { video.load(); }, 1000);
             return;
           }
-          fetch('https://screenvault-proxy.karthik-upadhyay98.workers.dev/event', {
+          fetch('https://studiobase-proxy.karthik-upadhyay98.workers.dev/event', {
             method: 'POST',
             body: JSON.stringify({ type: 'browser_video_error', sessionId, metadata: { code: video.error?.code } })
           }).catch(() => {});

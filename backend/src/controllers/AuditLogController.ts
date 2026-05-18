@@ -34,4 +34,29 @@ export class AuditLogController {
 
     return c.json({ data: results });
   }
+
+  static async create(c: AppContext) {
+    const ws = c.get('workspace');
+    const user = c.get('user');
+    const { action, targetId, metadata } = await c.req.json();
+
+    if (!ws) return c.json({ error: 'Workspace context missing' }, 400);
+
+    const id = crypto.randomUUID();
+    const timestamp = Date.now();
+
+    await c.env.DB.prepare(
+      'INSERT INTO audit_logs (id, workspaceId, actorId, action, targetId, timestamp, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(
+      id,
+      ws.id,
+      user.id,
+      action,
+      targetId,
+      timestamp,
+      JSON.stringify(metadata || {})
+    ).run();
+
+    return c.json({ success: true, id }, 201);
+  }
 }

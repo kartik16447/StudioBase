@@ -14,17 +14,28 @@ export class PipelineService {
       'SELECT * FROM sessions WHERE id = ? AND ownerId = ?'
     ).bind(sessionId, userId).first() as any;
     
-    if (!session) throw new Error('NOT_FOUND');
+    if (!session) {
+      console.error(`[PipelineService] NOT_FOUND — sessionId:${sessionId} userId:${userId}`);
+      throw new Error('NOT_FOUND');
+    }
+    console.log(`[PipelineService] session found — status:${session.status} r2JsonKey:${session.r2JsonKey ?? 'NULL'}`);
 
-    const creditCost =
-      (requestedOutputs?.sop ? 1 : 0) +
-      (requestedOutputs?.demo ? 1 : 0) +
-      (requestedOutputs?.video ? 2 : 0);
+    let finalOutputs = requestedOutputs || {};
+    let creditCost =
+      (finalOutputs?.sop ? 1 : 0) +
+      (finalOutputs?.demo ? 1 : 0) +
+      (finalOutputs?.video ? 2 : 0);
 
-    if (creditCost === 0) throw new Error('NO_OUTPUTS');
+    if (creditCost === 0) {
+      // Default to SOP if extension triggers without specifying
+      finalOutputs = { sop: true };
+      creditCost = 1;
+    }
 
     const userRecord = await this.env.DB.prepare('SELECT creditsBalance FROM users WHERE id = ?').bind(userId).first() as any;
+    console.log(`[PipelineService] credits — balance:${userRecord?.creditsBalance ?? 'NULL'} cost:${creditCost}`);
     if ((userRecord?.creditsBalance || 0) < creditCost) {
+      console.error(`[PipelineService] INSUFFICIENT_CREDITS — balance:${userRecord?.creditsBalance} cost:${creditCost}`);
       await this.env.DB.prepare('UPDATE sessions SET status = ? WHERE id = ?').bind('credit_exhausted', sessionId).run();
       throw new Error(`INSUFFICIENT_CREDITS:${creditCost}:${userRecord?.creditsBalance || 0}`);
     }
@@ -40,16 +51,17 @@ export class PipelineService {
       sessionId, 
       userId, 
       r2JsonKey: session.r2JsonKey, 
-      requestedOutputs 
+      requestedOutputs: finalOutputs 
     };
     
+    console.log(`[PipelineService] sending to queue — job:`, JSON.stringify(job));
     await this.env.PIPELINE_QUEUE.send(job);
 
     await this.audit.record({
       eventName: 'export.started',
       userId,
       sessionId,
-      properties: { creditCost, ...requestedOutputs }
+      properties: { creditCost, ...finalOutputs }
     });
 
     return { creditCost, queuedAt: now };

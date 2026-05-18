@@ -12,6 +12,7 @@ export interface Session {
   endedAt?: string;
   status: 'recording' | 'paused' | 'stopped';
   events: CaptureEvent[];
+  steps?: any[];
   videoKey?: string | null;
 }
 

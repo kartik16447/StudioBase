@@ -135,7 +135,6 @@ function isInsideShadowRoot(element: Element): boolean {
 
 /**
  * Recursively search through shadow roots to find an element matching a selector.
- * Used during demo/overlay playback to locate elements by stored selector.
  */
 export function queryShadowPiercing(selector: string, root: Document | ShadowRoot = document): Element | null {
   // Try direct query first

@@ -40,7 +40,7 @@ const RefreshSchema = z.object({
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 // 1. Presign Uploads (Requires Workspace Context)
-assets.post('/presign', authMiddleware(), workspaceMiddleware(), zValidator('json', PresignSchema), async (c) => {
+assets.post('/upload/presign', authMiddleware(), workspaceMiddleware(), zValidator('json', PresignSchema), async (c) => {
   const ws = c.get('workspace');
   const user = c.get('user');
   const { sessionId, files } = c.req.valid('json');
@@ -58,7 +58,7 @@ assets.post('/presign', authMiddleware(), workspaceMiddleware(), zValidator('jso
 });
 
 // 2. Init Multipart Upload
-assets.post('/multipart/init', authMiddleware(), zValidator('json', MultipartInitSchema), async (c) => {
+assets.post('/upload/multipart/init', authMiddleware(), zValidator('json', MultipartInitSchema), async (c) => {
   const { key } = c.req.valid('json');
   const service = new AssetService(c.env);
   try {
@@ -71,7 +71,7 @@ assets.post('/multipart/init', authMiddleware(), zValidator('json', MultipartIni
 });
 
 // 3. Complete Multipart Upload
-assets.post('/multipart/complete', authMiddleware(), zValidator('json', MultipartCompleteSchema), async (c) => {
+assets.post('/upload/multipart/complete', authMiddleware(), zValidator('json', MultipartCompleteSchema), async (c) => {
   const { key, uploadId, parts } = c.req.valid('json');
   const service = new AssetService(c.env);
   const audit = new AuditService(c.env, c.executionCtx);
@@ -90,6 +90,15 @@ assets.post('/multipart/complete', authMiddleware(), zValidator('json', Multipar
   } catch (err: any) {
     throw new HTTPException(500, { message: err.message });
   }
+});
+
+// 3b. Presign Part (Returns proxy URL for worker-mediated part upload)
+assets.post('/upload/multipart/presign-part', authMiddleware(), async (c) => {
+  const { key, uploadId, partNumber } = await c.req.json();
+  const origin = new URL(c.req.url).origin;
+  // We return a proxy URL that hits our assets.put('/file') endpoint
+  const uploadUrl = `${origin}/v1/assets/file?key=${encodeURIComponent(key)}&uploadId=${uploadId}&partNumber=${partNumber}`;
+  return c.json({ uploadUrl });
 });
 
 // 4. Handle File Upload (Worker Proxy / Part Upload) — body is raw binary, no JSON schema

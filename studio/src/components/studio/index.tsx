@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import type { Step, SessionEnvelope, AnnotationShape } from '../../../../shared/types/session';
+import type { Step, SessionEnvelope, AnnotationShape, Annotation } from '../../../../shared/types/session';
 import { I } from '../icons';
 import { 
   cn, Badge, IconButton, Tooltip, StepNumber, ScreenshotPlaceholder, 
@@ -159,7 +159,7 @@ export const AnnotationCanvas: React.FC<{
         onMouseLeave={() => setDrawing(false)}
       >
         {/* Saved annotations */}
-        {annotations.map(a => {
+        {annotations.map((a: Annotation) => {
           if (a.shape === 'blur') return null;
           if (a.shape === 'box') return (
             <rect key={a.id}
@@ -237,7 +237,7 @@ export const AnnotationCanvas: React.FC<{
       </svg>
 
       {/* Blur annotations as DOM divs (backdrop-filter) */}
-      {annotations.filter(a => a.shape === 'blur').map(a => (
+      {annotations.filter((a: Annotation) => a.shape === 'blur').map((a: Annotation) => (
         <div key={a.id}
           className="absolute pointer-events-none"
           style={{
@@ -274,6 +274,22 @@ export const AnnotationCanvas: React.FC<{
         </button>
       )}
     </div>
+  );
+};
+
+// ─── FaviconImg ────────────────────────────────────────────────────────
+const FaviconImg: React.FC<{ src: string; domain: string }> = ({ src, domain }) => {
+  const [failed, setFailed] = React.useState(false);
+  if (failed) return <I.Globe size={12} aria-hidden />;
+  return (
+    <img
+      src={src}
+      alt={domain}
+      width={12}
+      height={12}
+      className="rounded-sm object-contain"
+      onError={() => setFailed(true)}
+    />
   );
 };
 
@@ -330,17 +346,50 @@ export const StepCard: React.FC<{
         />
       </div>
 
-      <p className="text-[16px] leading-[1.65] text-text relative z-10" style={{ textWrap: 'pretty' as any }}>
-        {text}
-      </p>
+      {/* Step Title */}
+      {step.stepTitle && (
+        <h3 className="text-[15px] font-semibold text-text mb-1.5 leading-snug">
+          {step.stepTitle}
+        </h3>
+      )}
+
+      {/* Step Text / Editor */}
+      {useStudioStore.getState().sopStatus !== 'published' ? (
+        <textarea
+          className="w-full bg-transparent border border-white/10 rounded p-2 text-sm resize-none focus:outline-none focus:border-white/30 text-text-2 leading-[1.65]"
+          defaultValue={step.textOverride ?? step.generatedText ?? ''}
+          rows={3}
+          onBlur={(e) => {
+            const newText = e.currentTarget.value.trim();
+            const original = step.textOverride ?? step.generatedText ?? '';
+            if (newText !== original) {
+              useStudioStore.getState().saveStep(step.id, { textOverride: newText });
+            }
+          }}
+        />
+      ) : (
+        <p className="text-[15px] leading-[1.65] text-text-2 relative z-10" style={{ textWrap: 'pretty' as any }}>
+          {text}
+        </p>
+      )}
 
       <div className="mt-4 flex items-center gap-2 relative z-10">
-        <div className="flex items-center bg-surface-2 rounded-pill pr-1">
-          <Badge tone="neutral" size="sm" icon={I.Globe} className="bg-transparent border-none">
-            {(step.url || '').replace(/^https?:\/\//,'')}
-          </Badge>
-          <CopyLinkButton url={step.url || ''} />
-        </div>
+        {(() => {
+          const rawUrl = step.url || session?.capturedUrl || '';
+          if (!rawUrl) return null;
+          const domain = rawUrl.replace(/^https?:\/\//, '').split('/')[0];
+          if (!domain) return null;
+          const faviconSrc = `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
+          return (
+            <div className="flex items-center bg-surface-2 rounded-pill pr-1">
+              <div className="inline-flex items-center gap-1 rounded-pill font-semibold tracking-wide uppercase whitespace-nowrap text-text-2 text-[10px] h-5 px-2">
+                <FaviconImg src={faviconSrc} domain={domain} />
+                {domain}
+              </div>
+              <CopyLinkButton url={rawUrl} />
+            </div>
+          );
+        })()}
         {step.textOverride && (
           <Badge tone="primary" size="sm">edited</Badge>
         )}
@@ -381,6 +430,9 @@ export const ChapterBreak: React.FC<{ index: number; title: string }> = ({ index
 
 // ─── SummaryCallout ────────────────────────────────────────────────────
 export const SummaryCallout: React.FC<{ session: SessionEnvelope }> = ({ session }) => {
+  const summary = session.aiOutputs?.summary;
+  const tags = session.aiOutputs?.tags ?? [];
+  if (!summary) return null;
   return (
     <GlassPanel className="p-6 border-l-4 border-primary mb-8" style={{ borderTopLeftRadius: 4, borderBottomLeftRadius: 4 }}>
       <div className="flex items-center gap-2 mb-2">
@@ -388,15 +440,17 @@ export const SummaryCallout: React.FC<{ session: SessionEnvelope }> = ({ session
         <span className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-primary">AI summary</span>
       </div>
       <p className="text-[15px] leading-[1.65] text-text-2" style={{ textWrap: 'pretty' as any }}>
-        {session.aiOutputs.summary}
+        {summary}
       </p>
-      <div className="flex flex-wrap gap-1.5 mt-4">
-        {session.aiOutputs.tags?.map(t => (
-          <span key={t} className="text-[11px] font-medium text-text-2 bg-surface-2 px-2.5 h-6 inline-flex items-center rounded-pill">
-            {t}
-          </span>
-        ))}
-      </div>
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-4">
+          {tags.map(t => (
+            <span key={t} className="text-[11px] font-medium text-text-2 bg-surface-2 px-2.5 h-6 inline-flex items-center rounded-pill">
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
     </GlassPanel>
   );
 };

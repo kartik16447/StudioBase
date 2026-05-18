@@ -1,6 +1,7 @@
 import { Env } from '../../types/hono';
 import { AuditService } from '../AuditService';
-import { Events } from '../../telemetry/events';
+import type { Step } from '../../../../shared/types/step';
+import type { SessionEnvelope } from '../../../../shared/types/session';
 
 export interface PipelineJob {
   sessionId: string;
@@ -13,6 +14,75 @@ export interface PipelineJob {
   };
 }
 
+// ─── AI response schema ───────────────────────────────────────────────────────
+
+const SOP_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    summary: { type: 'string' },
+    tags: { type: 'array', items: { type: 'string' } },
+    steps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          stepTitle: { type: 'string' },
+          generatedText: { type: 'string' },
+        },
+        required: ['id', 'stepTitle', 'generatedText'],
+      },
+    },
+    chapterBreaks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          afterStepId: { type: 'string' },
+          chapterTitle: { type: 'string' },
+        },
+        required: ['afterStepId', 'chapterTitle'],
+      },
+    },
+  },
+  required: ['title', 'summary', 'tags', 'steps', 'chapterBreaks'],
+};
+
+const SYSTEM_PROMPT = `You are an expert SOP (Standard Operating Procedure) writer. Given a sequence of raw user actions from a screen recording session, produce polished, professional documentation that a new employee could follow without any technical knowledge.
+
+Output fields:
+- title: A clear, action-oriented title describing the overall goal (e.g. "Navigating and Opening Documents in the Application"). Do not start with "How to".
+- summary: 2–3 sentences describing what this procedure accomplishes, when someone would use it, and what they will achieve by the end. Write in third person (e.g. "This process walks you through...").
+- tags: 2–5 lowercase keywords relevant to the workflow domain.
+- steps: For each input step produce:
+    - stepTitle: A short noun phrase naming the goal of this step (e.g. "Open the Main Application Screen", "Locate the Primary Navigation Area"). Capitalize each word. Do not include a step number.
+    - generatedText: 1–3 sentences describing what the user does and WHY — focus on the user's intent and what they are accomplishing, not the raw mechanics. Write in second person imperative (e.g. "Begin by navigating to the main application screen where your work area and options are displayed."). If the action involves a form field or input, mention what value was entered and why.
+- chapterBreaks: Group steps into 2–5 logical workflow phases. afterStepId must be an id from the input. Place breaks at natural transitions between distinct stages of the workflow.
+
+Critical rules:
+- Every step id must be preserved exactly as given — do not add, remove, or rename any.
+- Do NOT mention raw technical details like CSS selectors, DOM roles, or coordinates.
+- Write as if explaining to a non-technical new hire. Avoid jargon.
+- Output valid JSON only — no markdown fences, no commentary.`;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function buildStepPayload(steps: Step[]) {
+  return steps.map(s => ({
+    id: s.id,
+    action: s.action,
+    elementText: s.elementText,
+    elementRole: s.elementRole,
+    inputValue: s.inputValue,
+    pageTitle: s.pageTitle,
+    url: s.url,
+    selector: s.selector,
+  }));
+}
+
+// ─── Processor ───────────────────────────────────────────────────────────────
+
 export class PipelineProcessor {
   private audit: AuditService;
 
@@ -22,69 +92,93 @@ export class PipelineProcessor {
 
   async process(job: PipelineJob) {
     const { sessionId, userId } = job;
-    const now = Date.now();
+    const startedAt = Date.now();
 
     try {
-      await this.audit.record({
-        eventName: 'pipeline.started',
-        userId,
-        sessionId,
-        properties: { ...job.requestedOutputs }
-      });
-
+      await this.audit.record({ eventName: 'pipeline.started', userId, sessionId, properties: { ...job.requestedOutputs } });
       console.log(`[PIPELINE] Starting: ${sessionId}`);
 
-      // 1. Update session status to processing
-      await this.env.DB.prepare(
-        'UPDATE sessions SET status = ?, updatedAt = ? WHERE id = ?'
-      ).bind('processing', now, sessionId).run();
+      await this.env.DB.prepare('UPDATE sessions SET status = ?, updatedAt = ? WHERE id = ?')
+        .bind('processing', startedAt, sessionId).run();
 
-      // 2. Parse payload and simulate backend generation work
-      if (job.r2JsonKey) {
-        const obj = await this.env.R2.get(job.r2JsonKey);
-        if (obj) {
-          const envelope: any = await obj.json();
-          // Simulate work (e.g., adding metadata)
-          envelope.metadata = envelope.metadata || {};
-          envelope.metadata.processedAt = Date.now();
-          envelope.metadata.outputs = job.requestedOutputs;
-          
-          // 3. Re-save the SessionEnvelope JSON to R2
-          await this.env.R2.put(job.r2JsonKey, JSON.stringify(envelope), {
-            httpMetadata: { contentType: 'application/json' }
-          });
-        }
+      if (!job.r2JsonKey) throw new Error('NO_R2_KEY');
+      console.log(`[PIPELINE] fetching R2 object — key:${job.r2JsonKey}`);
+
+      const obj = await this.env.R2.get(job.r2JsonKey);
+      if (!obj) throw new Error('R2_OBJECT_NOT_FOUND');
+
+      const envelope = await obj.json() as SessionEnvelope;
+      console.log(`[PIPELINE] envelope loaded — steps:${envelope.steps?.length ?? 0} sessionType:${envelope.sessionType}`);
+
+      // ── SOP generation ──────────────────────────────────────────────────────
+      if (job.requestedOutputs?.sop !== false && envelope.steps?.length > 0) {
+        const userMessage = JSON.stringify(buildStepPayload(envelope.steps));
+        console.log(`[PIPELINE] calling Workers AI — model:@cf/meta/llama-4-scout-17b-16e-instruct steps:${envelope.steps.length} inputChars:${userMessage.length}`);
+
+        const aiResponse = await (this.env.AI.run as any)(
+          '@cf/meta/llama-4-scout-17b-16e-instruct',
+          {
+            messages: [
+              { role: 'system', content: SYSTEM_PROMPT },
+              { role: 'user', content: userMessage },
+            ],
+            response_format: { type: 'json_schema', json_schema: SOP_JSON_SCHEMA },
+          }
+        ) as { response: string };
+
+        console.log(`[PIPELINE] AI response received — raw length:${aiResponse?.response?.length ?? 0}`);
+        console.log(`[PIPELINE] AI raw response:`, aiResponse?.response?.slice(0, 300));
+        const generated = JSON.parse(aiResponse.response) as {
+          title: string;
+          summary: string;
+          tags: string[];
+          steps: { id: string; stepTitle: string; generatedText: string }[];
+          chapterBreaks: { afterStepId: string; chapterTitle: string }[];
+        };
+
+        const aiStepMap = new Map(generated.steps.map(s => [s.id, s]));
+        envelope.steps = envelope.steps.map(step => ({
+          ...step,
+          stepTitle: aiStepMap.get(step.id)?.stepTitle ?? step.stepTitle ?? null,
+          generatedText: aiStepMap.get(step.id)?.generatedText ?? step.generatedText,
+        }));
+
+        envelope.aiOutputs = {
+          title: generated.title,
+          summary: generated.summary,
+          tags: generated.tags,
+        };
+
+        envelope.metadata = {
+          ...envelope.metadata,
+          chapterBreaks: generated.chapterBreaks,
+        };
+
+        console.log(`[PIPELINE] AI generated title: "${generated.title}" for ${sessionId}`);
       }
-      
-      // 4. On success, update session status to ready
-      await this.env.DB.prepare(
-        'UPDATE sessions SET status = ?, pipelinePath = ?, updatedAt = ? WHERE id = ?'
-      ).bind('ready', 'cloud', Date.now(), sessionId).run();
 
-      await this.audit.record({
-        eventName: 'pipeline.completed',
-        userId,
-        sessionId,
-        properties: { durationMs: Date.now() - now }
+      envelope.metadata = envelope.metadata ?? {};
+      (envelope.metadata as any).processedAt = Date.now();
+
+      await this.env.R2.put(job.r2JsonKey, JSON.stringify(envelope), {
+        httpMetadata: { contentType: 'application/json' },
       });
 
+      await this.env.DB.prepare('UPDATE sessions SET status = ?, pipelinePath = ?, updatedAt = ? WHERE id = ?')
+        .bind('ready', 'cloud', Date.now(), sessionId).run();
+
+      await this.audit.record({ eventName: 'pipeline.completed', userId, sessionId, properties: { durationMs: Date.now() - startedAt } });
       console.log(`[PIPELINE] Done: ${sessionId}`);
+
     } catch (err: any) {
       console.error(`[PIPELINE] Failed for ${sessionId}:`, err.message);
-      
-      // 5. On error, catch the exception, update status to failed, and populate errorReason
-      await this.env.DB.prepare(
-        'UPDATE sessions SET status = ?, errorReason = ?, updatedAt = ? WHERE id = ?'
-      ).bind('failed', err.message, Date.now(), sessionId).run();
 
-      await this.audit.record({
-        eventName: 'pipeline.failed',
-        userId,
-        sessionId,
-        properties: { error: err.message }
-      });
+      await this.env.DB.prepare('UPDATE sessions SET status = ?, errorReason = ?, updatedAt = ? WHERE id = ?')
+        .bind('failed', err.message, Date.now(), sessionId).run();
 
-      throw err; // Allow queue retry
+      await this.audit.record({ eventName: 'pipeline.failed', userId, sessionId, properties: { error: err.message } });
+
+      throw err;
     }
   }
 }

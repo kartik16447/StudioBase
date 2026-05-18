@@ -6,6 +6,7 @@ import { HTTPException } from 'hono/http-exception';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { PipelineService } from '../../services/PipelineService';
+import { planGate } from '../../middlewares/plan';
 
 const pipeline = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -27,6 +28,7 @@ pipeline.post(
   '/trigger',
   authMiddleware(),
   workspaceMiddleware(),
+  planGate('export'),
   zValidator('json', TriggerSchema),
   async (c) => {
     const user = c.get('user');

@@ -5,13 +5,29 @@ export const RenderConstants = {
   ASSET_REFRESH_INTERVAL: 15 * 60 * 1000,
   PLAYER_MAX_HEIGHT: 'calc(100vh - 280px)',
   PLAYER_ASPECT_RATIO: '16/9',
-  EXPORT_COMPOSITOR_WIDTH: 2880,
-  EXPORT_COMPOSITOR_HEIGHT: 1444,
-  EXPORT_VISUAL_WIDTH: '288px',
-  EXPORT_VISUAL_HEIGHT: '162px',
-  EXPORT_VIDEO_BITRATE: 25000000,
+
+  // Export: standard 1080p HD — balances quality and render speed.
+  // 4K (2880x1444) was the previous value and caused 5-10 min export times
+  // because software-decoded frames had to be composited at that resolution.
+  EXPORT_COMPOSITOR_WIDTH: 1920,
+  EXPORT_COMPOSITOR_HEIGHT: 1080,
+  EXPORT_VISUAL_WIDTH: '192px',
+  EXPORT_VISUAL_HEIGHT: '108px',
+  EXPORT_VIDEO_BITRATE: 16000000, // 16 Mbps — plenty for 1080p60
   EXPORT_FPS: 60,
+
+  // Preview internal render resolution (CSS will scale it down)
+  PREVIEW_WIDTH: 1920,
+  PREVIEW_HEIGHT: 1080,
+
   GRID_SPACING: 60,
+
+  // How much padding around the screenshot at zoom=1 (fraction of canvas dimension)
+  SCREENSHOT_PADDING: 0.005,
+
   PANEL_SPRING: { type: 'spring' as const, stiffness: 280, damping: 36 },
-  CAMERA_SPRING: { type: 'spring' as const, stiffness: 70, damping: 18, mass: 1.1, restDelta: 0.001 }
+
+  // Golden 64adceb spring — unified physics for XY and scale
+  CAMERA_XY_SPRING:    { stiffness: 70, damping: 18, mass: 1.1, restDelta: 0.001 },
+  CAMERA_SCALE_SPRING: { stiffness: 70, damping: 18, mass: 1.1, restDelta: 0.001 },
 };

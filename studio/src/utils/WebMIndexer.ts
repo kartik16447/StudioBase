@@ -40,6 +40,7 @@ export class WebMIndexer {
     this.view = new DataView(buffer);
     console.log("🎬 [Indexer] Starting Hierarchy-Aware Scan (v2.1)...");
     this.parseEBML(0, buffer.byteLength, false);
+    this.view = null; // PHASE A: Release DataView/ArrayBuffer after indexing
     console.log(`🎬 [Indexer] Indexing complete. Found ${this.frames.length} frames.`);
   }
 

@@ -14,8 +14,12 @@ class ApiClient {
   }
 
   getUrl(path: string): string {
-    if (path.startsWith('http')) return path;
-    return `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+    const token = localStorage.getItem('sb_token') || sessionStorage.getItem('sb_token');
+    const separator = path.includes('?') ? '&' : '?';
+    const authQuery = token ? `${separator}token=${token}` : '';
+    
+    if (path.startsWith('http')) return `${path}${authQuery}`;
+    return `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}${authQuery}`;
   }
 
   private async handleResponse<T>(res: Response, requestPath?: string): Promise<T> {
@@ -134,6 +138,89 @@ class ApiClient {
     if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
     return res;
   }
+
+  // ── Comments ────────────────────────────────────────────────────────────────
+  comments = {
+    list: (sopId: string) =>
+      this.get<{ comments: CommentItem[] }>(`/comments?sopId=${sopId}`),
+
+    create: (sopId: string, body: string, stepId?: string | null) =>
+      this.post<CommentItem>('/comments', { sopId, stepId: stepId ?? null, body }),
+
+    resolve: (commentId: string) =>
+      this.patch<CommentItem>(`/comments/${commentId}/resolve`),
+
+    remove: (commentId: string) =>
+      this.delete<{ ok: boolean }>(`/comments/${commentId}`),
+  };
+
+  // ── Notifications ────────────────────────────────────────────────────────────
+  notifications = {
+    list: () =>
+      this.get<{ notifications: NotificationItem[]; unreadCount: number }>('/notifications'),
+
+    markRead: (notifId: string) =>
+      this.post<{ ok: boolean }>(`/notifications/${notifId}/read`),
+
+    markAllRead: () =>
+      this.post<{ ok: boolean }>('/notifications/read-all'),
+  };
+
+  // ── Sharing ──────────────────────────────────────────────────────────────────
+  sessions = {
+    setShare: (sessionId: string, isPublic: boolean) =>
+      this.patch<{ isPublic: boolean; shareToken: string | null; shareUrl: string | null }>(
+        `/sessions/${sessionId}/share`,
+        { isPublic },
+      ),
+  };
+
+  // ── Workspace Invites ────────────────────────────────────────────────────────
+  invites = {
+    list: () =>
+      this.get<{ invites: PendingInvite[] }>('/workspaces/invites'),
+
+    create: (role: string) =>
+      this.post<{ invite: PendingInvite }>('/workspaces/invites', { role }),
+
+    revoke: (inviteId: string) =>
+      this.post<{ ok: boolean }>(`/workspaces/invites/${inviteId}/revoke`),
+  };
+}
+
+// ── Shared types (consumed by store + components) ─────────────────────────────
+
+export interface CommentItem {
+  id: string;
+  sopId: string;
+  stepId: string | null;
+  authorId: string;
+  authorName: string | null;
+  authorAvatarUrl: string | null;
+  body: string;
+  resolvedAt: number | null;
+  resolvedBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface NotificationItem {
+  id: string;
+  type: string;
+  actorId: string | null;
+  actorName: string | null;
+  targetId: string | null;
+  metadata: string | null;  // JSON string
+  readAt: number | null;
+  createdAt: number;
+}
+
+export interface PendingInvite {
+  id: string;
+  token: string;
+  role: string;
+  createdAt: number;
+  expiresAt: number | null;
 }
 
 export const apiClient = new ApiClient();

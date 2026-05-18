@@ -62,9 +62,14 @@ export const EmbedSOPView: React.FC = () => {
           <motion.div
             key={step?.id ?? idx}
             custom={dirRef.current}
-            initial={(dir: number) => ({ opacity: 0, x: dir * 48, scale: 0.97 })}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={(dir: number) => ({ opacity: 0, x: dir * -48, scale: 0.97 })}
+            variants={{
+              enter: (dir: number) => ({ opacity: 0, x: dir * 48, scale: 0.97 }),
+              center: { opacity: 1, x: 0, scale: 1 },
+              exit: (dir: number) => ({ opacity: 0, x: dir * -48, scale: 0.97 }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
             transition={SPRING}
             className="relative w-full flex items-center justify-center"
           >

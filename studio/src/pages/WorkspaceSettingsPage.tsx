@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { apiClient } from '../lib/apiClient';
+import { apiClient, type PendingInvite } from '../lib/apiClient';
 import { sessionManager } from '../lib/auth/sessionManager';
 import { I } from '../components/icons';
 import { cn } from '../components/ui';
@@ -41,22 +41,65 @@ const ROLE_BADGES: Record<string, string> = {
 export const WorkspaceSettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Invite form state
+  const [inviteRole, setInviteRole] = useState<'Member' | 'Admin' | 'Viewer'>('Member');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{ token: string; url: string } | null>(null);
+  const [copiedToken, setCopiedToken] = useState(false);
+
   const workspaceId = sessionManager.getWorkspaceId();
 
-  useEffect(() => {
+  const loadData = () => {
     if (!workspaceId) return;
     setLoading(true);
     Promise.all([
       apiClient.get<{ settings: WorkspaceSettings }>('/workspaces/settings'),
       apiClient.get<{ members: Member[] }>('/workspaces/members'),
-    ]).then(([settingsRes, membersRes]) => {
+      apiClient.invites.list().catch(() => ({ invites: [] })),
+    ]).then(([settingsRes, membersRes, invitesRes]) => {
       setSettings(settingsRes.settings);
       setMembers(membersRes.members || []);
+      setPendingInvites(invitesRes.invites || []);
     }).catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, [workspaceId]);
+  };
+
+  useEffect(() => { loadData(); }, [workspaceId]);
+
+  const handleCreateInvite = async () => {
+    setInviteLoading(true);
+    setInviteResult(null);
+    try {
+      const res = await apiClient.invites.create(inviteRole);
+      const token = res.invite.token;
+      const url = `${window.location.origin}${window.location.pathname}?join=${token}`;
+      setInviteResult({ token, url });
+      setPendingInvites((prev) => [res.invite, ...prev]);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const handleRevoke = async (inviteId: string) => {
+    try {
+      await apiClient.invites.revoke(inviteId);
+      setPendingInvites((prev) => prev.filter((i) => i.id !== inviteId));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const copyInviteLink = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedToken(true);
+    setTimeout(() => setCopiedToken(false), 2000);
+  };
 
   if (loading) return (
     <div className="flex-1 flex items-center justify-center text-text-3">
@@ -94,6 +137,99 @@ export const WorkspaceSettingsPage: React.FC = () => {
           SSO configuration is managed by your workspace admin. Contact support to enable SAML or OIDC federation.
         </p>
       </section>
+
+      {/* Invite New Member */}
+      <section className="mb-6 bg-surface border border-white/5 rounded-lg p-6">
+        <div className="flex items-center gap-2 mb-5">
+          <I.UserPlus size={16} className="text-primary" />
+          <h2 className="text-[15px] font-semibold text-text">Invite Member</h2>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <select
+            value={inviteRole}
+            onChange={(e) => setInviteRole(e.target.value as any)}
+            className="bg-surface-2 border border-white/10 rounded-lg px-3 py-2 text-[13px] text-text focus:outline-none focus:border-primary/40"
+          >
+            <option value="Member">Member</option>
+            <option value="Admin">Admin</option>
+            <option value="Viewer">Viewer</option>
+          </select>
+          <button
+            onClick={handleCreateInvite}
+            disabled={inviteLoading}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white text-[13px] font-semibold transition-colors disabled:opacity-50"
+          >
+            {inviteLoading ? <I.Loader size={14} className="animate-spin" /> : <I.Link size={14} />}
+            Generate Invite Link
+          </button>
+        </div>
+
+        {inviteResult && (
+          <div className="mt-4 p-3 bg-white/[0.04] rounded-lg border border-white/[0.08] space-y-2">
+            <p className="text-[11px] font-semibold text-text-3 uppercase tracking-wider">Invite link (expires in 7 days)</p>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 font-mono text-[11px] text-text-2 truncate bg-white/[0.04] px-3 py-2 rounded border border-white/[0.06]">
+                {inviteResult.url}
+              </div>
+              <button
+                onClick={() => copyInviteLink(inviteResult.url)}
+                className="flex-shrink-0 px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-[12px] font-semibold transition-colors flex items-center gap-1.5"
+              >
+                {copiedToken ? <I.Check size={13} /> : <I.Copy size={13} />}
+                {copiedToken ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Pending Invites */}
+      {pendingInvites.length > 0 && (
+        <section className="mb-6 bg-surface border border-white/5 rounded-lg p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <I.Clock size={16} className="text-text-3" />
+            <h2 className="text-[15px] font-semibold text-text">Pending Invites ({pendingInvites.length})</h2>
+          </div>
+          <div className="divide-y divide-white/5">
+            {pendingInvites.map((inv) => {
+              const url = `${window.location.origin}${window.location.pathname}?join=${inv.token}`;
+              return (
+                <div key={inv.id} className="flex items-center justify-between py-3 gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        'text-[11px] font-semibold px-2 py-0.5 rounded-full border',
+                        ROLE_BADGES[inv.role] || ROLE_BADGES.Member
+                      )}>{inv.role}</span>
+                      <span className="text-[11px] text-text-3 font-mono truncate">{url}</span>
+                    </div>
+                    {inv.expiresAt && (
+                      <div className="text-[10px] text-text-3 mt-0.5">
+                        Expires {new Date(inv.expiresAt).toLocaleDateString()}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => copyInviteLink(url)}
+                      className="text-[11px] text-text-3 hover:text-text transition-colors px-2 py-1 rounded flex items-center gap-1"
+                    >
+                      <I.Copy size={11} /> Copy
+                    </button>
+                    <button
+                      onClick={() => handleRevoke(inv.id)}
+                      className="text-[11px] text-red-400 hover:text-red-300 transition-colors px-2 py-1 rounded flex items-center gap-1"
+                    >
+                      <I.X size={11} /> Revoke
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Members */}
       <section className="bg-surface border border-white/5 rounded-lg p-6">

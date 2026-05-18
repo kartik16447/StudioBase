@@ -8,6 +8,9 @@
 
 export const SCHEMA_VERSION = "1.0";
 
+import type { Step, Annotation, AnimationTarget } from './step';
+export type { Step, Annotation, AnimationTarget };
+
 // ─── Action Types ───────────────────────────────────────────
 
 export type ActionType =
@@ -53,13 +56,6 @@ export interface Coordinates {
 
 // ─── Animation (computed by pipeline, consumed by Studio video view) ────────
 
-export interface AnimationTarget {
-  centerX: number;         // click point x as % of viewport width (0-100)
-  centerY: number;         // click point y as % of viewport height (0-100)
-  zoomScale: number;       // how much to zoom in (1.0 = no zoom, 2.5 = default)
-  transitionType: TransitionType;
-  transitionDurationMs: number;
-}
 
 // ─── Path 3 — Debug / Bug Capture ───────────────────────────
 
@@ -134,16 +130,6 @@ export interface TemplateMeta {
 
 export type AnnotationShape = "arrow" | "box" | "circle" | "text" | "blur";
 
-export interface Annotation {
-  id: string;
-  shape: AnnotationShape;
-  x: number;           // % of screenshot width (0-100)
-  y: number;           // % of screenshot height (0-100)
-  width?: number;      // for box/circle, % of width
-  height?: number;     // for box/circle, % of height
-  text?: string;       // label text
-  color?: string;      // hex color
-}
 
 // ─── Trupeer-equivalent: Translation ─────────────────────────
 // Per-step translated text and audio — populated by pipeline on demand
@@ -199,51 +185,6 @@ export interface OverlayMeta {
   display: OverlayDisplay;
 }
 
-// ─── Core Step Object ───────────────────────────────────────
-
-export interface Step {
-  id: string;
-  sequence: number;          // 1-indexed display order
-  timestamp: number;         // ms since session start
-  action: ActionType;
-  url: string;
-  pageTitle: string;
-
-  // Element capture
-  selector: string | null;
-  elementText: string | null;
-  elementRole: string | null;
-  elementType: string | null;
-  inputValue: string | null;
-
-  // Geometry
-  coordinates: Coordinates | null;
-
-  // Screenshot — key into SessionEnvelope.assets, NEVER a direct URL
-  screenshotKey: string;
-
-  // AI pipeline outputs (null until pipeline runs)
-  generatedText: string | null;
-  textOverride: string | null;   // user edited this in Studio
-  voiceoverKey: string | null;
-  voiceoverDurationMs: number | null;
-  animationTarget: AnimationTarget | null;
-
-  // Trupeer-equivalent features — undefined until generated
-  annotations?: Annotation[];           // smart callouts on this screenshot
-  translations?: StepTranslations;      // translated text + audio per language
-
-  // Future paths — undefined until their path is built
-  debug?: DebugCapture;
-  automation?: AutomationActions;
-  memory?: MemoryMeta;
-  courseware?: CoursewareMeta;
-  template?: TemplateMeta;
-  overlay?: OverlayMeta;
-
-  // Metadata captured at interaction time
-  data?: Record<string, any>;
-}
 
 // ─── Session Envelope ───────────────────────────────────────
 
@@ -301,4 +242,9 @@ export interface SessionEnvelope {
   avatar?: AvatarConfig;            // AI avatar config if user requested it
   videoKey?: string | null;         // R2 key for the recorded .webm video file
   activeLanguage?: string;          // which translation is currently active ("en" default)
+
+  // Populated by the backend GET /sessions/:id response (not stored in R2 envelope)
+  workspaceId?: string;
+  sopId?: string | null;
+  sopStatus?: 'draft' | 'review' | 'published' | null;
 }

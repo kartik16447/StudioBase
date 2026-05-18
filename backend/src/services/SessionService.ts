@@ -62,9 +62,54 @@ export class SessionService {
   }
 
   async getById(id: string, workspaceId: string) {
-    return await this.env.DB.prepare(
+    const session = await this.env.DB.prepare(
       'SELECT * FROM sessions WHERE (id = ? OR shareToken = ?) AND workspaceId = ? AND deletedAt IS NULL'
     ).bind(id, id, workspaceId).first() as any;
+
+    if (!session) return null;
+
+    try {
+      // Fetch steps by joining with sops to find steps associated with this sessionId
+      const { results: steps } = await this.env.DB.prepare(
+        `SELECT steps.* FROM steps 
+         JOIN sops ON steps.sopId = sops.id 
+         WHERE sops.sessionId = ? 
+         ORDER BY steps.stepIndex ASC`
+      ).bind(session.id).all();
+
+      const { results: artifacts } = await this.env.DB.prepare(
+        "SELECT * FROM artifacts WHERE sessionId = ? AND type = 'screenshot'"
+      ).bind(session.id).all();
+
+      // Ensure steps uses the JSON blob for content if available
+      const parsedSteps = steps.map((s: any) => ({
+        ...s,
+        content: typeof s.content === 'string' ? JSON.parse(s.content) : s.content,
+      }));
+
+      // Map artifact R2 keys to public URLs for screenshots
+      const origin = 'https://studiobase-backend.karthik-upadhyay98.workers.dev';
+      const mappedArtifacts = artifacts.map((a: any) => {
+        let r2Key = a.metadata;
+        if (typeof a.metadata === 'string' && a.metadata.startsWith('{')) {
+          const meta = JSON.parse(a.metadata);
+          r2Key = meta.r2Key || meta.storageKey;
+        }
+        return {
+          ...a,
+          url: r2Key ? `${origin}/v1/assets/${r2Key}` : null
+        };
+      });
+
+      return {
+        ...session,
+        steps: parsedSteps,
+        artifacts: mappedArtifacts
+      };
+    } catch (e) {
+      console.error('[SessionService] Hydration failed, returning raw session', e);
+      return session;
+    }
   }
 
   async getEnvelope(id: string, workspaceId: string) {

@@ -5,6 +5,71 @@ import { BACKEND_URL, STUDIO_URL } from "../../shared/constants";
 let state: AppState;
 let localTimerInterval: ReturnType<typeof setInterval> | null = null;
 let lastAutoCopiedUrl: string | null = null;
+let isPolling = false;
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+async function pollSessionStatus(sessionId: string) {
+  if (isPolling) return;
+  isPolling = true;
+
+  const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
+  const token = sb_user?.accessToken;
+  const workspaceId = sb_user?.workspaceId;
+
+  if (!token) {
+    isPolling = false;
+    return;
+  }
+
+  let attempts = 0;
+  pollInterval = setInterval(async () => {
+    attempts++;
+    if (attempts > 20) {
+      if (pollInterval) clearInterval(pollInterval);
+      isPolling = false;
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/v1/sessions/${sessionId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "x-workspace-id": workspaceId || ""
+        }
+      });
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const backendStatus = data.status || data.session?.status;
+      const errorReason = data.errorReason || data.session?.errorReason;
+
+      const titleEl = document.querySelector(".success-title") as HTMLElement;
+      const metaEl = document.querySelector(".success-meta") as HTMLElement;
+      const checkEl = document.querySelector(".success-check") as HTMLElement;
+
+      // Buttons stay visible regardless of pipeline status — user can always copy the link
+      if (backendStatus === "queued" || backendStatus === "processing") {
+        titleEl.textContent = "Processing Pipeline...";
+        metaEl.textContent = "Generating your session — link is ready to share.";
+        checkEl.textContent = "⌛";
+      } else if (backendStatus === "failed") {
+        titleEl.textContent = "Pipeline Failed";
+        metaEl.textContent = errorReason || "An error occurred during processing.";
+        checkEl.textContent = "⚠️";
+        if (pollInterval) clearInterval(pollInterval);
+        isPolling = false;
+      } else if (backendStatus === "ready") {
+        titleEl.textContent = "Capture Ready!";
+        metaEl.textContent = "Your interactive session is ready to view.";
+        checkEl.textContent = "✓";
+        if (pollInterval) clearInterval(pollInterval);
+        isPolling = false;
+      }
+    } catch (err) {
+      console.warn("Poll failed", err);
+    }
+  }, 3000);
+}
 
 // Elements
 const screenAuth = document.getElementById("screen-auth")!;
@@ -155,7 +220,7 @@ async function handleSignIn() {
       });
     });
 
-    const res = await fetch(`${BACKEND_URL}/auth/google`, {
+    const res = await fetch(`${BACKEND_URL}/v1/auth/google`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ accessToken: token }),
@@ -258,11 +323,13 @@ function renderState(newState: AppState) {
       break;
     case "ready":
       showScreen(screenSuccess);
-      (document.querySelector(".success-title") as HTMLElement).textContent = "Capture Ready!";
-      (document.querySelector(".success-meta") as HTMLElement).textContent = "Your interactive session is ready.";
+      (document.querySelector(".success-title") as HTMLElement).textContent = "Session Captured!";
+      (document.querySelector(".success-meta") as HTMLElement).textContent = "Your link is ready — processing in background.";
       (document.querySelector(".success-check") as HTMLElement).textContent = "✓";
       (document.querySelector(".success-actions") as HTMLElement).style.display = "flex";
-      btnOpenStudio.textContent = "Open in Studio";
+      if (state.sessionId) {
+        pollSessionStatus(state.sessionId);
+      }
       break;
     case "enriching":
       showScreen(screenSuccess);
@@ -363,9 +430,7 @@ btnOpenStudio.addEventListener("click", async () => {
     chrome.runtime.sendMessage({ type: "RETRY_UPLOAD" });
     return;
   }
-  const { sb_user } = (await chrome.storage.local.get("sb_user")) as { sb_user?: BackendUser };
-  const token = sb_user?.accessToken;
-  const url = `${STUDIO_URL}/studio?session=${state.sessionId}${token ? `&token=${token}` : ""}${sb_user?.workspaceId ? `&workspaceId=${sb_user.workspaceId}` : ""}`;
+  const url = `${STUDIO_URL}/sessions/${state.sessionId}`;
   chrome.tabs.create({ url });
 });
 

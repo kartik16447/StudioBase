@@ -36,7 +36,7 @@ export async function sbLog(tag: string, data: any) {
     const { token, sessionId } = await chrome.storage.local.get(["token", "sessionId"]);
 
     if (token) {
-      await fetch(`${BACKEND_URL}/logs`, {
+      await fetch(`${BACKEND_URL}/v1/logs`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

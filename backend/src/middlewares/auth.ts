@@ -2,13 +2,21 @@ import { Next } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { verify } from 'hono/jwt';
 import { AppContext } from '../types/hono';
+import { workspaceMiddleware, requirePermission } from './workspace';
+import { Permission } from '../utils/permissions';
 
 export const authMiddleware = (options: { optional?: boolean } = {}) => {
   return async (c: AppContext, next: Next) => {
-    const authHeader = c.req.header('Authorization');
+    let authHeader = c.req.header('Authorization');
     const path = c.req.path;
     const isDev = c.env.ENVIRONMENT === 'development';
     
+    // Fallback to query param for direct media links (e.g. <video src="...v1/assets/...?token=...">)
+    const queryToken = c.req.query('token');
+    if (!authHeader && queryToken) {
+      authHeader = `Bearer ${queryToken}`;
+    }
+
     if (!authHeader?.startsWith('Bearer ')) {
       if (options.optional) return next();
       console.log(`[DIAGNOSTIC] Auth failed for ${path}: Missing Authorization header`);
@@ -127,5 +135,23 @@ export const authMiddleware = (options: { optional?: boolean } = {}) => {
       console.log(`[DIAGNOSTIC] Critical Auth Failure: ${err.message}`);
       throw new HTTPException(401, { message: err.message });
     }
+  };
+};
+
+export const requireWorkspaceMembership = (level: 'viewer' | 'editor') => {
+  const permission: Permission = level === 'editor' ? 'sop:edit' : 'session:read';
+  
+  return async (c: AppContext, next: Next) => {
+    // Run auth, then workspace, then permission check
+    // We wrap them manually to ensure they run in sequence
+    let authenticated = false;
+    await authMiddleware()(c, async () => { authenticated = true; });
+    if (!authenticated) return;
+
+    let inWorkspace = false;
+    await workspaceMiddleware()(c, async () => { inWorkspace = true; });
+    if (!inWorkspace) return;
+
+    await requirePermission(permission)(c, next);
   };
 };

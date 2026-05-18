@@ -75,9 +75,8 @@ export const EmbedDemoView: React.FC = () => {
   return (
     <div
       className="w-full h-full flex flex-col items-center justify-center overflow-hidden relative select-none"
-      style={{ background: stepBg(hue) }}
+      style={{ background: stepBg(hue), cursor: isLast ? 'default' : 'pointer' }}
       onClick={!isLast ? advance : undefined}
-      style={{ cursor: isLast ? 'default' : 'pointer' }}
     >
       {/* Canvas */}
       <div className="relative flex items-center justify-center w-full h-full" style={{ padding: '0 40px' }}>
@@ -85,9 +84,14 @@ export const EmbedDemoView: React.FC = () => {
           <motion.div
             key={step?.id ?? idx}
             custom={dirRef.current}
-            initial={(dir: number) => ({ opacity: 0, x: dir * 40, scale: 0.97 })}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={(dir: number) => ({ opacity: 0, x: dir * -40, scale: 0.97 })}
+            variants={{
+              enter: (dir: number) => ({ opacity: 0, x: dir * 40, scale: 0.97 }),
+              center: { opacity: 1, x: 0, scale: 1 },
+              exit: (dir: number) => ({ opacity: 0, x: dir * -40, scale: 0.97 }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
             transition={SPRING}
             className="relative w-full flex items-center justify-center"
           >

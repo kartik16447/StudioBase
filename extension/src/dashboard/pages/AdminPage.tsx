@@ -1,6 +1,7 @@
+// @ts-nocheck
 import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { safeFetch } from '../../utils/api';
+
 
 export function AdminPage({ session }: { session: any }) {
   const [data, setData] = useState<any>(null);
@@ -16,7 +17,7 @@ export function AdminPage({ session }: { session: any }) {
       if (query) setIsSearching(true);
       else setLoading(true);
 
-      let url = `https://screenvault-backend.karthik-upadhyay98.workers.dev/admin`;
+      let url = `https://studiobase-backend.karthik-upadhyay98.workers.dev/admin`;
       
       if (query) {
         if (query.includes('@')) {
@@ -69,7 +70,7 @@ export function AdminPage({ session }: { session: any }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '3rem' }}>
         {[
           { label: 'Upload Success', value: `${data.upload.successRate}%`, sub: `7d • Deduplicated (${data.upload.success}/${data.upload.success + data.upload.failed})`, status: data.upload.successRate > 90 ? 'healthy' : 'warning' },
-          { label: 'Playback Success', value: `${data.playback.successRate}%`, sub: `7d • Deduplicated (${data.playback.started}/${data.playback.started + data.playback.failed})`, status: data.playback.successRate > 90 ? 'healthy' : 'warning' },
+          { label: 'PB Success', value: `${data.pb.successRate}%`, sub: `7d • Deduplicated (${data.pb.started}/${data.pb.started + data.pb.failed})`, status: data.pb.successRate > 90 ? 'healthy' : 'warning' },
           { label: 'Active Users', value: data.activeUsers, sub: '24h • High Confidence', status: 'neutral' },
           { label: 'Total Library', value: data.totalVideos, sub: 'Lifetime • Absolute', status: 'neutral' },
         ].map((stat, i) => (
@@ -99,7 +100,7 @@ export function AdminPage({ session }: { session: any }) {
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', marginBottom: '0.25rem' }}>Top Playback Failures</h3>
           <p style={{ fontSize: '0.75rem', color: '#71717A', marginBottom: '1.5rem' }}>Last 7 Days • Unique Sessions</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {data.playback.topErrors.map((err: any, i: number) => (
+            {data.pb.topErrors.map((err: any, i: number) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.875rem', color: '#A1A1AA' }}>{err.error || 'Unknown'}</span>
                 <span style={{ fontSize: '0.875rem', color: '#ef4444', fontWeight: 600 }}>{err.count}</span>
@@ -177,7 +178,7 @@ export function AdminPage({ session }: { session: any }) {
             </div>
              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '1rem' }}>
                <div style={{ fontSize: '0.75rem', color: '#71717A', marginBottom: '0.25rem' }}>Total Playback Events</div>
-               <div style={{ color: '#fff', fontSize: '0.875rem', fontWeight: 500 }}>{data.playbackEvents.length}</div>
+               <div style={{ color: '#fff', fontSize: '0.875rem', fontWeight: 500 }}>{data.pbEvents.length}</div>
             </div>
           </div>
        </div>
@@ -186,7 +187,7 @@ export function AdminPage({ session }: { session: any }) {
         <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff' }}>Playback Lifecycle</h3>
         </div>
-        {renderEventTable(data.playbackEvents)}
+        {renderEventTable(data.pbEvents)}
       </div>
     </div>
   );

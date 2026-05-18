@@ -21,17 +21,21 @@ export const loggerMiddleware = async (c: Context, next: Next) => {
     })
   );
 
-  // Future: Record to Cloudflare Analytics Engine
   if (c.env.ANALYTICS) {
-    c.env.ANALYTICS.writeDataPoint({
-      blobs: [
-        c.req.method,
-        c.req.path,
-        c.get('user')?.id || 'anonymous',
-        requestId,
-      ],
-      doubles: [c.res.status, latency],
-      indexes: [c.req.path],
-    });
+    try {
+      // WAE index limit is 96 bytes — use a normalized path (strip UUIDs) so deeply
+      // nested routes don't blow the limit.
+      const pathIndex = c.req.path
+        .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id')
+        .replace(/[a-z]{2,}_[A-Za-z0-9]{10,}/g, ':id')
+        .slice(0, 96);
+      c.env.ANALYTICS.writeDataPoint({
+        blobs: [c.req.method, c.req.path, c.get('user')?.id || 'anonymous', requestId],
+        doubles: [c.res.status, latency],
+        indexes: [pathIndex],
+      });
+    } catch (e) {
+      console.error('[LOGGER] WAE writeDataPoint error:', e);
+    }
   }
 };

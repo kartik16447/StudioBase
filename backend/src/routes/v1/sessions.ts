@@ -81,13 +81,21 @@ sessions.get('/:id', async (c) => {
   let sessionJsonUrl: string | null = null;
   if (session.r2JsonKey && session.status !== 'deleted') {
     const origin = new URL(c.req.url).origin;
-    sessionJsonUrl = `${origin}/assets/${session.r2JsonKey}`;
+    sessionJsonUrl = `${origin}/v1/assets/${session.r2JsonKey}`;
   }
 
-  return c.json({ 
-    ...session, 
-    sessionJsonUrl, 
-    studioUrl: `${STUDIO_BASE_URL}/s/${session.shareToken}` 
+  // Attach the linked SOP id + status so the frontend can drive the editor workflow
+  const sopRow = await c.env.DB
+    .prepare('SELECT id, status FROM sops WHERE sessionId = ? AND workspaceId = ? LIMIT 1')
+    .bind(id, ws.id)
+    .first<{ id: string; status: string }>();
+
+  return c.json({
+    ...session,
+    sessionJsonUrl,
+    studioUrl: `${STUDIO_BASE_URL}/s/${session.shareToken}`,
+    sopId: sopRow?.id ?? null,
+    sopStatus: sopRow?.status ?? null,
   });
 });
 
@@ -114,10 +122,40 @@ sessions.delete('/:id', requirePermission('workspace:admin'), async (c) => {
 
   const service = new SessionService(c.env, c.executionCtx);
   const success = await service.delete(id!, ws.id!, user.id!);
-  
+
   if (!success) throw new HTTPException(404, { message: 'Not found' });
 
   return c.json({ success: true });
+});
+
+// PATCH /v1/sessions/:id/share  — toggle public link
+sessions.patch('/:id/share', requirePermission('sop:edit'), async (c) => {
+  const ws = c.get('workspace');
+  const id = c.req.param('id');
+  const { isPublic } = await c.req.json<{ isPublic: boolean }>();
+
+  const row = await c.env.DB
+    .prepare('SELECT id, shareToken, isPublic FROM sessions WHERE id = ? AND workspaceId = ?')
+    .bind(id, ws.id)
+    .first<{ id: string; shareToken: string | null; isPublic: number }>();
+
+  if (!row) return c.json({ error: 'Not found' }, 404);
+
+  let shareToken = row.shareToken;
+  if (isPublic && !shareToken) {
+    shareToken = crypto.randomUUID().replace(/-/g, '');
+  }
+
+  await c.env.DB
+    .prepare('UPDATE sessions SET isPublic = ?, shareToken = ?, updatedAt = ? WHERE id = ?')
+    .bind(isPublic ? 1 : 0, shareToken, Date.now(), id)
+    .run();
+
+  const shareUrl = shareToken
+    ? `${STUDIO_BASE_URL}?share=${shareToken}`
+    : null;
+
+  return c.json({ isPublic, shareToken, shareUrl });
 });
 
 export default sessions;

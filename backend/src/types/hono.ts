@@ -6,9 +6,11 @@ export interface Env {
   TOKEN_CACHE: KVNamespace;
   R2: R2Bucket;
   PIPELINE_QUEUE: Queue;
+  AI: Ai;
   ANALYTICS: AnalyticsEngineDataset;
   ADMIN_EMAIL: string;
   ENCRYPTION_KEY: string;
+  GOOGLE_CLIENT_SECRET?: string;
   SENTRY_DSN?: string;
   ALLOWED_ORIGINS?: string;
   ENVIRONMENT: 'production' | 'staging' | 'development';

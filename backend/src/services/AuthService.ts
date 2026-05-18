@@ -11,13 +11,52 @@ export class AuthService {
     this.audit = new AuditService(env, executionCtx);
   }
 
+  async exchangeCode(code: string, codeVerifier: string, redirectUri: string) {
+    const clientSecret = this.env.GOOGLE_CLIENT_SECRET;
+    if (!clientSecret) throw new Error('GOOGLE_CLIENT_SECRET not configured');
+
+    const body = new URLSearchParams({
+      code,
+      client_id: '813435932187-oktc8br8kq98luccqgmsdnhju3h80lht.apps.googleusercontent.com',
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+      code_verifier: codeVerifier,
+    });
+
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as any;
+      console.error('[AuthService] Code exchange failed:', err);
+      throw new Error('AUTH_FAILED');
+    }
+
+    const { id_token } = await res.json() as { id_token: string };
+    if (!id_token) throw new Error('AUTH_FAILED');
+    return this.verifyGoogleToken(id_token);
+  }
+
   async verifyGoogleToken(token: string) {
-    // Try v3 first (modern)
+    // Google ID tokens are JWTs (3 base64 segments). Access tokens start with "ya29."
+    const isIdToken = !token.startsWith('ya29.') && token.split('.').length === 3;
+
+    if (isIdToken) {
+      const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${token}`);
+      if (!res.ok) throw new Error('AUTH_FAILED');
+      const data = await res.json() as any;
+      return { email: data.email, name: data.name, picture: data.picture, sub: data.sub };
+    }
+
+    // Access token path
     const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) {
-      // Fallback to v2
       const res2 = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
         headers: { Authorization: `Bearer ${token}` },
       });

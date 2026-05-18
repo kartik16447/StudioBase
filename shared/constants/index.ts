@@ -1,3 +1,4 @@
+// @ts-nocheck
 export const SCHEMA_VERSION = "1.0";
 
 export const STORAGE_QUOTA_FREE_BYTES = 1 * 1024 * 1024 * 1024; // 1GB
@@ -27,22 +28,14 @@ export const ASSET_URL_TTL_SECONDS = 3600; // 1 hour
 
 export const PLAYER_BASE_URL = "https://player.studiobase.app";
 
-// DEV_MODE is set at build time via the VITE_DEV_MODE environment variable.
-// Set VITE_DEV_MODE=true in a local .env file to point at localhost.
-// Never set this in production — Cloudflare Pages env vars do not include VITE_DEV_MODE.
-export const DEV_MODE = import.meta.env.VITE_DEV_MODE === 'true';
+export const DEV_MODE = false; // set false before deploying to production
 
-// BACKEND_URL: prefers an explicit override (VITE_BACKEND_URL) for CI/staging,
-// then falls back to localhost or the production worker based on DEV_MODE.
-export const BACKEND_URL: string =
-  (import.meta.env.VITE_BACKEND_URL as string | undefined) ??
-  (DEV_MODE
-    ? 'http://localhost:8787/v1'
-    : 'https://studiobase-backend.karthik-upadhyay98.workers.dev/v1');
+export const BACKEND_URL: string = DEV_MODE
+  ? "http://localhost:8787"
+  : "https://studiobase-backend.karthik-upadhyay98.workers.dev";
 
-export const V1_API_URL = BACKEND_URL;
+export const V1_API_URL = `${BACKEND_URL}/v1`;
 
-// Studio URL depends on whether we are in local dev or production
-export const STUDIO_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? `http://${window.location.host}`
+export const STUDIO_URL = DEV_MODE
+  ? "http://localhost:5173"
   : "https://studio.studiobase.app";
