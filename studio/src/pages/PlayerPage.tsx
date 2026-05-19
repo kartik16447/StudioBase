@@ -1,7 +1,11 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useSpring } from 'framer-motion';
 import { I } from '../components/icons';
 import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
+import { CanvasRenderer } from '../modules/render-engine/CanvasRenderer';
+import { CinematicMath } from '../modules/render-engine/CinematicMath';
+import { RenderConstants } from '../modules/render-engine/RenderConstants';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -15,6 +19,8 @@ interface PStep {
   elementText?: string;
   action?: string;
   url?: string;
+  timestamp?: number;
+  voiceoverDurationMs?: number;
   coordinates?: { x: number; y: number; viewportWidth: number; viewportHeight: number } | null;
   animationTarget?: { centerX: number; centerY: number; zoomScale: number } | null;
 }
@@ -30,9 +36,9 @@ interface PSession {
 
 type ViewMode = 'video' | 'guide';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const STEP_MS = 3000;
+const STEP_MS = 3500;
 
 const fmtTime = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -56,14 +62,15 @@ function buildChapterMap(breaks?: { afterStepId: string; chapterTitle: string }[
   return map;
 }
 
-// ─── CinematicPlayer ─────────────────────────────────────────────────────────
+// ─── CinematicVideoPlayer ─────────────────────────────────────────────────────
+// Uses the exact same CanvasRenderer + CinematicMath + framer-motion springs as
+// the dashboard VideoCanvas — identical cinematic quality on the public share page.
 
 interface PlayerProps {
   steps: PStep[];
   assets: Record<string, string>;
   currentIndex: number;
   isPlaying: boolean;
-  progress: number;
   speed: number;
   onSeek: (idx: number) => void;
   onTogglePlay: () => void;
@@ -72,110 +79,358 @@ interface PlayerProps {
   onSpeedChange: (s: number) => void;
 }
 
-const CinematicPlayer: React.FC<PlayerProps> = ({
-  steps, assets, currentIndex, isPlaying, progress, speed,
+const CinematicVideoPlayer: React.FC<PlayerProps> = ({
+  steps, assets, currentIndex, isPlaying, speed,
   onSeek, onTogglePlay, onPrev, onNext, onSpeedChange,
 }) => {
+  const containerRef  = useRef<HTMLDivElement>(null);
+  const canvasRef     = useRef<HTMLCanvasElement>(null);
+  const slideImageRef = useRef<HTMLImageElement | null>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const stepStartWall  = useRef(performance.now());
+  const renderer      = useMemo(() => new CanvasRenderer(), []);
+
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [showControls, setShowControls] = useState(true);
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isEnded, setIsEnded] = useState(false);
 
-  const step = steps[currentIndex];
-  const screenshotUrl = step?.screenshotKey ? assets[step.screenshotKey] : null;
+  // Refs for RAF loop (avoids stale closures)
+  const isPlayingRef    = useRef(isPlaying);
+  const currentIdxRef   = useRef(currentIndex);
+  const speedRef        = useRef(speed);
+  const stepsRef        = useRef(steps);
+  const onNextRef       = useRef(onNext);
+  const onToggleRef     = useRef(onTogglePlay);
+  useEffect(() => { isPlayingRef.current    = isPlaying;    }, [isPlaying]);
+  useEffect(() => { currentIdxRef.current   = currentIndex; }, [currentIndex]);
+  useEffect(() => { speedRef.current        = speed;        }, [speed]);
+  useEffect(() => { stepsRef.current        = steps;        }, [steps]);
+  useEffect(() => { onNextRef.current       = onNext;       }, [onNext]);
+  useEffect(() => { onToggleRef.current     = onTogglePlay; }, [onTogglePlay]);
 
-  const getTransform = () => {
-    const t = step?.animationTarget;
-    const c = step?.coordinates;
-    if (t && (t.zoomScale ?? 1) > 1.1) {
-      const s = t.zoomScale;
-      return `scale(${s}) translate(${(50 - t.centerX) * (s - 1) / s}%, ${(50 - t.centerY) * (s - 1) / s}%)`;
-    }
-    if (c) {
-      const s = 1.7;
-      const cx = (c.x / (c.viewportWidth || 1440)) * 100;
-      const cy = (c.y / (c.viewportHeight || 900)) * 100;
-      return `scale(${s}) translate(${(50 - cx) * (s - 1) / s}%, ${(50 - cy) * (s - 1) / s}%)`;
-    }
-    return 'scale(1)';
-  };
+  // ── Camera springs (framer-motion — matches dashboard exactly) ──────────────
+  const { stiffness: sxy, damping: dxy, mass: mxy } = RenderConstants.CAMERA_XY_SPRING;
+  const { stiffness: ss,  damping: ds,  mass: ms  } = RenderConstants.CAMERA_SCALE_SPRING;
+  const camX     = useSpring(50,  { stiffness: sxy, damping: dxy, mass: mxy });
+  const camY     = useSpring(50,  { stiffness: sxy, damping: dxy, mass: mxy });
+  const camScale = useSpring(1.0, { stiffness: ss,  damping: ds,  mass: ms  });
 
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen();
-      setIsFullscreen(true);
+  const currentStep = steps[currentIndex];
+  const prevStep    = steps[currentIndex - 1] ?? null;
+
+  // Reset step wall-clock timer on step change
+  useEffect(() => {
+    stepStartWall.current = performance.now();
+    setIsEnded(false);
+  }, [currentIndex]);
+
+  // Camera spring target on step change (mirrors VideoCanvas exactly)
+  useEffect(() => {
+    if (!currentStep) return;
+    const target   = CinematicMath.getTarget(currentStep, 'slideshow');
+    const sameCtx  = CinematicMath.isSameContext(prevStep, currentStep);
+
+    if (sameCtx) {
+      camX.set(target.pctX);
+      camY.set(target.pctY);
+      camScale.set(target.scale);
     } else {
-      document.exitFullscreen();
-      setIsFullscreen(false);
+      // Cross-context: briefly return to overview, then spring to new target
+      camScale.set(1.0);
+      camX.set(50);
+      camY.set(50);
+      const t = setTimeout(() => {
+        camX.set(target.pctX);
+        camY.set(target.pctY);
+        camScale.set(target.scale);
+      }, 120);
+      return () => clearTimeout(t);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, currentStep?.id]);
+
+  // Preload screenshot into an off-screen Image so canvas gets pixels immediately
+  useEffect(() => {
+    slideImageRef.current = null;
+    if (!currentStep?.screenshotKey) return;
+    const url = assets[currentStep.screenshotKey];
+    if (!url) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    img.onload = () => { slideImageRef.current = img; };
+  }, [currentStep?.id, currentStep?.screenshotKey, assets]);
+
+  // ── Single persistent RAF render loop ──────────────────────────────────────
+  useEffect(() => {
+    let rafId: number;
+
+    const tick = () => {
+      const canvas = canvasRef.current;
+      const step   = stepsRef.current[currentIdxRef.current];
+
+      if (canvas && step) {
+        const cW = RenderConstants.PREVIEW_WIDTH;
+        const cH = RenderConstants.PREVIEW_HEIGHT;
+        if (canvas.width !== cW || canvas.height !== cH) {
+          canvas.width  = cW;
+          canvas.height = cH;
+        }
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          // Auto-advance + progress bar (all via refs, no stale closure issues)
+          if (isPlayingRef.current) {
+            const elapsed = performance.now() - stepStartWall.current;
+            const stepMs  = STEP_MS / speedRef.current;
+
+            // Direct DOM update — no React re-render, buttery smooth
+            if (progressBarRef.current) {
+              const ci  = currentIdxRef.current;
+              const len = stepsRef.current.length;
+              const pct = Math.min(100, ((ci + Math.min(elapsed / stepMs, 1)) / len) * 100);
+              progressBarRef.current.style.width = `${pct}%`;
+            }
+
+            if (elapsed >= stepMs) {
+              stepStartWall.current = performance.now(); // reset before calling onNext
+              if (currentIdxRef.current < stepsRef.current.length - 1) {
+                onNextRef.current();
+              } else {
+                onToggleRef.current(); // stop at end
+              }
+            }
+          }
+
+          renderer.render(
+            ctx,
+            {
+              dimensions: { width: cW, height: cH },
+              step,
+              prevStep: stepsRef.current[currentIdxRef.current - 1] ?? null,
+              progress: 1.0,
+              theme: { primaryColor: '#5E5CE6' },
+              renderMode: 'slideshow',
+              camera: {
+                pctX:  camX.get(),
+                pctY:  camY.get(),
+                scale: camScale.get(),
+              },
+              timeMs: performance.now(),
+            },
+            slideImageRef.current,
+          );
+        }
+      }
+
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally empty — everything is read via refs
+
+  // ── Auto-hide controls ──────────────────────────────────────────────────────
+  const showControlsTemporarily = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    if (isPlayingRef.current) {
+      controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
+    }
+  }, []);
 
   useEffect(() => {
-    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener('fullscreenchange', onFsChange);
-    return () => document.removeEventListener('fullscreenchange', onFsChange);
+    if (!isPlaying) { setShowControls(true); }
+    else { showControlsTemporarily(); }
+    return () => { if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current); };
+  }, [isPlaying, showControlsTemporarily]);
+
+  // ── Fullscreen ──────────────────────────────────────────────────────────────
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) containerRef.current?.requestFullscreen();
+    else document.exitFullscreen();
+  };
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
   }, []);
 
   const totalSteps = steps.length;
-  const overallPct = totalSteps > 0 ? ((currentIndex + progress / 100) / totalSteps) * 100 : 0;
-  const elapsedMs = currentIndex * STEP_MS + (progress / 100) * STEP_MS;
-  const totalMs = totalSteps * STEP_MS;
+  const elapsedMs  = currentIndex * STEP_MS;
+  const totalMs    = totalSteps * STEP_MS;
+  const stepTitle  = currentStep?.stepTitle || currentStep?.elementText || `Step ${currentIndex + 1}`;
 
   return (
-    <div ref={containerRef} className="w-full bg-black rounded-2xl overflow-hidden select-none">
-      {/* Screenshot */}
-      <div className="relative aspect-video bg-[#080808]">
-        {screenshotUrl ? (
-          <img
-            key={step?.id}
-            src={screenshotUrl}
-            alt={step?.stepTitle || ''}
-            className="w-full h-full object-contain transition-transform duration-500 ease-in-out"
-            style={{ transform: getTransform(), transformOrigin: 'center center' }}
-            draggable={false}
+    <div
+      ref={containerRef}
+      className="w-full select-none"
+      onMouseMove={showControlsTemporarily}
+      style={{ cursor: isPlaying && !showControls ? 'none' : 'default' }}
+    >
+      {/* Rotating border glow shell */}
+      <div
+        className="relative w-full rounded-[18px] overflow-hidden"
+        style={{
+          aspectRatio: '16/9',
+          padding: '1.5px',
+          filter: 'drop-shadow(0 24px 64px rgba(0,0,0,0.80)) drop-shadow(0 0 48px rgba(94,92,230,0.10))',
+        }}
+      >
+        {/* Animated conic border (reuses the spin keyframe from index.css) */}
+        <div
+          className="absolute inset-0 rounded-[18px] pointer-events-none"
+          style={{
+            background: 'conic-gradient(from var(--angle, 0deg), transparent 65%, rgba(94,92,230,0.7) 80%, rgba(255,255,255,0.35) 86%, rgba(139,92,246,0.7) 92%, transparent 100%)',
+            animation: 'spin 4s linear infinite',
+          }}
+        />
+
+        {/* Inner canvas card */}
+        <div
+          className="absolute inset-[1.5px] rounded-2xl overflow-hidden bg-[#12121a]"
+          onClick={() => { if (!isEnded) onTogglePlay(); }}
+          style={{ cursor: 'pointer' }}
+        >
+          {/* Canvas — the cinematic renderer draws here */}
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 w-full h-full block"
+            style={{ imageRendering: 'auto' }}
           />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center gap-2">
-            <I.Video size={36} className="text-white/15" />
-            <p className="text-[12px] text-white/20">No screenshot</p>
-          </div>
-        )}
-        <div className="absolute top-3 right-3 px-2.5 py-1 bg-black/60 rounded-full text-white text-[11px] font-semibold backdrop-blur-sm">
-          {currentIndex + 1} / {totalSteps}
-        </div>
-        <div className="absolute inset-0 flex">
-          <div className="flex-1 cursor-pointer" onClick={onPrev} />
-          <div className="flex-1 cursor-pointer" onClick={onNext} />
-        </div>
-      </div>
 
-      {/* Scrubber */}
-      <div className="h-1 bg-white/10 cursor-pointer group relative" onClick={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        onSeek(Math.min(totalSteps - 1, Math.floor(((e.clientX - rect.left) / rect.width) * totalSteps)));
-      }}>
-        <div className="h-full bg-indigo-500 group-hover:bg-indigo-400 transition-colors" style={{ width: `${overallPct}%` }} />
-        <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity" style={{ left: `calc(${overallPct}% - 6px)` }} />
-      </div>
+          {/* Play overlay when paused */}
+          {!isPlaying && !isEnded && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-20 h-20 rounded-full bg-black/55 backdrop-blur-sm border border-white/20 flex items-center justify-center"
+                style={{ boxShadow: '0 0 0 1px rgba(94,92,230,0.3), 0 8px 32px rgba(0,0,0,0.5)' }}>
+                <I.Play size={28} className="text-white ml-1.5" />
+              </div>
+            </div>
+          )}
 
-      {/* Controls */}
-      <div className="flex items-center gap-2 px-4 h-12 bg-[#0c0c0f]">
-        <button onClick={onPrev} disabled={currentIndex === 0} className="p-1.5 text-white/60 hover:text-white disabled:opacity-30 transition-colors"><I.SkipBack size={16} /></button>
-        <button onClick={onTogglePlay} className="w-8 h-8 rounded-full bg-white flex items-center justify-center hover:bg-white/90 transition-colors flex-shrink-0">
-          {isPlaying ? <I.Pause size={14} className="text-black" /> : <I.Play size={14} className="text-black ml-0.5" />}
-        </button>
-        <button onClick={onNext} disabled={currentIndex === totalSteps - 1} className="p-1.5 text-white/60 hover:text-white disabled:opacity-30 transition-colors"><I.SkipForward size={16} /></button>
-        <span className="text-[11px] text-white/40 tabular-nums ml-1 font-mono">{fmtTime(elapsedMs)} / {fmtTime(totalMs)}</span>
-        <div className="flex-1" />
-        <div className="flex items-center gap-0.5 bg-white/[0.08] rounded-md p-0.5">
-          {[0.5, 1, 1.5, 2].map(s => (
-            <button key={s} onClick={() => onSpeedChange(s)}
-              className={cn('px-2 h-5 rounded text-[10px] font-bold transition-colors', speed === s ? 'bg-white text-black' : 'text-white/50 hover:text-white')}>
-              {s}×
-            </button>
-          ))}
+          {/* Ended overlay */}
+          {isEnded && (
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8">
+              <div className="w-16 h-16 rounded-full bg-indigo-500/20 flex items-center justify-center mb-5">
+                <I.CheckCircle size={30} className="text-indigo-400" strokeWidth={2} />
+              </div>
+              <h2 className="text-[22px] font-bold text-white mb-2">End of Walkthrough</h2>
+              <p className="text-[14px] text-white/50 max-w-xs mb-7">You've reached the end.</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onSeek(0); setIsEnded(false); onTogglePlay(); }}
+                  className="flex items-center gap-2 px-5 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[13px] font-semibold transition-colors"
+                >
+                  <I.RotateCcw size={14} /> Watch again
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setIsEnded(false); }}
+                  className="flex items-center gap-2 px-5 h-10 rounded-xl border border-white/20 text-white/70 hover:text-white text-[13px] font-semibold transition-colors"
+                >
+                  Stay here
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step counter badge */}
+          {!isEnded && (
+            <div
+              className="absolute top-3 right-3 px-2.5 py-1 bg-black/60 rounded-full text-white text-[11px] font-semibold backdrop-blur-sm pointer-events-none"
+              style={{ opacity: showControls || !isPlaying ? 1 : 0, transition: 'opacity 0.3s' }}
+            >
+              {currentIndex + 1} / {totalSteps}
+            </div>
+          )}
+
+          {/* Lower-third step label */}
+          {!isEnded && (
+            <div
+              className="absolute bottom-[52px] left-0 right-0 px-5 pb-3 pointer-events-none"
+              style={{
+                background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%)',
+                opacity: showControls || !isPlaying ? 1 : 0,
+                transition: 'opacity 0.3s',
+              }}
+            >
+              <p className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider mb-0.5">
+                Step {currentIndex + 1}
+              </p>
+              <p className="text-[13px] font-semibold text-white leading-snug line-clamp-1">{stepTitle}</p>
+            </div>
+          )}
+
+          {/* Controls overlay (auto-hides during playback) */}
+          {!isEnded && (
+            <div
+              className="absolute bottom-0 left-0 right-0"
+              style={{
+                opacity: showControls || !isPlaying ? 1 : 0,
+                transition: 'opacity 0.3s',
+                pointerEvents: showControls || !isPlaying ? 'auto' : 'none',
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Progress bar */}
+              <div
+                className="h-1 bg-white/10 cursor-pointer group"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const pct  = (e.clientX - rect.left) / rect.width;
+                  onSeek(Math.min(totalSteps - 1, Math.floor(pct * totalSteps)));
+                }}
+              >
+                <div
+                  ref={progressBarRef}
+                  className="h-full bg-gradient-to-r from-indigo-500 to-violet-500"
+                  style={{ width: `${(currentIndex / totalSteps) * 100}%`, transition: 'none' }}
+                />
+                <div
+                  className="absolute top-0 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity -translate-x-1/2 pointer-events-none"
+                  style={{ left: `${(currentIndex / totalSteps) * 100}%` }}
+                />
+              </div>
+
+              {/* Controls row */}
+              <div className="flex items-center gap-2 px-4 h-12 bg-black/80 backdrop-blur-sm">
+                <button onClick={onPrev} disabled={currentIndex === 0}
+                  className="p-1.5 text-white/50 hover:text-white disabled:opacity-20 transition-colors">
+                  <I.SkipBack size={16} />
+                </button>
+                <button
+                  onClick={onTogglePlay}
+                  className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:bg-white/90 active:scale-95 flex-shrink-0 transition-all shadow"
+                >
+                  {isPlaying
+                    ? <I.Pause size={15} className="text-black" />
+                    : <I.Play  size={15} className="text-black ml-0.5" />}
+                </button>
+                <button onClick={onNext} disabled={currentIndex === totalSteps - 1}
+                  className="p-1.5 text-white/50 hover:text-white disabled:opacity-20 transition-colors">
+                  <I.SkipForward size={16} />
+                </button>
+                <span className="text-[11px] text-white/35 tabular-nums ml-1 font-mono select-none">
+                  {fmtTime(elapsedMs)} / {fmtTime(totalMs)}
+                </span>
+                <div className="flex-1" />
+                <div className="flex items-center gap-0.5 bg-white/[0.08] rounded-md p-0.5">
+                  {[0.5, 1, 1.5, 2].map(s => (
+                    <button key={s} onClick={() => onSpeedChange(s)}
+                      className={cn('px-2 h-5 rounded text-[10px] font-bold transition-colors',
+                        speed === s ? 'bg-white text-black' : 'text-white/40 hover:text-white')}>
+                      {s}×
+                    </button>
+                  ))}
+                </div>
+                <button onClick={toggleFullscreen} className="p-1.5 text-white/40 hover:text-white transition-colors ml-1">
+                  {isFullscreen ? <I.Minimize2 size={14} /> : <I.Maximize size={14} />}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
-        <button onClick={toggleFullscreen} className="p-1.5 text-white/50 hover:text-white transition-colors">
-          {isFullscreen ? <I.Minimize2 size={15} /> : <I.Maximize size={15} />}
-        </button>
       </div>
     </div>
   );
@@ -203,31 +458,38 @@ const TranscriptPanel: React.FC<{
       <div className="flex-1 overflow-y-auto py-2 min-h-0">
         {steps.map((step, i) => {
           const isActive = i === currentIndex;
-          const thumb = step.screenshotKey ? assets[step.screenshotKey] : null;
-          const title = step.stepTitle || step.elementText || `Step ${i + 1}`;
-          const text = step.textOverride || step.generatedText || '';
+          const thumb    = step.screenshotKey ? assets[step.screenshotKey] : null;
+          const title    = step.stepTitle || step.elementText || `Step ${i + 1}`;
+          const text     = step.textOverride || step.generatedText || '';
           const chapterTitle = chapterMap.get(step.id);
           if (chapterTitle) chapterIdx++;
           return (
             <React.Fragment key={step.id || i}>
               {chapterTitle && (
                 <div className="px-4 pt-3 pb-1">
-                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Chapter {chapterIdx}: {chapterTitle}</span>
+                  <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">
+                    Chapter {chapterIdx}: {chapterTitle}
+                  </span>
                 </div>
               )}
-              <button ref={isActive ? activeRef : null} onClick={() => onSelect(i)}
+              <button
+                ref={isActive ? activeRef : null}
+                onClick={() => onSelect(i)}
                 className={cn('w-full flex items-start gap-3 px-4 py-2.5 text-left transition-colors rounded-lg mx-1',
-                  isActive ? 'bg-white/[0.09]' : 'hover:bg-white/[0.04]')}>
+                  isActive ? 'bg-white/[0.09]' : 'hover:bg-white/[0.04]')}
+              >
                 <div className={cn('flex-shrink-0 w-14 h-9 rounded-md overflow-hidden mt-0.5 border',
                   isActive ? 'border-indigo-500/60' : 'border-white/[0.08]')}>
                   {thumb
                     ? <img src={thumb} alt="" className="w-full h-full object-cover" />
-                    : <div className="w-full h-full bg-white/[0.06] flex items-center justify-center text-[9px] text-white/30">{i + 1}</div>}
+                    : <div className="w-full h-full bg-white/[0.06] flex items-center justify-center text-[9px] text-white/30">{i + 1}</div>
+                  }
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     {isActive && <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />}
-                    <p className={cn('text-[12px] font-semibold leading-snug line-clamp-2', isActive ? 'text-white' : 'text-white/70')}>{title}</p>
+                    <p className={cn('text-[12px] font-semibold leading-snug line-clamp-2',
+                      isActive ? 'text-white' : 'text-white/70')}>{title}</p>
                   </div>
                   {text && <p className="text-[11px] text-white/35 mt-0.5 line-clamp-2 leading-relaxed">{text}</p>}
                 </div>
@@ -253,12 +515,10 @@ const GuideView: React.FC<{
   let chapterIdx = 0;
   return (
     <div className="max-w-[780px] mx-auto py-8 space-y-0">
-      {/* Doc title + summary */}
+      {/* Doc header */}
       <div className="mb-10 pb-8 border-b border-white/[0.07]">
         <h1 className="text-[28px] font-bold text-white leading-tight tracking-tight mb-4">{title}</h1>
-        {summary && (
-          <p className="text-[15px] text-white/55 leading-relaxed">{summary}</p>
-        )}
+        {summary && <p className="text-[15px] text-white/55 leading-relaxed">{summary}</p>}
         {tags && tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-4">
             {tags.map(t => (
@@ -271,14 +531,13 @@ const GuideView: React.FC<{
       {/* Steps */}
       {steps.map((step, i) => {
         const screenshotUrl = step.screenshotKey ? assets[step.screenshotKey] : null;
-        const stepTitle = step.stepTitle || step.elementText || '';
-        const text = step.textOverride || step.generatedText || '';
-        const chapterTitle = chapterMap.get(step.id);
+        const stepTitle     = step.stepTitle || step.elementText || '';
+        const text          = step.textOverride || step.generatedText || '';
+        const chapterTitle  = chapterMap.get(step.id);
         if (chapterTitle) chapterIdx++;
 
         return (
           <React.Fragment key={step.id || i}>
-            {/* Chapter break */}
             {chapterTitle && (
               <div className="flex items-center gap-3 py-6">
                 <div className="flex-1 h-px bg-white/[0.07]" />
@@ -289,7 +548,6 @@ const GuideView: React.FC<{
               </div>
             )}
 
-            {/* Step block */}
             <div className="group pb-14">
               {/* Screenshot */}
               <div className="w-full rounded-xl overflow-hidden bg-[#111116] border border-white/[0.06] mb-5"
@@ -315,10 +573,7 @@ const GuideView: React.FC<{
                 {stepTitle}
               </h2>
 
-              {/* Description */}
-              {text && (
-                <p className="text-[14px] text-white/60 leading-[1.75]">{text}</p>
-              )}
+              {text && <p className="text-[14px] text-white/60 leading-[1.75]">{text}</p>}
             </div>
           </React.Fragment>
         );
@@ -335,9 +590,7 @@ const ViewToggle: React.FC<{ mode: ViewMode; onChange: (m: ViewMode) => void }> 
       onClick={() => onChange('video')}
       className={cn(
         'flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200',
-        mode === 'video'
-          ? 'bg-white text-black shadow-sm'
-          : 'text-white/50 hover:text-white'
+        mode === 'video' ? 'bg-white text-black shadow-sm' : 'text-white/50 hover:text-white',
       )}
     >
       <I.Play size={14} className={mode === 'video' ? 'text-black' : 'text-white/50'} />
@@ -347,9 +600,7 @@ const ViewToggle: React.FC<{ mode: ViewMode; onChange: (m: ViewMode) => void }> 
       onClick={() => onChange('guide')}
       className={cn(
         'flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200',
-        mode === 'guide'
-          ? 'bg-white text-black shadow-sm'
-          : 'text-white/50 hover:text-white'
+        mode === 'guide' ? 'bg-white text-black shadow-sm' : 'text-white/50 hover:text-white',
       )}
     >
       <I.FileText size={14} className={mode === 'guide' ? 'text-black' : 'text-white/50'} />
@@ -361,30 +612,18 @@ const ViewToggle: React.FC<{ mode: ViewMode; onChange: (m: ViewMode) => void }> 
 // ─── PlayerPage ───────────────────────────────────────────────────────────────
 
 export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => {
-  const [session, setSession] = useState<PSession | null>(null);
-  const [ownerName, setOwnerName] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('video');
+  const [session,    setSession]    = useState<PSession | null>(null);
+  const [ownerName,  setOwnerName]  = useState('');
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState<string | null>(null);
+  const [copied,     setCopied]     = useState(false);
+  const [viewMode,   setViewMode]   = useState<ViewMode>('video');
 
   // Player state
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [speed, setSpeed] = useState(1);
+  const [isPlaying,    setIsPlaying]    = useState(false);
+  const [speed,        setSpeed]        = useState(1);
   const speedRef = useRef(1);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Override html/body overflow:hidden from index.css so the page scrolls
-  useEffect(() => {
-    document.documentElement.style.overflow = 'auto';
-    document.body.style.overflow = 'auto';
-    return () => {
-      document.documentElement.style.overflow = '';
-      document.body.style.overflow = '';
-    };
-  }, []);
 
   // Load session
   useEffect(() => {
@@ -405,40 +644,16 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     })();
   }, [shareToken]);
 
-  const steps = session?.steps || [];
+  const steps  = session?.steps  || [];
   const assets = session?.assets || {};
 
-  // Playback
-  const advance = useCallback(() => {
-    setCurrentIndex(prev => {
-      if (prev >= steps.length - 1) { setIsPlaying(false); return prev; }
-      setProgress(0);
-      return prev + 1;
-    });
-  }, [steps.length]);
-
-  useEffect(() => {
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    if (!isPlaying) return;
-    const adjustedStart = Date.now() - (progress / 100) * (STEP_MS / speedRef.current);
-    intervalRef.current = setInterval(() => {
-      const pct = Math.min(((Date.now() - adjustedStart) * speedRef.current / STEP_MS) * 100, 100);
-      setProgress(pct);
-      if (pct >= 100) advance();
-    }, 50);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [isPlaying, currentIndex, advance]);
-
-  const goTo = (idx: number) => {
+  const goTo = useCallback((idx: number) => {
     setCurrentIndex(Math.max(0, Math.min(steps.length - 1, idx)));
-    setProgress(0);
-    if (intervalRef.current) clearInterval(intervalRef.current);
-  };
+  }, [steps.length]);
 
   const handleSpeedChange = (s: number) => {
     setSpeed(s);
     speedRef.current = s;
-    if (isPlaying) { setIsPlaying(false); setTimeout(() => setIsPlaying(true), 20); }
   };
 
   const copyLink = () => {
@@ -447,27 +662,29 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (e.key === 'ArrowRight') goTo(currentIndex + 1);
       if (e.key === 'ArrowLeft')  goTo(currentIndex - 1);
       if (e.key === ' ')          { e.preventDefault(); setIsPlaying(p => !p); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [currentIndex, steps.length]);
+  }, [currentIndex, goTo]);
 
   // ── Loading ──
   if (loading) return (
-    <div className="min-h-screen bg-[#0c0c0f] flex items-center justify-center">
+    <div className="fixed inset-0 bg-[#0c0c0f] flex items-center justify-center">
       <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 
   // ── Error ──
   if (error || !session) return (
-    <div className="min-h-screen bg-[#0c0c0f] flex flex-col items-center justify-center text-center p-12">
+    <div className="fixed inset-0 bg-[#0c0c0f] flex flex-col items-center justify-center text-center p-12">
       <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center mb-4">
         <I.X size={24} className="text-red-400" />
       </div>
@@ -479,14 +696,14 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     </div>
   );
 
-  const title = session.aiOutputs?.title || 'Walkthrough';
-  const summary = session.aiOutputs?.summary;
-  const tags = session.aiOutputs?.tags || [];
-  const chapterMap = buildChapterMap(session.metadata?.chapterBreaks);
-  const currentStep = steps[currentIndex];
+  const title        = session.aiOutputs?.title || 'Walkthrough';
+  const summary      = session.aiOutputs?.summary;
+  const tags         = session.aiOutputs?.tags || [];
+  const chapterMap   = buildChapterMap(session.metadata?.chapterBreaks);
+  const currentStep  = steps[currentIndex];
   const currentTitle = currentStep?.stepTitle || currentStep?.elementText || `Step ${currentIndex + 1}`;
-  const currentText = currentStep?.textOverride || currentStep?.generatedText || '';
-  const siteDomain = getDomain(session.capturedUrl);
+  const currentText  = currentStep?.textOverride || currentStep?.generatedText || '';
+  const siteDomain   = getDomain(session.capturedUrl);
 
   let currentChapter = '';
   for (let i = currentIndex; i >= 0; i--) {
@@ -495,9 +712,10 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   }
 
   return (
-    <div className="min-h-screen bg-[#0c0c0f] text-white">
+    // fixed + overflow-y-auto = own scroll context, ignores body overflow:hidden from index.css
+    <div className="fixed inset-0 bg-[#0c0c0f] text-white overflow-y-auto">
 
-      {/* ── Sticky Nav ── */}
+      {/* ── Sticky nav ── */}
       <nav className="sticky top-0 z-50 bg-[#0c0c0f]/95 backdrop-blur border-b border-white/[0.06] h-14 flex items-center px-6 gap-4">
         <div className="flex items-center gap-2.5 flex-shrink-0">
           <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
@@ -524,10 +742,12 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
       {/* ── Page content ── */}
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-8">
 
-        {/* Title + meta — always visible */}
+        {/* Session title + meta */}
         <div className="mb-6">
-          <h1 className="text-[26px] sm:text-[30px] font-bold text-white leading-tight tracking-tight mb-3"
-            style={{ textWrap: 'balance' as any }}>
+          <h1
+            className="text-[26px] sm:text-[30px] font-bold text-white leading-tight tracking-tight mb-3"
+            style={{ textWrap: 'balance' as any }}
+          >
             {title}
           </h1>
           <div className="flex flex-wrap items-center gap-2.5 text-[13px] text-white/40">
@@ -551,7 +771,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
           )}
         </div>
 
-        {/* ── View mode toggle — centered, prominent ── */}
+        {/* View toggle */}
         <div className="flex items-center justify-center mb-8">
           <ViewToggle mode={viewMode} onChange={setViewMode} />
         </div>
@@ -559,12 +779,15 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
         {/* ── VIDEO MODE ── */}
         {viewMode === 'video' && (
           <div className="flex flex-col lg:flex-row gap-5 items-start">
-            {/* Left: player + step card */}
+
+            {/* Left: cinematic player + step card */}
             <div className="flex-1 min-w-0 space-y-4">
-              <CinematicPlayer
-                steps={steps} assets={assets}
-                currentIndex={currentIndex} isPlaying={isPlaying}
-                progress={progress} speed={speed}
+              <CinematicVideoPlayer
+                steps={steps}
+                assets={assets}
+                currentIndex={currentIndex}
+                isPlaying={isPlaying}
+                speed={speed}
                 onSeek={goTo}
                 onTogglePlay={() => setIsPlaying(p => !p)}
                 onPrev={() => goTo(currentIndex - 1)}
@@ -572,7 +795,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
                 onSpeedChange={handleSpeedChange}
               />
 
-              {/* Current step card */}
+              {/* Current step info card */}
               <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-6">
                 {currentChapter && (
                   <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider mb-2">{currentChapter}</p>
