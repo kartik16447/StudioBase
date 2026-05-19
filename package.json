@@ -1,0 +1,8 @@
+{
+  "name": "studiobase-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "zod": "^4.4.3"
+  }
+}

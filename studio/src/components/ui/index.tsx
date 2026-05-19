@@ -349,8 +349,9 @@ export const ScreenshotPlaceholder: React.FC<{
   const tint = `hsl(${hue} 70% 60%)`;
   const tintSoft = `hsl(${hue} 70% 96%)`;
 
-  const vw = step?.data?.coordinates?.viewportWidth || 1440;
-  const vh = step?.data?.coordinates?.viewportHeight || 900;
+  const coords = (step?.data?.coordinates as { viewportWidth?: number; viewportHeight?: number } | undefined);
+  const vw = step?.coordinates?.viewportWidth || coords?.viewportWidth || 1440;
+  const vh = step?.coordinates?.viewportHeight || coords?.viewportHeight || 900;
   const adaptiveRatio = vw / vh;
 
   const realUrl = step?.screenshotKey && session?.assets?.[step.screenshotKey] 

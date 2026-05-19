@@ -53,7 +53,7 @@ export const StepSchema = z.object({
   voiceoverDurationMs: z.number().nullable(),
   annotations: z.array(AnnotationSchema).optional(),
   animationTarget: AnimationTargetSchema.nullable().optional(),
-  data: z.record(z.any()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
 });
 
 export type Step = z.infer<typeof StepSchema>;

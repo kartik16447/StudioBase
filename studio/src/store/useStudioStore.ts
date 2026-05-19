@@ -84,6 +84,7 @@ interface StudioState {
   saveAnimationTarget: (stepId: string, animationTarget: any) => Promise<void>;
   publishSOP: (sopId: string, status: 'review' | 'published') => Promise<void>;
   forkSOP: (sopId: string) => Promise<string>; // returns new sopId
+  shareSession: () => Promise<{ shareUrl: string; shareToken: string }>;
 
   // Phase 6 — Comments
   comments: CommentItem[];
@@ -597,5 +598,21 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       { method: 'POST' }
     );
     return result.id;
+  },
+
+  shareSession: async () => {
+    const { session } = get();
+    const sessionId = (session as any)?.sessionId;
+    if (!sessionId) throw new Error('No sessionId');
+
+    const result = await apiClient.request<{ shareToken: string; shareUrl: string; isPublic: boolean }>(
+      `/sessions/${sessionId}/share`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPublic: true }),
+      }
+    );
+    return { shareUrl: result.shareUrl, shareToken: result.shareToken };
   },
 }));

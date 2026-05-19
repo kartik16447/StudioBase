@@ -22,6 +22,7 @@ export const SOPCanvas: React.FC = () => {
   const sopStatus = useStudioStore(state => state.sopStatus);
   const publishSOP = useStudioStore(state => state.publishSOP);
   const forkSOP = useStudioStore(state => state.forkSOP);
+  const shareSession = useStudioStore(state => state.shareSession);
 
   // Phase 6 — Comments
   const comments = useStudioStore(state => state.comments);
@@ -32,6 +33,9 @@ export const SOPCanvas: React.FC = () => {
   const fetchSession = useStudioStore(state => state.fetchSession);
 
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -265,9 +269,44 @@ export const SOPCanvas: React.FC = () => {
             <p className="text-[13px] text-text-2 mt-1">
               Publish to share with your team or embed anywhere.
             </p>
-            <Button variant="primary" size="md" icon={I.Share2} className="mt-4 px-6">
-              Publish &amp; share
-            </Button>
+            {shareUrl ? (
+              <div className="mt-4 flex items-center gap-2 w-full max-w-sm mx-auto">
+                <input
+                  readOnly
+                  value={shareUrl}
+                  className="flex-1 text-[12px] px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg truncate outline-none"
+                />
+                <Button
+                  variant="ghost" size="sm" icon={shareCopied ? I.Check : I.Copy}
+                  onClick={() => {
+                    navigator.clipboard.writeText(shareUrl);
+                    setShareCopied(true);
+                    setTimeout(() => setShareCopied(false), 2000);
+                  }}
+                >
+                  {shareCopied ? 'Copied!' : 'Copy'}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="primary" size="md" icon={I.Share2} className="mt-4 px-6"
+                disabled={isSharing}
+                onClick={async () => {
+                  setIsSharing(true);
+                  try {
+                    const result = await shareSession();
+                    setShareUrl(result.shareUrl);
+                    navigator.clipboard.writeText(result.shareUrl).catch(() => {});
+                  } catch (e: any) {
+                    console.error('[Share] failed:', e);
+                  } finally {
+                    setIsSharing(false);
+                  }
+                }}
+              >
+                {isSharing ? 'Generating link…' : 'Publish & share'}
+              </Button>
+            )}
           </div>
 
           {/* Secondary actions */}
