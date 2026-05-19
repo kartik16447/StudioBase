@@ -27,7 +27,9 @@ export const RenderConstants = {
 
   PANEL_SPRING: { type: 'spring' as const, stiffness: 280, damping: 36 },
 
-  // Golden 64adceb spring — unified physics for XY and scale
-  CAMERA_XY_SPRING:    { stiffness: 70, damping: 18, mass: 1.1, restDelta: 0.001 },
-  CAMERA_SCALE_SPRING: { stiffness: 70, damping: 18, mass: 1.1, restDelta: 0.001 },
+  // Cinematic camera springs — critically damped, heavy, no oscillation
+  // XY (pan): stiffness 40, damping 24, mass 1.6 → slow lazy pan, settles ~1.4s
+  // Scale (zoom): stiffness 32, damping 26, mass 1.8 → even heavier zoom, settles ~1.8s
+  CAMERA_XY_SPRING:    { stiffness: 40, damping: 24, mass: 1.6, restDelta: 0.001 },
+  CAMERA_SCALE_SPRING: { stiffness: 32, damping: 26, mass: 1.8, restDelta: 0.001 },
 };

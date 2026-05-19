@@ -85,6 +85,11 @@ export const CinematicMath = {
    */
   isSameContext(s1: any, s2: any): boolean {
     if (!s1 || !s2) return false;
+    // If neither step carries URL or pageTitle, we have no context signal —
+    // default to true so the camera does a direct spring pan instead of
+    // snapping back to overview on every step.
+    const hasContext = (s1.url || s1.pageTitle) && (s2.url || s2.pageTitle);
+    if (!hasContext) return true;
     return !!(s1.url && s1.url === s2.url) ||
            !!(s1.pageTitle && s1.pageTitle === s2.pageTitle);
   },

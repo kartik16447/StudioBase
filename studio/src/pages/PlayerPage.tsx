@@ -38,7 +38,7 @@ type ViewMode = 'video' | 'guide';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STEP_MS = 3500;
+const STEP_MS = 5000;
 
 const fmtTime = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -159,7 +159,7 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
         camX.set(target.pctX);
         camY.set(target.pctY);
         camScale.set(target.scale);
-      }, 120);
+      }, 350);
       return () => clearTimeout(t);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

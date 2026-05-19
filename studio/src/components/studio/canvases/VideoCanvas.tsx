@@ -238,10 +238,10 @@ export async function handleSOPVideoExport(config: {
         }
       }
 
-      // Cross-context reorientation beat — hold at overview for ~120 ms of real frames
+      // Cross-context reorientation beat — hold at overview for ~350 ms of real frames
       const sameCtx = CinematicMath.isSameContext(prevStep, step);
       if (!sameCtx && i > 0) {
-        const overviewFrames = Math.round(fps * 0.13);
+        const overviewFrames = Math.round(fps * 0.35);
         for (let of = 0; of < overviewFrames; of++) {
           const sox = simSpring(springX, velX, 50, RenderConstants.CAMERA_XY_SPRING.stiffness, RenderConstants.CAMERA_XY_SPRING.damping, RenderConstants.CAMERA_XY_SPRING.mass);
           const soy = simSpring(springY, velY, 50, RenderConstants.CAMERA_XY_SPRING.stiffness, RenderConstants.CAMERA_XY_SPRING.damping, RenderConstants.CAMERA_XY_SPRING.mass);
@@ -553,7 +553,7 @@ export const VideoCanvas: React.FC = () => {
         camX.set(target.pctX);
         camY.set(target.pctY);
         camScale.set(target.scale);
-      }, 120);
+      }, 350);
       return () => clearTimeout(t);
     }
 
