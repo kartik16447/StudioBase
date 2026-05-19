@@ -136,7 +136,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   currentTime: 0,
   scrollTrigger: 0,
   sessionError: null,
-  renderMode: 'slideshow',
+  renderMode: 'hybrid',
   hybridStepIndex: 0,
   slideshowStepIndex: 0,
   isExporting: false,
