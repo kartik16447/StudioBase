@@ -685,24 +685,41 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const [speed,        setSpeed]        = useState(1);
   const speedRef = useRef(1);
 
-  // Load session
-  useEffect(() => {
-    if (!shareToken) { setError('No share token.'); setLoading(false); return; }
-    (async () => {
-      try {
+  // ── Fetch session JSON (shared by initial load + background refresh) ──────
+  const sessionJsonUrlRef = useRef<string | null>(null);
+
+  const fetchSessionData = useCallback(async (isInitial = false) => {
+    try {
+      // Only fetch meta once; subsequent polls use the cached sessionJsonUrl
+      if (!sessionJsonUrlRef.current) {
         const meta = await fetch(`${BACKEND_URL}/v1/public/${shareToken}`).then(r => r.json()) as any;
         if (meta.error) throw new Error(meta.error);
         setOwnerName(meta.owner?.name || 'Anonymous');
         if (!meta.sessionJsonUrl) throw new Error('Session not ready.');
-        const data = await fetch(meta.sessionJsonUrl).then(r => r.json()) as PSession;
-        setSession(data);
-      } catch (e: any) {
-        setError(e.message || 'Failed to load.');
-      } finally {
-        setLoading(false);
+        sessionJsonUrlRef.current = meta.sessionJsonUrl;
       }
-    })();
+      // Cache-bust with ?t= so Cloudflare doesn't serve a stale copy
+      const url = `${sessionJsonUrlRef.current}?t=${Date.now()}`;
+      const data = await fetch(url).then(r => r.json()) as PSession;
+      setSession(data);
+    } catch (e: any) {
+      if (isInitial) setError(e.message || 'Failed to load.');
+    } finally {
+      if (isInitial) setLoading(false);
+    }
   }, [shareToken]);
+
+  // Initial load
+  useEffect(() => {
+    if (!shareToken) { setError('No share token.'); setLoading(false); return; }
+    fetchSessionData(true);
+  }, [shareToken, fetchSessionData]);
+
+  // Background refresh every 30 s — picks up zoom/text edits made in dashboard
+  useEffect(() => {
+    const id = setInterval(() => fetchSessionData(false), 30_000);
+    return () => clearInterval(id);
+  }, [fetchSessionData]);
 
   const steps  = session?.steps  || [];
   const assets = session?.assets || {};

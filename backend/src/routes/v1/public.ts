@@ -53,18 +53,60 @@ publicRoutes.get('/:shareToken', async (c) => {
 });
 
 // GET /v1/public/:shareToken/json — serve R2 session JSON publicly
+// Always merges live D1 data (zoom overrides + text edits) on top of the R2
+// snapshot so dashboard edits are immediately reflected on the share page.
 publicRoutes.get('/:shareToken/json', async (c) => {
   const { shareToken } = c.req.param();
 
   const session = await resolveSession(c.env.DB, shareToken);
   if (!session?.r2JsonKey) return c.json({ error: 'Not found' }, 404);
 
-  const obj = await c.env.R2.get(session.r2JsonKey);
+  // ── Fetch R2 snapshot + D1 live overrides in parallel ───────────────────
+  const [obj, sessionMeta, sopRow] = await Promise.all([
+    c.env.R2.get(session.r2JsonKey),
+
+    // Session metadata holds stepOverrides (zoom / animationTarget edits)
+    c.env.DB.prepare(
+      `SELECT metadata FROM sessions WHERE id = ?`
+    ).bind(session.id).first<{ metadata: string | null }>(),
+
+    // Linked SOP row — gives us sopId to fetch live step text overrides
+    c.env.DB.prepare(
+      `SELECT id FROM sops WHERE sessionId = ? LIMIT 1`
+    ).bind(session.id).first<{ id: string }>(),
+  ]);
+
   if (!obj) return c.json({ error: 'Asset not found' }, 404);
 
   const json = await obj.json() as any;
 
-  // Rewrite screenshotKeys → public proxy URLs
+  // ── Parse D1 live overrides ──────────────────────────────────────────────
+  // animationTarget per step: stored in session.metadata.stepOverrides[stepId]
+  let stepOverrides: Record<string, { animationTarget?: any }> = {};
+  if (sessionMeta?.metadata) {
+    try {
+      const meta = JSON.parse(sessionMeta.metadata);
+      stepOverrides = meta?.stepOverrides || {};
+    } catch {}
+  }
+
+  // textOverride per step: stored in D1 steps table (content JSON blob)
+  const d1TextByStepId = new Map<string, string>();
+  if (sopRow?.id) {
+    try {
+      const { results } = await c.env.DB.prepare(
+        `SELECT id, content FROM steps WHERE sopId = ? ORDER BY stepIndex ASC`
+      ).bind(sopRow.id).all<{ id: string; content: string }>();
+      for (const row of results) {
+        try {
+          const content = JSON.parse(row.content);
+          if (content?.textOverride) d1TextByStepId.set(row.id, content.textOverride);
+        } catch {}
+      }
+    } catch {}
+  }
+
+  // ── Build asset proxy map ────────────────────────────────────────────────
   const origin = new URL(c.req.url).origin;
   const assets: Record<string, string> = {};
 
@@ -87,7 +129,6 @@ publicRoutes.get('/:shareToken/json', async (c) => {
   // Format: [{ stepIndex: number, r2Key: string }]
   const screenshotsArr = json.screenshots as Array<{ stepIndex: number; r2Key: string }> | undefined;
   if (Array.isArray(screenshotsArr)) {
-    // Build index → r2Key map and register all keys in assets
     const byIndex = new Map<number, string>();
     for (const s of screenshotsArr) {
       if (s.r2Key) {
@@ -103,12 +144,45 @@ publicRoutes.get('/:shareToken/json', async (c) => {
       json.steps = json.steps.map((step: any, i: number) => {
         if (step.screenshotKey) return step;
         const key =
-          byIndex.get(step.sequence ?? i) ??   // prefer sequence field
-          byIndex.get(i) ??                      // fallback to array index
+          byIndex.get(step.sequence ?? i) ??
+          byIndex.get(i) ??
           null;
         return key ? { ...step, screenshotKey: key } : step;
       });
     }
+  }
+
+  // ── Normalize steps: merge D1 live edits + promote nested fields ─────────
+  // This ensures the share page always reflects the latest dashboard edits:
+  //   • animationTarget (zoom) — from session.metadata.stepOverrides (D1)
+  //   • textOverride (text edits) — from steps table (D1)
+  //   • coordinates — promoted from step.data.coordinates if not at root
+  if (Array.isArray(json.steps)) {
+    json.steps = json.steps.map((step: any) => {
+      const override   = stepOverrides[step.id] || {};
+      const liveText   = d1TextByStepId.get(step.id);
+
+      // Normalize coordinates to root level (pipeline may nest them in step.data)
+      const coordinates =
+        step.coordinates ??
+        step.data?.coordinates ??
+        null;
+
+      // animationTarget: D1 stepOverride wins → R2 root → R2 nested
+      const animationTarget =
+        override.animationTarget ??
+        step.animationTarget ??
+        step.data?.animationTarget ??
+        null;
+
+      // textOverride: D1 step content wins → R2 value
+      const textOverride =
+        liveText ??
+        step.textOverride ??
+        null;
+
+      return { ...step, coordinates, animationTarget, textOverride };
+    });
   }
 
   return c.json({ ...json, assets });
