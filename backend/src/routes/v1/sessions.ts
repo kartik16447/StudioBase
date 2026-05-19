@@ -14,7 +14,7 @@ import { recordEvent, Events } from '../../telemetry/events';
 import { SessionService } from '../../services/SessionService';
 
 const sessions = new Hono<{ Bindings: Env; Variables: Variables }>();
-const STUDIO_BASE_URL = 'https://studio.studiobase.app';
+const STUDIO_BASE_URL = 'https://studiobase-umber.vercel.app';
 
 // Apply workspace middleware globally to all session routes
 // This enforces explicit workspaceId requirement

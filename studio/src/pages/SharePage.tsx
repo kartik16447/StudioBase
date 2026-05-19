@@ -358,8 +358,6 @@ export const SharePage: React.FC = () => {
   const chapterMap = new Map((session.metadata?.chapterBreaks || []).map(c => [c.afterStepId, c]));
   let chapterIndex = 1;
   const siteDomain = domain(session.capturedUrl);
-  const hasScreenshots = steps.some(s => s.screenshotKey && session.assets?.[s.screenshotKey]);
-
   return (
     <div className="min-h-screen bg-[#fafafa]">
 
@@ -439,8 +437,7 @@ export const SharePage: React.FC = () => {
         <div className="h-px bg-gray-200 my-8" />
 
         {/* ── Tabs ── */}
-        {hasScreenshots && (
-          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl mb-8 w-fit">
+        <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl mb-8 w-fit">
             <button
               onClick={() => setActiveTab('guide')}
               className={cn(
@@ -465,8 +462,7 @@ export const SharePage: React.FC = () => {
               <I.Play size={14} />
               Cinematic
             </button>
-          </div>
-        )}
+        </div>
 
         {/* ── Guide Tab ── */}
         {activeTab === 'guide' && (
