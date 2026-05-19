@@ -4,18 +4,19 @@ import { Env, Variables } from '../../types/hono';
 export const publicRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Helper: resolve a session by shareToken OR session id (for direct sharing / testing)
+// NOTE: column is `createdAt` not `capturedAt` in D1 schema
 async function resolveSession(db: Env['DB'], token: string) {
-  // Try shareToken first (production share links)
+  // Try shareToken first (production share links — must be public)
   let row = await db.prepare(
-    `SELECT id, capturedTitle, capturedAt, capturedUrl, r2JsonKey, status, ownerId, shareToken
-     FROM sessions WHERE shareToken = ? AND isPublic = 1 AND status = 'ready'`
+    `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, status, ownerId, shareToken
+     FROM sessions WHERE shareToken = ? AND isPublic = 1`
   ).bind(token).first<any>();
 
-  // Fallback: treat token as a session id (useful for testing / direct links)
+  // Fallback: treat token as session id — allows direct links without Publish step
   if (!row) {
     row = await db.prepare(
-      `SELECT id, capturedTitle, capturedAt, capturedUrl, r2JsonKey, status, ownerId, shareToken
-       FROM sessions WHERE id = ? AND status = 'ready'`
+      `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, status, ownerId, shareToken
+       FROM sessions WHERE id = ? AND deletedAt IS NULL`
     ).bind(token).first<any>();
   }
 
@@ -29,12 +30,10 @@ publicRoutes.get('/:shareToken', async (c) => {
   const session = await resolveSession(c.env.DB, shareToken);
   if (!session) return c.json({ error: 'Not found' }, 404);
 
-  // Fetch owner name
   const owner = await c.env.DB.prepare(
     `SELECT displayName, email FROM users WHERE id = ?`
   ).bind(session.ownerId).first<any>();
 
-  // Use the resolved session id (not the token) as the key for asset sub-routes
   const origin = new URL(c.req.url).origin;
   const sessionJsonUrl = session.r2JsonKey
     ? `${origin}/v1/public/${shareToken}/json`
@@ -42,8 +41,8 @@ publicRoutes.get('/:shareToken', async (c) => {
 
   return c.json({
     id: session.id,
-    capturedTitle: session.capturedTitle,
-    capturedAt: session.capturedAt,
+    capturedTitle: session.capturedTitle || session.title,
+    capturedAt: session.createdAt,   // map createdAt → capturedAt for frontend compat
     capturedUrl: session.capturedUrl,
     status: session.status,
     sessionJsonUrl,
@@ -85,7 +84,6 @@ publicRoutes.get('/:shareToken/json', async (c) => {
 publicRoutes.get('/:shareToken/asset/:key{.+}', async (c) => {
   const { shareToken, key } = c.req.param();
 
-  // Verify session exists (public OR direct id access)
   const session = await resolveSession(c.env.DB, shareToken);
   if (!session) return c.json({ error: 'Not found' }, 404);
 
