@@ -2,7 +2,9 @@ import { startCapture, stopCapture } from './capture/dom-observer';
 import { injectToolbar, removeToolbar } from './capture/toolbar';
 
 // ─── Token Injection for Studio ─────────────────────────────
-const isStudio = window.location.host.includes('localhost:5173') || window.location.host.includes('studiobase.app');
+const isStudio = window.location.host.includes('localhost') ||
+  window.location.host.includes('studiobase.app') ||
+  window.location.host.includes('studiobase-umber.vercel.app');
 if (isStudio) {
   function writeExtToken(token: string, workspaceId?: string) {
     // Always write with a fresh timestamp so App.tsx knows the token is live.

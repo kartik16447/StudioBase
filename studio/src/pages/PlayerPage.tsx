@@ -30,6 +30,14 @@ interface PSession {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+const STEP_MS = 3000; // ms per step at 1× speed
+
+const fmtTime = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, '0')}`;
+};
+
 const fmtDate = (ts: any) => {
   if (!ts) return '';
   return new Date(typeof ts === 'number' ? ts : ts)
@@ -40,7 +48,6 @@ const getDomain = (url?: string) => {
   try { return url ? new URL(url).hostname.replace('www.', '') : null; } catch { return null; }
 };
 
-// Build chapter map: stepId → chapter title
 function buildChapterMap(breaks?: { afterStepId: string; chapterTitle: string }[]) {
   const map = new Map<string, string>();
   (breaks || []).forEach(b => map.set(b.afterStepId, b.chapterTitle));
@@ -55,36 +62,36 @@ interface PlayerProps {
   currentIndex: number;
   isPlaying: boolean;
   progress: number; // 0–100 within current step
+  speed: number;
   onSeek: (idx: number) => void;
   onTogglePlay: () => void;
   onPrev: () => void;
   onNext: () => void;
+  onSpeedChange: (s: number) => void;
 }
 
 const CinematicPlayer: React.FC<PlayerProps> = ({
-  steps, assets, currentIndex, isPlaying, progress,
-  onSeek, onTogglePlay, onPrev, onNext,
+  steps, assets, currentIndex, isPlaying, progress, speed,
+  onSeek, onTogglePlay, onPrev, onNext, onSpeedChange,
 }) => {
-  const [speed, setSpeed] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const step = steps[currentIndex];
   const screenshotUrl = step?.screenshotKey ? assets[step.screenshotKey] : null;
 
-  // Zoom/pan transform from animationTarget or coordinates
+  // Always show zoom for the current step (indicates where the click happened)
   const getTransform = () => {
-    if (!isPlaying) return 'scale(1)';
     const t = step?.animationTarget;
     const c = step?.coordinates;
-    if (t) {
-      const s = t.zoomScale || 1.8;
+    if (t && (t.zoomScale ?? 1) > 1.1) {
+      const s = t.zoomScale;
       const tx = (50 - t.centerX) * (s - 1) / s;
       const ty = (50 - t.centerY) * (s - 1) / s;
       return `scale(${s}) translate(${tx}%, ${ty}%)`;
     }
     if (c) {
-      const s = 1.8;
+      const s = 1.7;
       const cx = (c.x / (c.viewportWidth || 1440)) * 100;
       const cy = (c.y / (c.viewportHeight || 900)) * 100;
       const tx = (50 - cx) * (s - 1) / s;
@@ -104,8 +111,14 @@ const CinematicPlayer: React.FC<PlayerProps> = ({
     }
   };
 
-  // Overall timeline progress for scrubber
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
   const totalSteps = steps.length;
+  // Overall scrubber position
   const overallPct = totalSteps > 0
     ? ((currentIndex + progress / 100) / totalSteps) * 100
     : 0;
@@ -116,53 +129,51 @@ const CinematicPlayer: React.FC<PlayerProps> = ({
     onSeek(Math.min(totalSteps - 1, Math.floor(pct * totalSteps)));
   };
 
+  // Elapsed and total time for the timer label
+  const elapsedMs = (currentIndex * STEP_MS + (progress / 100) * STEP_MS);
+  const totalMs = totalSteps * STEP_MS;
+
   return (
     <div ref={containerRef} className="w-full bg-black rounded-2xl overflow-hidden select-none">
       {/* Screenshot area */}
-      <div className="relative aspect-video bg-black">
+      <div className="relative aspect-video bg-[#0a0a0a]">
         {screenshotUrl ? (
           <img
             key={step?.id}
             src={screenshotUrl}
             alt={step?.stepTitle || ''}
-            className="w-full h-full object-contain transition-transform duration-700 ease-in-out"
+            className="w-full h-full object-contain transition-transform duration-500 ease-in-out"
             style={{ transform: getTransform(), transformOrigin: 'center center' }}
             draggable={false}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <I.Video size={48} className="text-white/20" />
+          <div className="w-full h-full flex flex-col items-center justify-center gap-3">
+            <I.Video size={40} className="text-white/15" />
+            <p className="text-[12px] text-white/25">No screenshot available</p>
           </div>
         )}
 
-        {/* Step counter */}
+        {/* Step counter pill */}
         <div className="absolute top-3 right-3 px-2.5 py-1 bg-black/60 rounded-full text-white text-[11px] font-semibold backdrop-blur-sm">
           {currentIndex + 1} / {totalSteps}
         </div>
 
-        {/* Click overlay: click left half = prev, right half = next */}
-        <div className="absolute inset-0 flex">
+        {/* Left/right click zones */}
+        <div className="absolute inset-0 flex pointer-events-auto">
           <div className="flex-1 cursor-pointer" onClick={onPrev} />
           <div className="flex-1 cursor-pointer" onClick={onNext} />
         </div>
-
-        {/* Play/pause overlay on center click */}
-        <div
-          className="absolute inset-0 flex items-center justify-center pointer-events-none"
-          style={{ background: isPlaying ? 'transparent' : 'rgba(0,0,0,0.15)' }}
-        />
       </div>
 
       {/* Scrubber */}
       <div
-        className="h-1.5 bg-white/10 cursor-pointer group relative mx-0"
+        className="h-1 bg-white/10 cursor-pointer group relative"
         onClick={handleScrubberClick}
       >
         <div
           className="h-full bg-indigo-500 group-hover:bg-indigo-400 transition-colors"
-          style={{ width: `${overallPct}%`, transition: 'none' }}
+          style={{ width: `${overallPct}%` }}
         />
-        {/* Thumb */}
         <div
           className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity"
           style={{ left: `calc(${overallPct}% - 6px)` }}
@@ -170,8 +181,7 @@ const CinematicPlayer: React.FC<PlayerProps> = ({
       </div>
 
       {/* Controls bar */}
-      <div className="flex items-center gap-3 px-4 h-12 bg-[#0c0c0f]">
-        {/* Prev / Play / Next */}
+      <div className="flex items-center gap-2 px-4 h-12 bg-[#0c0c0f]">
         <button onClick={onPrev} disabled={currentIndex === 0}
           className="p-1.5 text-white/60 hover:text-white disabled:opacity-30 transition-colors">
           <I.SkipBack size={16} />
@@ -187,17 +197,17 @@ const CinematicPlayer: React.FC<PlayerProps> = ({
           <I.SkipForward size={16} />
         </button>
 
-        {/* Time */}
-        <span className="text-[11px] text-white/40 tabular-nums ml-1">
-          {currentIndex + 1}:{String(Math.round(progress / 100 * 3)).padStart(2, '0')} / {totalSteps}:00
+        {/* Proper timer: elapsed / total */}
+        <span className="text-[11px] text-white/40 tabular-nums ml-1 font-mono">
+          {fmtTime(elapsedMs)} / {fmtTime(totalMs)}
         </span>
 
         <div className="flex-1" />
 
-        {/* Speed */}
+        {/* Speed selector */}
         <div className="flex items-center gap-0.5 bg-white/[0.08] rounded-md p-0.5">
           {[0.5, 1, 1.5, 2].map(s => (
-            <button key={s} onClick={() => setSpeed(s)}
+            <button key={s} onClick={() => onSpeedChange(s)}
               className={cn('px-2 h-5 rounded text-[10px] font-bold transition-colors',
                 speed === s ? 'bg-white text-black' : 'text-white/50 hover:text-white')}>
               {s}×
@@ -224,7 +234,6 @@ const TranscriptPanel: React.FC<{
   chapterMap: Map<string, string>;
   onSelect: (i: number) => void;
 }> = ({ steps, assets, currentIndex, chapterMap, onSelect }) => {
-  const listRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -235,15 +244,18 @@ const TranscriptPanel: React.FC<{
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tabs */}
+      {/* Header tab */}
       <div className="flex border-b border-white/[0.07] flex-shrink-0">
         <div className="px-5 py-3 text-[13px] font-semibold text-white border-b-2 border-indigo-500">
-          Transcript
+          Steps
+        </div>
+        <div className="px-4 py-3 text-[12px] text-white/30 self-end ml-auto pb-3 pr-4">
+          {steps.length} total
         </div>
       </div>
 
-      {/* Step list */}
-      <div ref={listRef} className="flex-1 overflow-y-auto py-2 space-y-0.5 scrollbar-hide">
+      {/* Scrollable step list */}
+      <div className="flex-1 overflow-y-auto py-2 space-y-0.5 min-h-0">
         {steps.map((step, i) => {
           const isActive = i === currentIndex;
           const thumb = step.screenshotKey ? assets[step.screenshotKey] : null;
@@ -266,28 +278,31 @@ const TranscriptPanel: React.FC<{
                 onClick={() => onSelect(i)}
                 className={cn(
                   'w-full flex items-start gap-3 px-4 py-2.5 text-left transition-colors rounded-lg mx-1',
-                  isActive ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
+                  isActive ? 'bg-white/[0.09]' : 'hover:bg-white/[0.04]'
                 )}
               >
                 {/* Thumbnail */}
-                <div className="flex-shrink-0 w-14 h-9 rounded-md overflow-hidden bg-white/[0.06] mt-0.5">
+                <div className={cn(
+                  'flex-shrink-0 w-14 h-9 rounded-md overflow-hidden mt-0.5 border',
+                  isActive ? 'border-indigo-500/60' : 'border-white/[0.08]'
+                )}>
                   {thumb
                     ? <img src={thumb} alt="" className="w-full h-full object-cover" />
-                    : <div className="w-full h-full flex items-center justify-center text-[9px] text-white/30">{i + 1}</div>
+                    : <div className="w-full h-full bg-white/[0.06] flex items-center justify-center text-[9px] text-white/30">{i + 1}</div>
                   }
                 </div>
 
                 {/* Text */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    {isActive && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />}
-                    <p className={cn('text-[12px] font-semibold leading-snug truncate',
+                  <div className="flex items-center gap-1.5">
+                    {isActive && <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />}
+                    <p className={cn('text-[12px] font-semibold leading-snug line-clamp-2',
                       isActive ? 'text-white' : 'text-white/70')}>
                       {title}
                     </p>
                   </div>
                   {text && (
-                    <p className="text-[11px] text-white/40 mt-0.5 line-clamp-2 leading-relaxed">{text}</p>
+                    <p className="text-[11px] text-white/35 mt-0.5 line-clamp-2 leading-relaxed">{text}</p>
                   )}
                 </div>
               </button>
@@ -311,9 +326,10 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   // Player state
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [progress, setProgress] = useState(0); // 0–100 within current step
+  const [speed, setSpeed] = useState(1);
+  const speedRef = useRef(1);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const STEP_MS = 3000;
 
   // Load session
   useEffect(() => {
@@ -338,7 +354,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const steps = session?.steps || [];
   const assets = session?.assets || {};
 
-  // Playback engine
+  // ── Playback engine ──
   const advance = useCallback(() => {
     setCurrentIndex(prev => {
       if (prev >= steps.length - 1) { setIsPlaying(false); return prev; }
@@ -350,9 +366,11 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
     if (!isPlaying) return;
-    const startTime = Date.now() - (progress / 100) * STEP_MS;
+    // Store start time accounting for where we are in the current step
+    const adjustedStart = Date.now() - (progress / 100) * (STEP_MS / speedRef.current);
     intervalRef.current = setInterval(() => {
-      const pct = Math.min(((Date.now() - startTime) / STEP_MS) * 100, 100);
+      const elapsed = Date.now() - adjustedStart;
+      const pct = Math.min((elapsed * speedRef.current / STEP_MS) * 100, 100);
       setProgress(pct);
       if (pct >= 100) advance();
     }, 50);
@@ -360,9 +378,21 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   }, [isPlaying, currentIndex, advance]);
 
   const goTo = (idx: number) => {
-    setCurrentIndex(idx);
+    setCurrentIndex(Math.max(0, Math.min(steps.length - 1, idx)));
     setProgress(0);
     if (intervalRef.current) clearInterval(intervalRef.current);
+  };
+
+  const handleSpeedChange = (s: number) => {
+    setSpeed(s);
+    speedRef.current = s;
+    // Restart interval at new speed if playing
+    if (isPlaying && intervalRef.current) {
+      clearInterval(intervalRef.current);
+      // Re-trigger by toggling — use a tiny delay to let state settle
+      setIsPlaying(false);
+      setTimeout(() => setIsPlaying(true), 20);
+    }
   };
 
   const copyLink = () => {
@@ -370,6 +400,17 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  // ── Keyboard: arrow keys to navigate steps ──
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') goTo(currentIndex + 1);
+      if (e.key === 'ArrowLeft')  goTo(currentIndex - 1);
+      if (e.key === ' ')          { e.preventDefault(); setIsPlaying(p => !p); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [currentIndex, steps.length]);
 
   // ── Loading ──
   if (loading) return (
@@ -402,7 +443,6 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const currentText = currentStep?.textOverride || currentStep?.generatedText || '';
   const siteDomain = getDomain(session.capturedUrl);
 
-  // Current chapter for this step
   let currentChapter = '';
   for (let i = currentIndex; i >= 0; i--) {
     const sid = steps[i]?.id;
@@ -438,7 +478,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
         </div>
       </nav>
 
-      {/* ── Main content ── */}
+      {/* ── Main ── */}
       <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-8">
 
         {/* Title + meta */}
@@ -464,7 +504,6 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
               <span className="flex items-center gap-1"><I.Globe size={12} />{siteDomain}</span></>
             )}
           </div>
-          {/* Tags */}
           {tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-3">
               {tags.map(t => (
@@ -477,49 +516,51 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
         </div>
 
         {/* ── Two-column layout ── */}
-        <div className="flex flex-col lg:flex-row gap-5">
+        <div className="flex flex-col lg:flex-row gap-5 items-start">
 
           {/* Left: Player + description */}
-          <div className="flex-1 min-w-0 space-y-5">
+          <div className="flex-1 min-w-0 space-y-4">
             <CinematicPlayer
               steps={steps}
               assets={assets}
               currentIndex={currentIndex}
               isPlaying={isPlaying}
               progress={progress}
+              speed={speed}
               onSeek={goTo}
               onTogglePlay={() => setIsPlaying(p => !p)}
-              onPrev={() => goTo(Math.max(0, currentIndex - 1))}
-              onNext={() => goTo(Math.min(steps.length - 1, currentIndex + 1))}
+              onPrev={() => goTo(currentIndex - 1)}
+              onNext={() => goTo(currentIndex + 1)}
+              onSpeedChange={handleSpeedChange}
             />
 
-            {/* Current step description — the Trupeer "big title" section */}
+            {/* Current step description card */}
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-6">
               {currentChapter && (
                 <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider mb-2">
                   {currentChapter}
                 </p>
               )}
-              <h2 className="text-[22px] sm:text-[26px] font-bold text-white leading-snug mb-3">
-                {currentTitle}
+              <h2 className="text-[20px] sm:text-[24px] font-bold text-white leading-snug mb-2">
+                Step {currentIndex + 1}: {currentTitle}
               </h2>
               {currentText && (
                 <p className="text-[14px] text-white/60 leading-relaxed">{currentText}</p>
               )}
 
-              {/* Step nav pills */}
+              {/* Prev / Next nav */}
               <div className="flex items-center gap-2 mt-5 pt-4 border-t border-white/[0.06]">
                 <button
-                  onClick={() => goTo(Math.max(0, currentIndex - 1))}
+                  onClick={() => goTo(currentIndex - 1)}
                   disabled={currentIndex === 0}
                   className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium text-white/50 hover:text-white hover:bg-white/[0.07] disabled:opacity-30 transition-colors">
                   <I.ChevronLeft size={14} /> Prev
                 </button>
                 <span className="text-[12px] text-white/30 flex-1 text-center">
-                  Step {currentIndex + 1} of {steps.length}
+                  {currentIndex + 1} of {steps.length}
                 </span>
                 <button
-                  onClick={() => goTo(Math.min(steps.length - 1, currentIndex + 1))}
+                  onClick={() => goTo(currentIndex + 1)}
                   disabled={currentIndex === steps.length - 1}
                   className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium text-white/50 hover:text-white hover:bg-white/[0.07] disabled:opacity-30 transition-colors">
                   Next <I.ChevronRight size={14} />
@@ -535,9 +576,12 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
             )}
           </div>
 
-          {/* Right: Transcript sidebar */}
-          <div className="w-full lg:w-[320px] flex-shrink-0">
-            <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl overflow-hidden h-full lg:max-h-[calc(100vh-180px)] lg:sticky lg:top-20">
+          {/* Right: Transcript sidebar — sticky, independent scroll */}
+          <div className="w-full lg:w-[300px] flex-shrink-0 lg:sticky lg:top-[72px]">
+            <div
+              className="bg-white/[0.03] border border-white/[0.06] rounded-2xl"
+              style={{ maxHeight: 'calc(100vh - 100px)', display: 'flex', flexDirection: 'column' }}
+            >
               <TranscriptPanel
                 steps={steps}
                 assets={assets}

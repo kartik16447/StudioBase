@@ -109,7 +109,7 @@ export const SOPCanvas: React.FC = () => {
   });
 
   return (
-    <div ref={sopVideoRef} className="flex-1 min-h-0 scroll-y bg-bg relative" data-print="sop">
+    <div ref={sopVideoRef} className="flex-1 min-h-0 overflow-y-auto bg-bg relative" data-print="sop">
       <CommentPanel />
       <EmbedModal open={embedOpen} onClose={() => setEmbedOpen(false)} />
       <DotGrid className="!fixed" glowRadius={RenderConstants.GLOW_RADIUS} />

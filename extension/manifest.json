@@ -35,7 +35,12 @@
     }
   },
   "externally_connectable": {
-    "matches": ["http://localhost:5173/*", "https://studio.studiobase.app/*"]
+    "matches": [
+      "http://localhost:5173/*",
+      "http://localhost:3000/*",
+      "https://studio.studiobase.app/*",
+      "https://studiobase-umber.vercel.app/*"
+    ]
   },
   "oauth2": {
     "client_id": "813435932187-l9vpdot4lsa51o4qa617o83111jgirot.apps.googleusercontent.com",

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import type { Step, SessionEnvelope, AnnotationShape, Annotation } from '../../../../shared/types/session';
 import { I } from '../icons';
 import { 
-  cn, Badge, IconButton, Tooltip, StepNumber, ScreenshotPlaceholder, 
+  cn, Badge, IconButton, Tooltip, ScreenshotPlaceholder,
   GlassPanel, Avatar, Button
 } from '../ui';
 import { useStudioStore } from '../../store/useStudioStore';
@@ -306,35 +306,23 @@ export const StepCard: React.FC<{
 }> = ({ step, hue = 244, onEdit, onAnnotate, onDelete, focused, onFocus }) => {
   const session = useStudioStore(state => state.session);
   const updateStep = useStudioStore(state => state.updateStep);
+  const sopStatus = useStudioStore(state => state.sopStatus);
   const text = step.textOverride || step.generatedText || '';
+  const stepLabel = `Step ${step.sequence ?? (step as any).index + 1}`;
+  const stepTitle = step.stepTitle || step.elementText || '';
+
   return (
     <article
       onClick={onFocus}
       className={cn(
-        'group relative bg-surface rounded-card shadow-card p-6 cursor-default transition-all duration-200 ease-out',
-        'hover:shadow-card-hover hover:-translate-y-1',
+        'group relative bg-white rounded-xl overflow-hidden cursor-default transition-all duration-200 ease-out',
+        'shadow-[0_2px_12px_rgba(0,0,0,0.07)] hover:shadow-[0_6px_24px_rgba(0,0,0,0.11)]',
         focused && 'ring-2 ring-primary ring-offset-2 ring-offset-bg',
       )}
     >
-      <div className="absolute top-3 right-6 pointer-events-none">
-        <StepNumber n={step.sequence} size="lg" />
-      </div>
-
-      <div className="flex items-center gap-2 mb-4 relative z-10">
-        <StepNumber n={step.sequence} size="badge" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-text-3">
-          {step.action}
-        </span>
-        {step.elementText && (
-          <span className="text-[12px] text-text-2 truncate">
-            <span className="text-text-3">·</span>{' '}
-            <span className="font-mono">{step.elementText}</span>
-          </span>
-        )}
-      </div>
-
-      <div className="relative mb-5">
-        <ScreenshotPlaceholder step={step} session={session} mode="blueprint" hue={hue} />
+      {/* ── Full-width screenshot ── */}
+      <div className="relative w-full">
+        <ScreenshotPlaceholder step={step} session={session} mode="blueprint" hue={hue} rounded="" className="rounded-none" />
         <AnnotationCanvas
           step={step}
           containerRef={React.useRef<HTMLDivElement>(null)}
@@ -344,69 +332,72 @@ export const StepCard: React.FC<{
           }}
           onClear={() => updateStep(step.id, { annotations: [] })}
         />
-      </div>
-
-      {/* Step Title */}
-      {step.stepTitle && (
-        <h3 className="text-[15px] font-semibold text-text mb-1.5 leading-snug">
-          {step.stepTitle}
-        </h3>
-      )}
-
-      {/* Step Text / Editor */}
-      {useStudioStore.getState().sopStatus !== 'published' ? (
-        <textarea
-          className="w-full bg-transparent border border-white/10 rounded p-2 text-sm resize-none focus:outline-none focus:border-white/30 text-text-2 leading-[1.65]"
-          defaultValue={step.textOverride ?? step.generatedText ?? ''}
-          rows={3}
-          onBlur={(e) => {
-            const newText = e.currentTarget.value.trim();
-            const original = step.textOverride ?? step.generatedText ?? '';
-            if (newText !== original) {
-              useStudioStore.getState().saveStep(step.id, { textOverride: newText });
-            }
-          }}
-        />
-      ) : (
-        <p className="text-[15px] leading-[1.65] text-text-2 relative z-10" style={{ textWrap: 'pretty' as any }}>
-          {text}
-        </p>
-      )}
-
-      <div className="mt-4 flex items-center gap-2 relative z-10">
-        {(() => {
-          const rawUrl = step.url || session?.capturedUrl || '';
-          if (!rawUrl) return null;
-          const domain = rawUrl.replace(/^https?:\/\//, '').split('/')[0];
-          if (!domain) return null;
-          const faviconSrc = `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
-          return (
-            <div className="flex items-center bg-surface-2 rounded-pill pr-1">
-              <div className="inline-flex items-center gap-1 rounded-pill font-semibold tracking-wide uppercase whitespace-nowrap text-text-2 text-[10px] h-5 px-2">
-                <FaviconImg src={faviconSrc} domain={domain} />
-                {domain}
-              </div>
-              <CopyLinkButton url={rawUrl} />
-            </div>
-          );
-        })()}
-        {step.textOverride && (
-          <Badge tone="primary" size="sm">edited</Badge>
-        )}
-
-        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+        {/* Hover toolbar — top-right of screenshot */}
+        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-white/90 rounded-lg px-1 py-1 shadow-sm">
+          <Tooltip content="Annotate" side="top">
+            <IconButton icon={I.Wand} label="Annotate" onClick={(e) => { e.stopPropagation(); onAnnotate?.(step); }} size={28} />
+          </Tooltip>
           <Tooltip content="Edit text" side="top">
-            <IconButton icon={I.Edit2} label="Edit" onClick={(e) => { e.stopPropagation(); onEdit?.(step); }} />
+            <IconButton icon={I.Edit2} label="Edit" onClick={(e) => { e.stopPropagation(); onEdit?.(step); }} size={28} />
           </Tooltip>
-          <Tooltip content="Annotate screenshot" side="top">
-            <IconButton icon={I.Wand} label="Annotate" onClick={(e) => { e.stopPropagation(); onAnnotate?.(step); }} />
-          </Tooltip>
-          <Tooltip content="Translate this step" side="top">
-            <IconButton icon={I.Languages} label="Translate" />
+          <Tooltip content="Translate" side="top">
+            <IconButton icon={I.Languages} label="Translate" size={28} />
           </Tooltip>
           <Tooltip content="Delete step" side="top">
-            <IconButton icon={I.Trash2} label="Delete" onClick={(e) => { e.stopPropagation(); onDelete?.(step); }} />
+            <IconButton icon={I.Trash2} label="Delete" onClick={(e) => { e.stopPropagation(); onDelete?.(step); }} size={28} />
           </Tooltip>
+        </div>
+      </div>
+
+      {/* ── Content below screenshot ── */}
+      <div className="px-7 pt-5 pb-6">
+        {/* "Step N: Title" heading — matches PDF format */}
+        <h3 className="text-[17px] font-bold text-text leading-snug mb-3">
+          {stepLabel}{stepTitle ? `: ${stepTitle}` : ''}
+        </h3>
+
+        {/* Step description — editable when draft, read-only when published */}
+        {sopStatus !== 'published' ? (
+          <textarea
+            className="w-full bg-surface-2/60 border border-border rounded-sm p-3 text-[14px] resize-none focus:outline-none focus:border-primary/40 text-text-2 leading-[1.7] transition-colors"
+            defaultValue={step.textOverride ?? step.generatedText ?? ''}
+            rows={3}
+            placeholder="Step description…"
+            onBlur={(e) => {
+              const newText = e.currentTarget.value.trim();
+              const original = step.textOverride ?? step.generatedText ?? '';
+              if (newText !== original) {
+                useStudioStore.getState().saveStep(step.id, { textOverride: newText });
+              }
+            }}
+          />
+        ) : (
+          <p className="text-[14px] leading-[1.7] text-text-2" style={{ textWrap: 'pretty' as any }}>
+            {text}
+          </p>
+        )}
+
+        {/* Footer: URL pill + edited badge */}
+        <div className="mt-4 flex items-center gap-2">
+          {(() => {
+            const rawUrl = step.url || session?.capturedUrl || '';
+            if (!rawUrl) return null;
+            const domain = rawUrl.replace(/^https?:\/\//, '').split('/')[0];
+            if (!domain) return null;
+            const faviconSrc = `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
+            return (
+              <div className="flex items-center bg-surface-2 rounded-pill pr-1">
+                <div className="inline-flex items-center gap-1 rounded-pill font-semibold tracking-wide uppercase whitespace-nowrap text-text-2 text-[10px] h-5 px-2">
+                  <FaviconImg src={faviconSrc} domain={domain} />
+                  {domain}
+                </div>
+                <CopyLinkButton url={rawUrl} />
+              </div>
+            );
+          })()}
+          {step.textOverride && (
+            <Badge tone="primary" size="sm">edited</Badge>
+          )}
         </div>
       </div>
     </article>
