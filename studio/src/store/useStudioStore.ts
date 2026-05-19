@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { SessionEnvelope, Step } from '../../../shared/types/session';
 import { apiClient, type CommentItem, type NotificationItem } from '../lib/apiClient';
 
-export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team' | 'analytics';
+export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'player' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team' | 'analytics';
 
 interface Route {
   name: RouteName;

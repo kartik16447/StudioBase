@@ -23,12 +23,12 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Derive share URL from token when available
+  // Derive share URL from token — always use /s/:token format
   useEffect(() => {
     if (shareState.shareToken) {
       setShareState((s) => ({
         ...s,
-        shareUrl: `${window.location.origin}${window.location.pathname}?share=${s.shareToken}`,
+        shareUrl: `${window.location.origin}/s/${s.shareToken}`,
       }));
     }
   }, [shareState.shareToken]);

@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage';
 import { StudioPage } from './pages/StudioPage';
 import { BrandKitPage } from './pages/BrandKitPage';
 import { SharePage } from './pages/SharePage';
+import { PlayerPage } from './pages/PlayerPage';
 import { WorkspaceSettingsPage } from './pages/WorkspaceSettingsPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { AdminDiagnosticsPage } from './pages/AdminDiagnosticsPage';
@@ -82,6 +83,19 @@ function App() {
 
       const workspaceId = params.get('workspaceId') || sessionManager.getWorkspaceId();
       if (workspaceId) sessionManager.setWorkspaceId(workspaceId);
+
+      // Public player page — /s/:shareToken
+      if (window.location.pathname.startsWith('/s/')) {
+        const shareToken = window.location.pathname.split('/s/')[1]?.split('/')[0];
+        if (shareToken) { navigate('player', { shareToken }); return; }
+      }
+      // Legacy ?share= param → redirect to /s/:token
+      const legacyShare = params.get('share');
+      if (legacyShare) {
+        window.history.replaceState({}, '', `/s/${legacyShare}`);
+        navigate('player', { shareToken: legacyShare });
+        return;
+      }
 
       // Deep-link to a specific session
       let sessionId = params.get('session');
@@ -226,6 +240,7 @@ function App() {
         case 'brand': 
         case 'templates': return <BrandKitPage />;
         case 'share': return <SharePage />;
+        case 'player': return <PlayerPage shareToken={route.params.shareToken} />;
         case 'team': return <WorkspaceSettingsPage />;
         case 'audit-logs' as any: return <AuditLogPage />;
         case 'admin' as any: return <AdminDiagnosticsPage />;
@@ -247,7 +262,7 @@ function App() {
 
   // While the async token exchange / workspace sync is running, show a neutral loading
   // screen instead of the login page — avoids the flash-of-login-then-app on reload.
-  if (initializing && route.name !== 'share' && !isEmbed) {
+  if (initializing && route.name !== 'share' && route.name !== 'player' && !isEmbed) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -256,11 +271,15 @@ function App() {
   }
 
   // Show login page if not authenticated (except share/embed pages which are public)
-  if (!authed && route.name !== 'share' && !isEmbed) {
+  if (!authed && route.name !== 'share' && route.name !== 'player' && !isEmbed) {
     return <LoginPage />;
   }
 
   const isShare = route.name === 'share';
+  const isPlayer = route.name === 'player';
+
+  // Player page renders completely standalone — no AppShell
+  if (isPlayer) return <>{renderRoute()}<GlobalToastContainer /></>;
 
   return (
     <>

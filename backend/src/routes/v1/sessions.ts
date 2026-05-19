@@ -152,7 +152,7 @@ sessions.patch('/:id/share', requirePermission('sop:edit'), async (c) => {
     .run();
 
   const shareUrl = shareToken
-    ? `${STUDIO_BASE_URL}?share=${shareToken}`
+    ? `${STUDIO_BASE_URL}/s/${shareToken}`
     : null;
 
   return c.json({ isPublic, shareToken, shareUrl });
