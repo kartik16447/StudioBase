@@ -27,7 +27,7 @@ export class CanvasRenderer implements IRenderer {
   render(
     ctx: CanvasRenderingContext2D,
     spec: RenderSpec,
-    masterFrame: ImageBitmap | HTMLImageElement | HTMLVideoElement | null,
+    masterFrame: ImageBitmap | HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | null,
   ) {
     const { dimensions, progress, step, theme } = spec;
     const { width: cW, height: cH } = dimensions;
@@ -179,7 +179,7 @@ export class CanvasRenderer implements IRenderer {
 
   private drawScreenshot(
     ctx: CanvasRenderingContext2D,
-    frame: ImageBitmap | HTMLImageElement | HTMLVideoElement,
+    frame: ImageBitmap | HTMLImageElement | HTMLVideoElement | HTMLCanvasElement,
     layout: ScreenshotLayout,
     scale: number,
   ) {
@@ -190,12 +190,12 @@ export class CanvasRenderer implements IRenderer {
       ? frame.videoWidth
       : frame instanceof HTMLImageElement
       ? frame.naturalWidth
-      : (frame as ImageBitmap).width;
+      : (frame as HTMLCanvasElement | ImageBitmap).width;
     const frameH = frame instanceof HTMLVideoElement
       ? frame.videoHeight
       : frame instanceof HTMLImageElement
       ? frame.naturalHeight
-      : (frame as ImageBitmap).height;
+      : (frame as HTMLCanvasElement | ImageBitmap).height;
 
     ctx.save();
     roundRect(ctx, drawX, drawY, drawW, drawH, cornerR);

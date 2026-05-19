@@ -569,8 +569,21 @@ export const VideoCanvas: React.FC = () => {
   }, [currentStepIndex, currentStep?.id, currentStep?.animationTarget, renderMode]);
 
   // ── Slide preloader ──────────────────────────────────────────────────────
-  // Always preload screenshot so paused hybrid frames have a static fallback.
-  const slideImageRef = useRef<HTMLImageElement | null>(null);
+  const slideImageRef      = useRef<HTMLImageElement | null>(null);
+  const prevSlideImageRef  = useRef<HTMLImageElement | null>(null);
+  const blendCanvasRef     = useRef<HTMLCanvasElement | null>(null);
+  const transitionStartRef = useRef<number>(-Infinity);
+  const leavingStepRef     = useRef<any>(null);
+  const previousIdxRef     = useRef<number>(0);
+
+  // Save outgoing state before loading new screenshot (cross-dissolve + cursor lerp)
+  useEffect(() => {
+    prevSlideImageRef.current  = slideImageRef.current;
+    leavingStepRef.current     = steps[previousIdxRef.current] ?? null;
+    previousIdxRef.current     = currentStepIndex;
+    transitionStartRef.current = performance.now();
+  }, [currentStepIndex]);
+
   useEffect(() => {
     if (!currentStep?.screenshotKey) return;
     const url = session?.assets?.[currentStep.screenshotKey];
@@ -716,19 +729,55 @@ export const VideoCanvas: React.FC = () => {
         }
       }
 
-      // ── Render ────────────────────────────────────────────────────────
-      const masterFrame: HTMLVideoElement | HTMLImageElement | null =
-        renderMode === 'hybrid' && video && !video.paused && !video.ended
-          ? video
-          : (slideImageRef.current ?? (video ?? null));
+      // ── Cross-dissolve + cursor lerp (mirrors PlayerPage logic) ──────────
+      const DISSOLVE_MS_VC = 400;
+      const lerpFn    = (a: number, b: number, t: number) => a + (b - a) * t;
+      const easeIO    = (t: number) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      const tRaw      = Math.min(1, (performance.now() - transitionStartRef.current) / DISSOLVE_MS_VC);
+      const tEased    = easeIO(tRaw);
+      const newReady  = !!slideImageRef.current;
+
+      let masterFrame: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | null;
+
+      if (renderMode === 'hybrid' && video && !video.paused && !video.ended) {
+        masterFrame = video;
+      } else if (!newReady && prevSlideImageRef.current) {
+        masterFrame = prevSlideImageRef.current;
+      } else if (tRaw < 1 && prevSlideImageRef.current && newReady) {
+        if (!blendCanvasRef.current) blendCanvasRef.current = document.createElement('canvas');
+        const bc  = blendCanvasRef.current;
+        const bw  = prevSlideImageRef.current.naturalWidth  || 1440;
+        const bh  = prevSlideImageRef.current.naturalHeight || 900;
+        if (bc.width !== bw || bc.height !== bh) { bc.width = bw; bc.height = bh; }
+        const bctx = bc.getContext('2d')!;
+        bctx.clearRect(0, 0, bw, bh);
+        bctx.globalAlpha = 1 - tEased;
+        bctx.drawImage(prevSlideImageRef.current, 0, 0, bw, bh);
+        bctx.globalAlpha = tEased;
+        bctx.drawImage(slideImageRef.current!, 0, 0, bw, bh);
+        bctx.globalAlpha = 1;
+        masterFrame = bc;
+      } else {
+        masterFrame = slideImageRef.current ?? (video ?? null);
+      }
+
+      // Cursor lerp: move from old click-point to new in sync with camera spring
+      const leaving = leavingStepRef.current;
+      const renderStep = (tRaw < 1 && leaving?.coordinates && currentStep?.coordinates)
+        ? { ...currentStep, coordinates: {
+            ...currentStep.coordinates,
+            x: lerpFn(leaving.coordinates.x, currentStep.coordinates.x, tEased),
+            y: lerpFn(leaving.coordinates.y, currentStep.coordinates.y, tEased),
+          }}
+        : currentStep;
 
       renderer.render(
         ctx,
         {
           dimensions: { width: cW, height: cH },
-          step: currentStep,
+          step: renderStep,
           prevStep,
-          progress: 1.0, // springs drive camera — progress only used for overlay effects
+          progress: 1.0,
           theme: {
             primaryColor: brand.primaryColor,
             logoUrl: brand.logoUrl ?? undefined,

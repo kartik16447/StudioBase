@@ -48,7 +48,7 @@ export const CinematicMath = {
       return {
         pctX: clamp(pctX, 15, 85),
         pctY: clamp(pctY, 15, 85),
-        scale: 1.55,
+        scale: 1.2,  // gentle zoom — keeps context visible, was 1.55
       };
     }
 

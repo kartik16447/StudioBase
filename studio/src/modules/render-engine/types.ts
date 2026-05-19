@@ -28,7 +28,7 @@ export interface IRenderer {
   render(
     ctx: CanvasRenderingContext2D,
     spec: RenderSpec,
-    masterFrame: ImageBitmap | HTMLImageElement | HTMLVideoElement | null,
+    masterFrame: ImageBitmap | HTMLImageElement | HTMLVideoElement | HTMLCanvasElement | null,
   ): void | Promise<void>;
 }
 

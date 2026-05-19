@@ -38,7 +38,12 @@ type ViewMode = 'video' | 'guide';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STEP_MS = 5000;
+const STEP_MS      = 5000;
+const DISSOLVE_MS  = 400;  // cross-dissolve duration when switching screenshots
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+const lerp       = (a: number, b: number, t: number) => a + (b - a) * t;
+const easeInOut  = (t: number) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 
 const fmtTime = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -86,13 +91,18 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
   videoUrl, sessionStartMs,
   onSeek, onTogglePlay, onPrev, onNext, onSpeedChange,
 }) => {
-  const containerRef  = useRef<HTMLDivElement>(null);
-  const canvasRef     = useRef<HTMLCanvasElement>(null);
-  const videoRef      = useRef<HTMLVideoElement>(null);
-  const slideImageRef = useRef<HTMLImageElement | null>(null);
-  const progressBarRef = useRef<HTMLDivElement>(null);
-  const stepStartWall  = useRef(performance.now());
-  const renderer      = useMemo(() => new CanvasRenderer(), []);
+  const containerRef       = useRef<HTMLDivElement>(null);
+  const canvasRef          = useRef<HTMLCanvasElement>(null);
+  const videoRef           = useRef<HTMLVideoElement>(null);
+  const slideImageRef      = useRef<HTMLImageElement | null>(null);
+  const prevSlideImageRef  = useRef<HTMLImageElement | null>(null);  // for cross-dissolve
+  const blendCanvasRef     = useRef<HTMLCanvasElement | null>(null); // offscreen blend surface
+  const transitionStartRef = useRef<number>(-Infinity);             // wall-clock when step changed
+  const leavingStepRef     = useRef<PStep | null>(null);            // step we just left (cursor lerp)
+  const previousIdxRef     = useRef<number>(0);                     // tracks previous step index
+  const progressBarRef     = useRef<HTMLDivElement>(null);
+  const stepStartWall      = useRef(performance.now());
+  const renderer           = useMemo(() => new CanvasRenderer(), []);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -165,8 +175,14 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, currentStep?.id]);
 
-  // Preload screenshot into an off-screen Image so canvas gets pixels immediately
+  // Preload screenshot — saves outgoing image/step first for cross-dissolve + cursor lerp
   useEffect(() => {
+    // Capture state of the step we're leaving before anything changes
+    prevSlideImageRef.current  = slideImageRef.current;
+    leavingStepRef.current     = stepsRef.current[previousIdxRef.current] ?? null;
+    previousIdxRef.current     = currentIdxRef.current;
+    transitionStartRef.current = performance.now();
+
     slideImageRef.current = null;
     if (!currentStep?.screenshotKey) return;
     const url = assets[currentStep.screenshotKey];
@@ -241,17 +257,55 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
             }
           }
 
-          // masterFrame: real video frame when playing, else screenshot
-          const masterFrame: HTMLVideoElement | HTMLImageElement | null =
-            hasVideo && video && !video.paused && !video.ended
-              ? video
-              : slideImageRef.current;
+          // ── Cross-dissolve: blend old → new screenshot over DISSOLVE_MS ──────
+          // This ensures screenshot never jumps hard; it fades while camera springs.
+          const tRaw   = Math.min(1, (performance.now() - transitionStartRef.current) / DISSOLVE_MS);
+          const tEased = easeInOut(tRaw);
+          const newImgReady = !!slideImageRef.current;
+
+          let masterFrame: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | null;
+
+          if (hasVideo && video && !video.paused && !video.ended) {
+            // Video mode — continuous playback, no dissolve needed
+            masterFrame = video;
+          } else if (!newImgReady && prevSlideImageRef.current) {
+            // New image still loading — hold old frame (no blank flash)
+            masterFrame = prevSlideImageRef.current;
+          } else if (tRaw < 1 && prevSlideImageRef.current && newImgReady) {
+            // Dissolve: blend old screenshot (fading out) with new screenshot (fading in)
+            if (!blendCanvasRef.current) blendCanvasRef.current = document.createElement('canvas');
+            const bc  = blendCanvasRef.current;
+            const bw  = (prevSlideImageRef.current as HTMLImageElement).naturalWidth  || 1440;
+            const bh  = (prevSlideImageRef.current as HTMLImageElement).naturalHeight || 900;
+            if (bc.width !== bw || bc.height !== bh) { bc.width = bw; bc.height = bh; }
+            const bctx = bc.getContext('2d')!;
+            bctx.clearRect(0, 0, bw, bh);
+            bctx.globalAlpha = 1 - tEased;
+            bctx.drawImage(prevSlideImageRef.current, 0, 0, bw, bh);
+            bctx.globalAlpha = tEased;
+            bctx.drawImage(slideImageRef.current!, 0, 0, bw, bh);
+            bctx.globalAlpha = 1;
+            masterFrame = bc;
+          } else {
+            masterFrame = slideImageRef.current;
+          }
+
+          // ── Cursor lerp: move cursor from old position to new in sync ────────
+          // Without this, cursor jumps to new coords while camera still pans there.
+          const leaving    = leavingStepRef.current;
+          const renderStep = (tRaw < 1 && leaving?.coordinates && step?.coordinates)
+            ? { ...step, coordinates: {
+                ...step.coordinates,
+                x: lerp(leaving.coordinates.x, step.coordinates.x, tEased),
+                y: lerp(leaving.coordinates.y, step.coordinates.y, tEased),
+              }}
+            : step;
 
           renderer.render(
             ctx,
             {
               dimensions: { width: cW, height: cH },
-              step,
+              step: renderStep,
               prevStep: stepsRef.current[currentIdxRef.current - 1] ?? null,
               progress: 1.0,
               theme: { primaryColor: '#5E5CE6' },
