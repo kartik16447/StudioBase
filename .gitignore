@@ -10,3 +10,5 @@ dist/
 backend/test.db
 extension/dist.crx
 
+.vercel
+.claude/settings.local.json
