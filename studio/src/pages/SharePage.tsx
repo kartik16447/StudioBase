@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { I } from '../components/icons';
 import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
@@ -15,6 +15,8 @@ interface PublicStep {
   elementText?: string;
   action?: string;
   url?: string;
+  coordinates?: { x: number; y: number; viewportWidth: number; viewportHeight: number } | null;
+  animationTarget?: { centerX: number; centerY: number; zoomScale: number; transitionType?: string } | null;
 }
 
 interface PublicSession {
@@ -51,7 +53,6 @@ const PublicStepCard: React.FC<{ step: PublicStep; index: number; assets?: Recor
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      {/* Screenshot */}
       {screenshotUrl && (
         <div className="bg-gray-50 border-b border-gray-100">
           <img
@@ -63,11 +64,8 @@ const PublicStepCard: React.FC<{ step: PublicStep; index: number; assets?: Recor
           {!imgLoaded && <div className="w-full aspect-video bg-gray-100 animate-pulse" />}
         </div>
       )}
-
-      {/* Content */}
       <div className="px-7 py-5">
         <div className="flex items-start gap-3">
-          {/* Step number badge */}
           <div className="flex-shrink-0 w-7 h-7 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center">
             <span className="text-[11px] font-bold text-indigo-600">{index + 1}</span>
           </div>
@@ -95,6 +93,179 @@ const ChapterDivider: React.FC<{ title: string; index: number }> = ({ title, ind
   </div>
 );
 
+// ─── VideoPlayer ──────────────────────────────────────────────────────────────
+
+const VideoPlayer: React.FC<{ steps: PublicStep[]; assets?: Record<string, string> }> = ({ steps, assets }) => {
+  const stepsWithScreenshots = steps.filter(s => s.screenshotKey && assets?.[s.screenshotKey]);
+  const [current, setCurrent] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0); // 0–100
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const STEP_DURATION_MS = 3000; // 3s per step
+  const progressRef = useRef(0);
+  const startTimeRef = useRef(0);
+
+  const goTo = useCallback((idx: number) => {
+    setCurrent(idx);
+    setProgress(0);
+    progressRef.current = 0;
+  }, []);
+
+  const advance = useCallback(() => {
+    setCurrent(prev => {
+      const next = prev + 1;
+      if (next >= stepsWithScreenshots.length) {
+        setPlaying(false);
+        return prev;
+      }
+      setProgress(0);
+      progressRef.current = 0;
+      return next;
+    });
+  }, [stepsWithScreenshots.length]);
+
+  useEffect(() => {
+    if (!playing) {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      return;
+    }
+    startTimeRef.current = Date.now() - (progressRef.current / 100) * STEP_DURATION_MS;
+    intervalRef.current = setInterval(() => {
+      const elapsed = Date.now() - startTimeRef.current;
+      const pct = Math.min((elapsed / STEP_DURATION_MS) * 100, 100);
+      progressRef.current = pct;
+      setProgress(pct);
+      if (pct >= 100) {
+        advance();
+        startTimeRef.current = Date.now();
+      }
+    }, 50);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, [playing, current, advance]);
+
+  if (stepsWithScreenshots.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+        <I.Video size={32} className="mb-3 opacity-40" />
+        <p className="text-sm">No screenshots available for video playback.</p>
+      </div>
+    );
+  }
+
+  const step = stepsWithScreenshots[current];
+  const screenshotUrl = step.screenshotKey ? assets?.[step.screenshotKey] : null;
+  const title = step.stepTitle || step.elementText || `Step ${current + 1}`;
+  const text = step.textOverride || step.generatedText || '';
+
+  // Compute zoom/pan from animationTarget or coordinates
+  const target = step.animationTarget;
+  const coords = step.coordinates;
+  let transform = 'scale(1) translate(0, 0)';
+  if (playing && target) {
+    const scale = target.zoomScale || 2;
+    const tx = (50 - target.centerX) * (scale - 1) / scale;
+    const ty = (50 - target.centerY) * (scale - 1) / scale;
+    transform = `scale(${scale}) translate(${tx}%, ${ty}%)`;
+  } else if (playing && coords) {
+    const scale = 2;
+    const cx = (coords.x / (coords.viewportWidth || 1440)) * 100;
+    const cy = (coords.y / (coords.viewportHeight || 900)) * 100;
+    const tx = (50 - cx) * (scale - 1) / scale;
+    const ty = (50 - cy) * (scale - 1) / scale;
+    transform = `scale(${scale}) translate(${tx}%, ${ty}%)`;
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Screen */}
+      <div className="bg-black rounded-2xl overflow-hidden aspect-video relative select-none">
+        {screenshotUrl ? (
+          <img
+            key={step.id}
+            src={screenshotUrl}
+            alt={title}
+            className="w-full h-full object-contain transition-transform duration-700 ease-in-out"
+            style={{ transform, transformOrigin: 'center center' }}
+            draggable={false}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-gray-600">
+            <I.Image size={40} className="opacity-30" />
+          </div>
+        )}
+
+        {/* Step counter overlay */}
+        <div className="absolute top-3 right-3 px-2.5 py-1 bg-black/50 rounded-full text-white text-[11px] font-semibold backdrop-blur-sm">
+          {current + 1} / {stepsWithScreenshots.length}
+        </div>
+
+        {/* Step caption */}
+        {text && (
+          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent px-5 pb-4 pt-8">
+            <p className="text-white text-[13px] font-medium leading-snug line-clamp-2">{text}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Progress bar */}
+      <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+        <div
+          className="h-full bg-indigo-500 transition-none rounded-full"
+          style={{ width: `${((current / stepsWithScreenshots.length) + (progress / 100) * (1 / stepsWithScreenshots.length)) * 100}%` }}
+        />
+      </div>
+
+      {/* Controls */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => goTo(Math.max(0, current - 1))}
+          disabled={current === 0}
+          className="w-9 h-9 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 disabled:opacity-30 transition-colors"
+        >
+          <I.ChevronLeft size={18} />
+        </button>
+
+        <button
+          onClick={() => setPlaying(p => !p)}
+          className="flex-1 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center gap-2 text-[13px] font-semibold hover:bg-indigo-700 transition-colors"
+        >
+          {playing ? <><I.Pause size={15} /> Pause</> : <><I.Play size={15} /> {current === stepsWithScreenshots.length - 1 ? 'Replay' : 'Play cinematic'}</>}
+        </button>
+
+        <button
+          onClick={() => goTo(Math.min(stepsWithScreenshots.length - 1, current + 1))}
+          disabled={current === stepsWithScreenshots.length - 1}
+          className="w-9 h-9 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 disabled:opacity-30 transition-colors"
+        >
+          <I.ChevronRight size={18} />
+        </button>
+      </div>
+
+      {/* Step strip */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+        {stepsWithScreenshots.map((s, i) => {
+          const url = s.screenshotKey ? assets?.[s.screenshotKey] : null;
+          return (
+            <button
+              key={s.id}
+              onClick={() => { goTo(i); setPlaying(false); }}
+              className={cn(
+                'flex-shrink-0 w-16 h-10 rounded-lg overflow-hidden border-2 transition-all',
+                i === current ? 'border-indigo-500 opacity-100' : 'border-transparent opacity-50 hover:opacity-80'
+              )}
+            >
+              {url
+                ? <img src={url} alt="" className="w-full h-full object-cover" />
+                : <div className="w-full h-full bg-gray-200 flex items-center justify-center text-[9px] text-gray-400">{i + 1}</div>
+              }
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // ─── SharePage ────────────────────────────────────────────────────────────────
 
 export const SharePage: React.FC = () => {
@@ -104,6 +275,7 @@ export const SharePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<'guide' | 'video'>('guide');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -117,7 +289,6 @@ export const SharePage: React.FC = () => {
 
     const load = async () => {
       try {
-        // 1. Fetch public metadata
         const meta = await fetch(`${BACKEND_URL}/v1/public/${shareToken}`).then(r => r.json()) as any;
         if (meta.error) throw new Error(meta.error);
 
@@ -126,7 +297,6 @@ export const SharePage: React.FC = () => {
 
         if (!meta.sessionJsonUrl) throw new Error('Session not ready.');
 
-        // 2. Fetch public session JSON (with rewritten asset URLs)
         const data = await fetch(meta.sessionJsonUrl).then(r => r.json()) as PublicSession;
         setSession(data);
       } catch (e: any) {
@@ -173,7 +343,7 @@ export const SharePage: React.FC = () => {
         </div>
         <h2 className="text-xl font-semibold text-gray-900 mb-2">Walkthrough unavailable</h2>
         <p className="text-sm text-gray-500 max-w-xs">{error || 'This link may have expired or been made private.'}</p>
-        <a href="https://studio.studiobase.app" className="mt-6 text-sm font-medium text-indigo-600 hover:underline">
+        <a href="https://studiobase-umber.vercel.app" className="mt-6 text-sm font-medium text-indigo-600 hover:underline">
           Create your own walkthrough →
         </a>
       </div>
@@ -188,6 +358,7 @@ export const SharePage: React.FC = () => {
   const chapterMap = new Map((session.metadata?.chapterBreaks || []).map(c => [c.afterStepId, c]));
   let chapterIndex = 1;
   const siteDomain = domain(session.capturedUrl);
+  const hasScreenshots = steps.some(s => s.screenshotKey && session.assets?.[s.screenshotKey]);
 
   return (
     <div className="min-h-screen bg-[#fafafa]">
@@ -215,7 +386,7 @@ export const SharePage: React.FC = () => {
               {copied ? 'Copied!' : 'Copy link'}
             </button>
             <a
-              href="https://studio.studiobase.app"
+              href="https://studiobase-umber.vercel.app"
               className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[13px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors"
             >
               Create for free
@@ -267,21 +438,57 @@ export const SharePage: React.FC = () => {
         {/* Divider */}
         <div className="h-px bg-gray-200 my-8" />
 
-        {/* Steps */}
-        <div className="space-y-4">
-          {steps.map((step, i) => (
-            <React.Fragment key={step.id || i}>
-              {/* Chapter break BEFORE this step */}
-              {chapterMap.has(step.id) && (
-                <ChapterDivider
-                  title={chapterMap.get(step.id)!.chapterTitle}
-                  index={chapterIndex++}
-                />
+        {/* ── Tabs ── */}
+        {hasScreenshots && (
+          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl mb-8 w-fit">
+            <button
+              onClick={() => setActiveTab('guide')}
+              className={cn(
+                'flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold transition-all',
+                activeTab === 'guide'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
               )}
-              <PublicStepCard step={step} index={i} assets={session.assets} />
-            </React.Fragment>
-          ))}
-        </div>
+            >
+              <I.List size={14} />
+              Step Guide
+            </button>
+            <button
+              onClick={() => setActiveTab('video')}
+              className={cn(
+                'flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold transition-all',
+                activeTab === 'video'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              )}
+            >
+              <I.Play size={14} />
+              Cinematic
+            </button>
+          </div>
+        )}
+
+        {/* ── Guide Tab ── */}
+        {activeTab === 'guide' && (
+          <div className="space-y-4">
+            {steps.map((step, i) => (
+              <React.Fragment key={step.id || i}>
+                {chapterMap.has(step.id) && (
+                  <ChapterDivider
+                    title={chapterMap.get(step.id)!.chapterTitle}
+                    index={chapterIndex++}
+                  />
+                )}
+                <PublicStepCard step={step} index={i} assets={session.assets} />
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+
+        {/* ── Video Tab ── */}
+        {activeTab === 'video' && (
+          <VideoPlayer steps={steps} assets={session.assets} />
+        )}
 
         {/* Footer */}
         <div className="mt-16 pt-8 border-t border-gray-100 flex flex-col items-center gap-3 text-center">
@@ -292,7 +499,7 @@ export const SharePage: React.FC = () => {
             Made with <span className="font-semibold text-gray-700">StudioBase</span>
           </p>
           <a
-            href="https://studio.studiobase.app"
+            href="https://studiobase-umber.vercel.app"
             className="text-[13px] font-semibold text-indigo-600 hover:underline"
           >
             Create your own walkthrough →
