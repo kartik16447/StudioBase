@@ -1,5 +1,4 @@
 import { CinematicMath } from './CinematicMath';
-import { RenderConstants } from './RenderConstants';
 
 const CANVAS_W = 1280;
 const CANVAS_H = 720;
@@ -74,8 +73,6 @@ export async function exportScreenshotsToVideo(
   recorder.start();
 
   // ── 3. Render each step ────────────────────────────────────────────────────
-  const padding = RenderConstants.SCREENSHOT_PADDING ?? 0.06;
-
   async function renderFrames(count: number, draw: (progress: number) => void) {
     for (let f = 0; f < count; f++) {
       draw(f / Math.max(count - 1, 1));
