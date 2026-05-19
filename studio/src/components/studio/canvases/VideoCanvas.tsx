@@ -691,8 +691,9 @@ export const VideoCanvas: React.FC = () => {
         }
       }
 
-      // ── Slideshow auto-advance — respects voiceover duration + playback rate ──
-      if (renderMode === 'slideshow' && isPlaying) {
+      // ── Slideshow auto-advance — runs in slideshow mode OR hybrid with no video ──
+      const usesSlideshowAdvance = renderMode === 'slideshow' || (renderMode === 'hybrid' && !hybridVideoUrl);
+      if (usesSlideshowAdvance && isPlaying) {
         const elapsed   = performance.now() - stepStartWall.current;
         const stepMs    = Math.max(2000, currentStep?.voiceoverDurationMs || 3500);
         const effectiveMs = stepMs / (playbackRate || 1);
