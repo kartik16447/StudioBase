@@ -902,8 +902,8 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
 
             {/* Right: transcript sidebar */}
             <div className="w-full lg:w-[300px] flex-shrink-0 lg:sticky lg:top-[72px]">
-              <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl flex flex-col"
-                style={{ maxHeight: 'calc(100vh - 100px)' }}>
+              <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl flex flex-col overflow-hidden"
+                style={{ height: 'calc(100vh - 100px)' }}>
                 <TranscriptPanel
                   steps={steps} assets={assets}
                   currentIndex={currentIndex} chapterMap={chapterMap}
