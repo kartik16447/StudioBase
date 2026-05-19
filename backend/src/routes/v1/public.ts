@@ -31,7 +31,7 @@ publicRoutes.get('/:shareToken', async (c) => {
   if (!session) return c.json({ error: 'Not found' }, 404);
 
   const owner = await c.env.DB.prepare(
-    `SELECT displayName, email FROM users WHERE id = ?`
+    `SELECT name, email FROM users WHERE id = ?`
   ).bind(session.ownerId).first<any>();
 
   const origin = new URL(c.req.url).origin;
@@ -47,7 +47,7 @@ publicRoutes.get('/:shareToken', async (c) => {
     status: session.status,
     sessionJsonUrl,
     owner: owner
-      ? { name: owner.displayName || owner.email?.split('@')[0] || 'Anonymous' }
+      ? { name: owner.name || owner.email?.split('@')[0] || 'Anonymous' }
       : { name: 'Anonymous' },
   });
 });
