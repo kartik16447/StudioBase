@@ -11,6 +11,7 @@ import { CinematicMath } from '../../../modules/render-engine/CinematicMath';
 import { TelemetryService } from '../../../services/TelemetryService';
 import { analyticsClient } from '../../../lib/analyticsClient';
 import { EmbedModal } from '../panels/EmbedModal';
+import { exportScreenshotsToVideo } from '../../../modules/render-engine/VideoExporter';
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -456,6 +457,8 @@ export const VideoCanvas: React.FC = () => {
   const [embedOpen, setEmbedOpen] = useState(false);
   const [isEnded, setIsEnded]     = useState(false);
   const [audioEl] = useState(() => new Audio());
+  const [screenshotExporting, setScreenshotExporting] = useState(false);
+  const [screenshotProgress, setScreenshotProgress]   = useState('');
 
   // PATCH 4: Intro / Outro slide state
   const [showIntroSlide, setShowIntroSlide] = useState(false);
@@ -1117,12 +1120,29 @@ export const VideoCanvas: React.FC = () => {
             Embed
           </Button>
           <Button
-            variant="primary" size="sm" icon={I.Video}
-            disabled={isExporting}
+            variant="primary" size="sm" icon={I.Download}
+            disabled={screenshotExporting || isExporting}
             className="shrink-0"
-            onClick={() => handleSOPVideoExport({ session, theme: brand, renderMode: 'slideshow' })}
+            title="Export session as WebM video (uses screenshots)"
+            onClick={async () => {
+              if (screenshotExporting) return;
+              setScreenshotExporting(true);
+              setScreenshotProgress('Loading…');
+              try {
+                await exportScreenshotsToVideo(session, (p) => {
+                  if (p.phase === 'loading') setScreenshotProgress(`Loading ${p.step}/${p.total}…`);
+                  else if (p.phase === 'rendering') setScreenshotProgress(`Rendering ${p.step}/${p.total}…`);
+                  else setScreenshotProgress('Finishing…');
+                });
+              } catch (e: any) {
+                alert(`Export failed: ${e.message}`);
+              } finally {
+                setScreenshotExporting(false);
+                setScreenshotProgress('');
+              }
+            }}
           >
-            {isExporting ? 'Exporting…' : 'Export'}
+            {screenshotExporting ? screenshotProgress : 'Export Video'}
           </Button>
         </div>
       </div>

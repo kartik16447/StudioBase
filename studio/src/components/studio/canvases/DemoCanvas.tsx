@@ -63,7 +63,7 @@ export const DemoCanvas: React.FC = () => {
 
   if (!session || !step) return null;
 
-  const coords = step.data?.coordinates;
+  const coords = step.coordinates || step.data?.coordinates;
   const hotspotX = coords ? (coords.x / (coords.viewportWidth || 1440)) * 100 : 50;
   const hotspotY = coords ? (coords.y / (coords.viewportHeight || 900)) * 100 : 50;
   const stepText = step.textOverride || step.generatedText || '';

@@ -28,7 +28,8 @@ export const ASSET_URL_TTL_SECONDS = 3600; // 1 hour
 
 export const PLAYER_BASE_URL = "https://player.studiobase.app";
 
-export const DEV_MODE = false; // set false before deploying to production
+// Vite replaces import.meta.env.DEV at build time; esbuild defines it via build.mjs
+export const DEV_MODE: boolean = (import.meta as any).env?.DEV === true;
 
 export const BACKEND_URL: string = DEV_MODE
   ? "http://localhost:8787"

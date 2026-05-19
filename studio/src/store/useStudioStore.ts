@@ -288,6 +288,21 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         return;
       }
 
+      // Light-normalize R2 steps that arrived as raw event objects (no id, have 'type' not 'action')
+      if (Array.isArray(sessionData.steps)) {
+        sessionData.steps = sessionData.steps.map((s: any, i: number) => ({
+          ...s,
+          id: s.id || `step-${i}`,
+          sequence: s.sequence ?? i + 1,
+          action: s.action || s.type || 'click',
+          coordinates: s.coordinates || s.data?.coordinates || null,
+          generatedText: s.generatedText || s.data?.generatedText || null,
+          animationTarget: s.animationTarget || s.data?.animationTarget || null,
+          screenshotKey: s.screenshotKey || s.data?.screenshotKey || null,
+          annotations: s.annotations || [],
+        }));
+      }
+
       if (!sessionData.aiOutputs) {
         sessionData.aiOutputs = { title: (sessionData as any).title || 'Untitled', summary: '', tags: [] };
       }

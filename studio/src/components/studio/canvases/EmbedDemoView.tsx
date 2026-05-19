@@ -107,7 +107,7 @@ export const EmbedDemoView: React.FC = () => {
                   src={screenshotUrl}
                   alt={`Step ${idx + 1}`}
                   className={cn(
-                    'absolute inset-0 w-full h-full object-cover transition-opacity duration-300',
+                    'absolute inset-0 w-full h-full object-contain transition-opacity duration-300',
                     imgLoaded ? 'opacity-100' : 'opacity-0',
                   )}
                   onLoad={() => setImgLoaded(true)}
