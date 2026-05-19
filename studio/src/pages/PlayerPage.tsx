@@ -491,6 +491,7 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
             </div>
           )}
         </div>
+      </div>
     </div>
   );
 };
