@@ -106,13 +106,13 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
                   <button
                     onClick={togglePublic}
                     disabled={loading}
-                    className={`relative w-10 h-6 rounded-full transition-colors flex-shrink-0 ${
+                    className={`relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0 overflow-hidden ${
                       shareState.isPublic ? 'bg-primary' : 'bg-white/[0.12]'
-                    } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    } ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                   >
                     <span
-                      className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                        shareState.isPublic ? 'translate-x-5' : 'translate-x-1'
+                      className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow-sm transition-transform duration-200 ${
+                        shareState.isPublic ? 'translate-x-[1.375rem]' : 'translate-x-0'
                       }`}
                     />
                   </button>
