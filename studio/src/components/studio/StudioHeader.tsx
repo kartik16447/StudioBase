@@ -67,8 +67,8 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
           <div className="w-px h-6 bg-border shrink-0" />
           <div className="flex items-center bg-surface-2 rounded-pill p-0.5 relative shrink-0">
             {([
-              { id: 'hybrid', icon: I.Video, label: 'Video' },
-              { id: 'slideshow', icon: I.Layers, label: 'Slides' },
+              { id: 'slideshow', icon: I.Video, label: 'Video' },
+              { id: 'hybrid', icon: I.Layers, label: 'With Recording' },
             ] as const).map(({ id, icon: Icon, label }) => (
               <button
                 key={id}
