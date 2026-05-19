@@ -68,6 +68,11 @@ publicRoutes.get('/:shareToken/json', async (c) => {
   const origin = new URL(c.req.url).origin;
   const assets: Record<string, string> = {};
 
+  // Expose raw screen recording video through the public proxy
+  if (json.videoKey && typeof json.videoKey === 'string') {
+    assets[json.videoKey] = `${origin}/v1/public/${shareToken}/asset/${encodeURIComponent(json.videoKey)}`;
+  }
+
   // Pass 1: per-step screenshotKey (set by older pipeline versions)
   if (Array.isArray(json.steps)) {
     for (const step of json.steps) {

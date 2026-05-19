@@ -72,6 +72,8 @@ interface PlayerProps {
   currentIndex: number;
   isPlaying: boolean;
   speed: number;
+  videoUrl: string | null;       // raw screen recording URL (if available)
+  sessionStartMs: number;        // epoch ms when recording started (for video seek sync)
   onSeek: (idx: number) => void;
   onTogglePlay: () => void;
   onPrev: () => void;
@@ -81,10 +83,12 @@ interface PlayerProps {
 
 const CinematicVideoPlayer: React.FC<PlayerProps> = ({
   steps, assets, currentIndex, isPlaying, speed,
+  videoUrl, sessionStartMs,
   onSeek, onTogglePlay, onPrev, onNext, onSpeedChange,
 }) => {
   const containerRef  = useRef<HTMLDivElement>(null);
   const canvasRef     = useRef<HTMLCanvasElement>(null);
+  const videoRef      = useRef<HTMLVideoElement>(null);
   const slideImageRef = useRef<HTMLImageElement | null>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const stepStartWall  = useRef(performance.now());
@@ -96,18 +100,22 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
   const [isEnded, setIsEnded] = useState(false);
 
   // Refs for RAF loop (avoids stale closures)
-  const isPlayingRef    = useRef(isPlaying);
-  const currentIdxRef   = useRef(currentIndex);
-  const speedRef        = useRef(speed);
-  const stepsRef        = useRef(steps);
-  const onNextRef       = useRef(onNext);
-  const onToggleRef     = useRef(onTogglePlay);
-  useEffect(() => { isPlayingRef.current    = isPlaying;    }, [isPlaying]);
-  useEffect(() => { currentIdxRef.current   = currentIndex; }, [currentIndex]);
-  useEffect(() => { speedRef.current        = speed;        }, [speed]);
-  useEffect(() => { stepsRef.current        = steps;        }, [steps]);
-  useEffect(() => { onNextRef.current       = onNext;       }, [onNext]);
-  useEffect(() => { onToggleRef.current     = onTogglePlay; }, [onTogglePlay]);
+  const isPlayingRef      = useRef(isPlaying);
+  const currentIdxRef     = useRef(currentIndex);
+  const speedRef          = useRef(speed);
+  const stepsRef          = useRef(steps);
+  const onNextRef         = useRef(onNext);
+  const onToggleRef       = useRef(onTogglePlay);
+  const sessionStartMsRef = useRef(sessionStartMs);
+  const videoUrlRef       = useRef(videoUrl);
+  useEffect(() => { isPlayingRef.current      = isPlaying;      }, [isPlaying]);
+  useEffect(() => { currentIdxRef.current     = currentIndex;   }, [currentIndex]);
+  useEffect(() => { speedRef.current          = speed;          }, [speed]);
+  useEffect(() => { stepsRef.current          = steps;          }, [steps]);
+  useEffect(() => { onNextRef.current         = onNext;         }, [onNext]);
+  useEffect(() => { onToggleRef.current       = onTogglePlay;   }, [onTogglePlay]);
+  useEffect(() => { sessionStartMsRef.current = sessionStartMs; }, [sessionStartMs]);
+  useEffect(() => { videoUrlRef.current       = videoUrl;       }, [videoUrl]);
 
   // ── Camera springs (framer-motion — matches dashboard exactly) ──────────────
   const { stiffness: sxy, damping: dxy, mass: mxy } = RenderConstants.CAMERA_XY_SPRING;
@@ -119,11 +127,18 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
   const currentStep = steps[currentIndex];
   const prevStep    = steps[currentIndex - 1] ?? null;
 
-  // Reset step wall-clock timer on step change
+  // Reset step wall-clock timer on step change; seek video to step position
   useEffect(() => {
     stepStartWall.current = performance.now();
     setIsEnded(false);
-  }, [currentIndex]);
+    // Seek video to the relative timestamp of this step
+    if (videoRef.current && videoUrl && currentStep?.timestamp) {
+      const relSec = Math.max(0, (currentStep.timestamp - sessionStartMs) / 1000);
+      if (Math.abs(videoRef.current.currentTime - relSec) > 0.2) {
+        videoRef.current.currentTime = relSec;
+      }
+    }
+  }, [currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Camera spring target on step change (mirrors VideoCanvas exactly)
   useEffect(() => {
@@ -179,28 +194,58 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
         }
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          // Auto-advance + progress bar (all via refs, no stale closure issues)
+          const video     = videoRef.current;
+          const hasVideo  = !!(videoUrlRef.current && video);
+
+          // Auto-advance + progress bar
           if (isPlayingRef.current) {
-            const elapsed = performance.now() - stepStartWall.current;
-            const stepMs  = STEP_MS / speedRef.current;
+            const ci  = currentIdxRef.current;
+            const len = stepsRef.current.length;
 
-            // Direct DOM update — no React re-render, buttery smooth
-            if (progressBarRef.current) {
-              const ci  = currentIdxRef.current;
-              const len = stepsRef.current.length;
-              const pct = Math.min(100, ((ci + Math.min(elapsed / stepMs, 1)) / len) * 100);
-              progressBarRef.current.style.width = `${pct}%`;
-            }
+            if (hasVideo && video) {
+              // ── Video-driven advance: sync steps to video.currentTime ──────
+              const videoMs   = video.currentTime * 1000;
+              const nextStep  = stepsRef.current[ci + 1];
+              if (nextStep?.timestamp) {
+                const nextRelMs = nextStep.timestamp - sessionStartMsRef.current;
+                if (videoMs >= nextRelMs) {
+                  stepStartWall.current = performance.now();
+                  onNextRef.current();
+                }
+              }
+              if (!nextStep && video.ended) {
+                onToggleRef.current();
+              }
+              // Progress bar based on video duration
+              if (progressBarRef.current && video.duration) {
+                progressBarRef.current.style.width = `${Math.min(100, (video.currentTime / video.duration) * 100)}%`;
+              }
+            } else {
+              // ── Slideshow fallback: fixed timing ──────────────────────────
+              const elapsed = performance.now() - stepStartWall.current;
+              const stepMs  = STEP_MS / speedRef.current;
 
-            if (elapsed >= stepMs) {
-              stepStartWall.current = performance.now(); // reset before calling onNext
-              if (currentIdxRef.current < stepsRef.current.length - 1) {
-                onNextRef.current();
-              } else {
-                onToggleRef.current(); // stop at end
+              if (progressBarRef.current) {
+                const pct = Math.min(100, ((ci + Math.min(elapsed / stepMs, 1)) / len) * 100);
+                progressBarRef.current.style.width = `${pct}%`;
+              }
+
+              if (elapsed >= stepMs) {
+                stepStartWall.current = performance.now();
+                if (ci < len - 1) {
+                  onNextRef.current();
+                } else {
+                  onToggleRef.current();
+                }
               }
             }
           }
+
+          // masterFrame: real video frame when playing, else screenshot
+          const masterFrame: HTMLVideoElement | HTMLImageElement | null =
+            hasVideo && video && !video.paused && !video.ended
+              ? video
+              : slideImageRef.current;
 
           renderer.render(
             ctx,
@@ -210,7 +255,7 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
               prevStep: stepsRef.current[currentIdxRef.current - 1] ?? null,
               progress: 1.0,
               theme: { primaryColor: '#5E5CE6' },
-              renderMode: 'slideshow',
+              renderMode: hasVideo ? 'hybrid' : 'slideshow',
               camera: {
                 pctX:  camX.get(),
                 pctY:  camY.get(),
@@ -218,7 +263,7 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
               },
               timeMs: performance.now(),
             },
-            slideImageRef.current,
+            masterFrame,
           );
         }
       }
@@ -230,6 +275,18 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
     return () => cancelAnimationFrame(rafId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — everything is read via refs
+
+  // ── Video play/pause ────────────────────────────────────────────────────────
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !videoUrl) return;
+    if (isPlaying) v.play().catch(() => {});
+    else v.pause();
+  }, [isPlaying, videoUrl]);
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = speed;
+  }, [speed]);
 
   // ── Auto-hide controls ──────────────────────────────────────────────────────
   const showControlsTemporarily = useCallback(() => {
@@ -269,27 +326,30 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
       onMouseMove={showControlsTemporarily}
       style={{ cursor: isPlaying && !showControls ? 'none' : 'default' }}
     >
-      {/* Rotating border glow shell */}
+      {/* Hidden video element — feeds canvas renderer in hybrid mode */}
+      {videoUrl && (
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          crossOrigin="anonymous"
+          className="hidden"
+          playsInline
+          muted={false}
+          preload="auto"
+        />
+      )}
+
+      {/* Player shell */}
       <div
-        className="relative w-full rounded-[18px] overflow-hidden"
+        className="relative w-full rounded-2xl overflow-hidden"
         style={{
           aspectRatio: '16/9',
-          padding: '1.5px',
-          filter: 'drop-shadow(0 24px 64px rgba(0,0,0,0.80)) drop-shadow(0 0 48px rgba(94,92,230,0.10))',
+          boxShadow: '0 24px 64px rgba(0,0,0,0.70), 0 0 0 1px rgba(94,92,230,0.2)',
         }}
       >
-        {/* Animated conic border (reuses the spin keyframe from index.css) */}
+        {/* Canvas card */}
         <div
-          className="absolute inset-0 rounded-[18px] pointer-events-none"
-          style={{
-            background: 'conic-gradient(from var(--angle, 0deg), transparent 65%, rgba(94,92,230,0.7) 80%, rgba(255,255,255,0.35) 86%, rgba(139,92,246,0.7) 92%, transparent 100%)',
-            animation: 'spin 4s linear infinite',
-          }}
-        />
-
-        {/* Inner canvas card */}
-        <div
-          className="absolute inset-[1.5px] rounded-2xl overflow-hidden bg-[#12121a]"
+          className="absolute inset-0 rounded-2xl overflow-hidden bg-[#12121a]"
           onClick={() => { if (!isEnded) onTogglePlay(); }}
           style={{ cursor: 'pointer' }}
         >
@@ -431,7 +491,6 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
             </div>
           )}
         </div>
-      </div>
     </div>
   );
 };
@@ -647,9 +706,17 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const steps  = session?.steps  || [];
   const assets = session?.assets || {};
 
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
   const goTo = useCallback((idx: number) => {
-    setCurrentIndex(Math.max(0, Math.min(steps.length - 1, idx)));
-  }, [steps.length]);
+    const clamped = Math.max(0, Math.min(steps.length - 1, idx));
+    setCurrentIndex(clamped);
+    // Seek video to the step's relative position
+    const step = steps[clamped] as any;
+    if (videoElRef.current && step?.timestamp && sessionStartMs) {
+      const relSec = Math.max(0, (step.timestamp - sessionStartMs) / 1000);
+      videoElRef.current.currentTime = relSec;
+    }
+  }, [steps, sessionStartMs]);
 
   const handleSpeedChange = (s: number) => {
     setSpeed(s);
@@ -700,6 +767,11 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const summary      = session.aiOutputs?.summary;
   const tags         = session.aiOutputs?.tags || [];
   const chapterMap   = buildChapterMap(session.metadata?.chapterBreaks);
+  const videoUrl     = (session as any).videoKey ? assets[(session as any).videoKey] ?? null : null;
+  const sessionStartMs = useMemo(() => {
+    const s = (session as any).startedAt;
+    return s ? new Date(s).getTime() : ((steps[0] as any)?.timestamp || 0);
+  }, [session, steps]);
   const currentStep  = steps[currentIndex];
   const currentTitle = currentStep?.stepTitle || currentStep?.elementText || `Step ${currentIndex + 1}`;
   const currentText  = currentStep?.textOverride || currentStep?.generatedText || '';
@@ -788,6 +860,8 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
                 currentIndex={currentIndex}
                 isPlaying={isPlaying}
                 speed={speed}
+                videoUrl={videoUrl}
+                sessionStartMs={sessionStartMs}
                 onSeek={goTo}
                 onTogglePlay={() => setIsPlaying(p => !p)}
                 onPrev={() => goTo(currentIndex - 1)}
