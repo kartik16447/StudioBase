@@ -14,12 +14,13 @@ function App() {
   });
 
   React.useEffect(() => {
-    chrome.storage.local.get(['sv_accounts']).then(res => {
-      const accounts = res.sv_accounts || [];
-      if (accounts.length > 0) {
-        setSession({
-          user: { email: accounts[0].email, id: accounts[0].id }
-        });
+    chrome.storage.local.get(['sv_user', 'sv_accounts']).then(res => {
+      const user = res.sv_user;
+      const accounts: any[] = res.sv_accounts || [];
+      if (user?.email) {
+        setSession({ user: { email: user.email, id: user.userId || '' } });
+      } else if (accounts.length > 0) {
+        setSession({ user: { email: accounts[0].email, id: accounts[0].id || '' } });
       }
     });
   }, []);

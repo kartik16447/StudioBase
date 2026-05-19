@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ScreenVault | Video Player</title>
+    <link rel="icon" type="image/png" href="icons/icon48.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,17 +13,7 @@
       rel="stylesheet"
     />
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: { sans: ["Inter", "sans-serif"] },
-            colors: { brand: "#ef4444" }, // ScreenVault Red
-          },
-        },
-      };
-    </script>
+    <link rel="stylesheet" href="player.css" />
 
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
 
@@ -67,7 +58,7 @@
     <nav
       class="w-full bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm z-10"
     >
-      <div class="flex items-center gap-2">
+      <a href="https://screenvault.karthik-upadhyay98.workers.dev/" class="flex items-center gap-2 no-underline">
         <div
           class="w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-md"
         >
@@ -76,13 +67,16 @@
         <span class="font-bold text-xl tracking-tight text-gray-900"
           >ScreenVault</span
         >
-      </div>
+      </a>
       <div>
-        <button
-          class="text-sm font-medium bg-gray-900 text-white px-4 py-2 rounded-md transition-colors hover:bg-gray-800 shadow-sm ml-2"
+        <a
+          href="https://chromewebstore.google.com/detail/screenvault/kcjifkhbafhlccnhamlmjlnpdpofdfom"
+          target="_blank"
+          rel="noopener"
+          class="text-sm font-medium bg-gray-900 text-white px-4 py-2 rounded-md transition-colors hover:bg-gray-800 shadow-sm ml-2 inline-block"
         >
           Get the Extension
-        </button>
+        </a>
       </div>
     </nav>
 
@@ -359,18 +353,24 @@
         }
 
         function updateUI() {
-          // Progress Fill
+          const currentMs = video.currentTime * 1000;
+
+          // Resolve total duration: prefer authoritative backend value,
+          // fall back to video.duration once it becomes finite (WebM streams
+          // report Infinity until enough data is buffered).
           let totalMs = authoritativeDurationMs;
-          if (!totalMs && video.duration && isFinite(video.duration)) {
+          if (!totalMs && video.duration && isFinite(video.duration) && video.duration > 0) {
             totalMs = Math.floor(video.duration * 1000);
           }
 
           if (totalMs > 0) {
-            const currentMs = video.currentTime * 1000;
             const progress = (currentMs / totalMs) * 100;
             progressFill.style.width = `${Math.min(100, progress)}%`;
             seekSlider.value = Math.min(1000, (currentMs / totalMs) * 1000);
             timeText.textContent = `${formatTime(currentMs)} / ${formatTime(totalMs)}`;
+          } else {
+            // Duration unknown yet — still show elapsed time so the clock ticks
+            timeText.textContent = formatTime(currentMs);
           }
 
           // Play/Pause Icons
@@ -546,6 +546,44 @@
           }
         });
 
+        // Auto-hide controls during playback after 3s of no mouse movement
+        let hideControlsTimer = null;
+        const controlsBar = document.getElementById("controls-bar");
+
+        function showControls() {
+          videoWrapper.classList.add("controls-visible");
+          if (hideControlsTimer) clearTimeout(hideControlsTimer);
+          hideControlsTimer = null;
+        }
+
+        function scheduleHide() {
+          if (hideControlsTimer) clearTimeout(hideControlsTimer);
+          hideControlsTimer = setTimeout(() => {
+            if (!video.paused) videoWrapper.classList.remove("controls-visible");
+          }, 3000);
+        }
+
+        videoWrapper.addEventListener("mousemove", () => {
+          showControls();
+          if (!video.paused) scheduleHide();
+        });
+
+        videoWrapper.addEventListener("mouseleave", () => {
+          if (!video.paused) {
+            if (hideControlsTimer) clearTimeout(hideControlsTimer);
+            videoWrapper.classList.remove("controls-visible");
+          }
+        });
+
+        video.addEventListener("play", () => {
+          scheduleHide();
+        });
+
+        video.addEventListener("pause", () => {
+          if (hideControlsTimer) clearTimeout(hideControlsTimer);
+          videoWrapper.classList.add("controls-visible");
+        });
+
         // Loop Logic & UI Sync
         video.addEventListener("timeupdate", () => {
           if (previewLoopActive && video.currentTime >= 4) {
@@ -557,6 +595,8 @@
         video.addEventListener("play", updateUI);
         video.addEventListener("pause", updateUI);
         video.addEventListener("volumechange", updateVolumeIcon);
+        video.addEventListener("loadedmetadata", updateUI);
+        video.addEventListener("durationchange", updateUI);
 
         video.addEventListener("canplay", () => {
           loader.style.opacity = "0";
@@ -585,10 +625,16 @@
       });
     </script>
     <style>
-      /* Ensure controls are always visible when paused */
-      #video-wrapper.paused #controls-bar {
-        opacity: 1;
-        pointer-events: auto;
+      /* Show controls when paused or when mouse is active */
+      #video-wrapper.paused #controls-bar,
+      #video-wrapper.controls-visible #controls-bar {
+        opacity: 1 !important;
+        pointer-events: auto !important;
+      }
+
+      /* Hide cursor when controls are hidden during playback */
+      #video-wrapper:not(.paused):not(.controls-visible):not(.preview) {
+        cursor: none;
       }
 
       /* Auto-hide loader the instant video gets .loaded — no JS timing needed */

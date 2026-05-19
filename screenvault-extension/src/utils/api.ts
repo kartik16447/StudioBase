@@ -28,10 +28,6 @@ async function rotateToken(failedToken?: string): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
-    const now = new Date().toISOString();
-    console.group(`[Auth Rotation ${now}]`);
-    console.log(`[Auth ${now}] Token expired, starting rotation`);
-
     try {
       const { sv_user, sv_accounts, lastUsedEmail } = (await chrome.storage.local.get([
         "sv_user",
@@ -39,53 +35,34 @@ async function rotateToken(failedToken?: string): Promise<string | null> {
         "lastUsedEmail"
       ])) as { sv_user?: BackendUser; sv_accounts?: StorageAccount[]; lastUsedEmail?: string };
 
-      if (!sv_user) {
-        console.groupEnd();
-        return null;
-      }
+      if (!sv_user) return null;
 
-      // 1. Build priority list of accounts to try
       const accounts = sv_accounts || [];
       const priorityList: StorageAccount[] = [];
 
-      // Priority 1: Match lastUsedEmail (smart rotation)
       const lastUsed = accounts.find(a => a.email === lastUsedEmail);
       if (lastUsed) priorityList.push(lastUsed);
-
-      // Priority 2: All other accounts
       accounts.forEach(a => {
         if (a.email !== lastUsedEmail) priorityList.push(a);
       });
 
-      // 2. Probe each account
       for (const account of priorityList) {
-        // [Optimization] Skip the token that just failed or the current identity token if they match
         if (account.accessToken === failedToken || account.accessToken === sv_user.accessToken) {
           continue;
         }
 
-        console.log(`[Auth ${now}] Trying token for:`, account.email);
         const isValid = await probeToken(account.accessToken);
-
         if (isValid) {
-          console.log(`[Auth ${now}] Token rotation success:`, account.email);
-          
           const updatedUser: BackendUser = { ...sv_user, accessToken: account.accessToken };
           await chrome.storage.local.set({ sv_user: updatedUser });
-          
-          console.groupEnd();
           return account.accessToken;
-        } else {
-          console.warn(`[Auth ${now}] Token failed:`, account.email);
         }
       }
 
-      console.error(`[Auth ${now}] All tokens invalid, clearing session`);
-      console.groupEnd();
+      console.warn("[Auth] All tokens invalid, session needs refresh");
       return null;
     } catch (err) {
-      console.error(`[Auth ${now}] Token rotation process failed:`, err);
-      console.groupEnd();
+      console.error("[Auth] Token rotation failed:", err);
       return null;
     }
   })();
@@ -100,10 +77,17 @@ async function rotateToken(failedToken?: string): Promise<string | null> {
  * by automatically rotating through other linked Google accounts.
  */
 export async function safeFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const { sv_user } = (await chrome.storage.local.get("sv_user")) as { sv_user?: BackendUser };
+  let { sv_user } = (await chrome.storage.local.get("sv_user")) as { sv_user?: BackendUser };
 
   if (!sv_user?.accessToken) {
-    throw new Error("No session found. Please sign in.");
+    // Try to silently recover via a linked account token before giving up
+    const { sv_accounts } = (await chrome.storage.local.get("sv_accounts")) as { sv_accounts?: StorageAccount[] };
+    const candidate = sv_accounts?.find(a => a.accessToken);
+    if (candidate) {
+      sv_user = { accessToken: candidate.accessToken } as BackendUser;
+    } else {
+      throw new Error("No session found. Please sign in.");
+    }
   }
 
   const sendRequest = (token: string) => {

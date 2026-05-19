@@ -246,7 +246,6 @@ async function selectBestAccount(): Promise<StorageAccount | null> {
   }
 
   if (candidate) {
-    console.log(`[SV][ACTIVE_ACCOUNT_SELECTED] Selection: ${candidate.email}`);
   }
   return candidate;
 }
@@ -560,7 +559,6 @@ chrome.runtime.onMessage.addListener(
     } else if (msg.type === "UPLOAD_PROGRESS") {
       updateState({ uploadProgress: msg.progress });
     } else if (msg.type === "UPLOAD_COMPLETE") {
-      console.log(`[SV][UPLOAD_COMPLETE_SW] sessionId: ${state.sessionId}, Account: ${msg.account}, URL: ${msg.url}`);
       svLog("UPLOAD_COMPLETE_RECEIVED", {
         sessionId: state.sessionId,
         backendVideoId: state.backendVideoId,
@@ -1007,7 +1005,6 @@ async function syncPrimaryAccount(token: string, forceUpdate = false) {
             workspaceRole,
           },
         });
-        console.log("[Auth] Session updated for:", email);
         chrome.runtime.sendMessage({ type: "STATE_UPDATE", state }).catch(() => {});
       }
     }
@@ -1357,7 +1354,6 @@ function stopRecording() {
 
 // Migration and Cleanup Logic
 async function runIdentityMigration() {
-  console.log("[SV][SESSION_MIGRATION] Starting identity authority cleanup...");
   
   try {
     const res = await chrome.storage.local.get(["sv_sessions", "sv_accounts"]);
@@ -1373,7 +1369,6 @@ async function runIdentityMigration() {
     for (const [sessionId, session] of Object.entries(sv_sessions)) {
       // 1. Clean "Unknown Account" strings
       if (session.accountEmail === "Unknown Account") {
-        console.log(`[SV][UNKNOWN_ACCOUNT_CLEANED] Session: ${sessionId}`);
         delete session.accountEmail;
         cleanedCount++;
       }
@@ -1385,7 +1380,6 @@ async function runIdentityMigration() {
       const isSynced = session.backendSynced || session.status === 'ready';
 
       if (isOld && isSynced) {
-        console.log(`[SV][STALE_SESSION_REMOVED] Session: ${sessionId}`);
         staleRemovedCount++;
         continue; // Don't add to updatedSessions
       }
@@ -1394,7 +1388,6 @@ async function runIdentityMigration() {
     }
 
     await chrome.storage.local.set({ sv_sessions: updatedSessions });
-    console.log(`[SV][SESSION_MIGRATION] Completed. Cleaned: ${cleanedCount}, Removed: ${staleRemovedCount}`);
     
   } catch (err) {
     console.error("[SV][SESSION_MIGRATION] Failed:", err);
@@ -1403,12 +1396,10 @@ async function runIdentityMigration() {
 
 // Global Event Listeners
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("[SV] Extension installed/updated. Running migration...");
   runIdentityMigration();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  console.log("[SV] Browser started. Running identity cleanup...");
   runIdentityMigration();
 });
 

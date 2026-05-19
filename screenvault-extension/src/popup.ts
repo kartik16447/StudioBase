@@ -35,9 +35,6 @@ const btnTryAgain = document.getElementById("btn-try-again")!;
 const btnToggleMic = document.getElementById(
   "btn-toggle-mic",
 ) as HTMLButtonElement;
-const btnSkipCountdown = document.getElementById(
-  "btn-skip-countdown",
-) as HTMLButtonElement;
 
 const accountsList = document.getElementById("accounts-list")!;
 const noAccounts = document.getElementById("no-accounts")!;
@@ -49,16 +46,8 @@ const progressPct = document.getElementById("progress-pct")!;
 const uploadAccountLabel = document.getElementById("upload-account-label")!;
 const successMeta = document.getElementById("success-meta")!;
 const errorMessage = document.getElementById("error-message")!;
-const countdownOverlay = document.getElementById(
-  "countdown-overlay",
-) as HTMLElement;
-const countdownNumber = document.getElementById(
-  "countdown-number",
-) as HTMLElement;
 const toast = document.getElementById("toast") as HTMLElement;
 
-let countdownInterval: ReturnType<typeof setInterval> | null = null;
-let pendingCountdownTarget: AppState["target"] | null = null;
 let hasMicPermission = false;
 let isMicEnabled = false;
 let isConnectingAccount = false;
@@ -143,15 +132,6 @@ async function detectMicPermissionState() {
   renderMicToggleState();
 }
 
-function clearCountdown() {
-  if (countdownInterval) {
-    clearInterval(countdownInterval);
-    countdownInterval = null;
-  }
-  pendingCountdownTarget = null;
-  countdownOverlay.style.display = "none";
-}
-
 function sendStartRecording(target: AppState["target"]) {
   const payloadTarget = target
     ? { 
@@ -166,33 +146,14 @@ function sendStartRecording(target: AppState["target"]) {
   });
 }
 
-function startCountdown(target: AppState["target"]) {
+function startRecordingNow(target: AppState["target"]) {
   if (!target) return;
-  clearCountdown();
 
-  // Parallel Path: Start pre-allocation immediately while the user sees the countdown
+  // Pre-allocate in parallel while the picker is open
   chrome.runtime.sendMessage({ type: "PRE_ALLOCATE_AND_COPY" });
 
-  pendingCountdownTarget = target;
-  let seconds = 3;
-  countdownNumber.textContent = String(seconds);
-  countdownOverlay.style.display = "flex";
-
-  countdownInterval = setInterval(() => {
-    seconds -= 1;
-    if (seconds <= 0) {
-      if (countdownInterval) {
-        clearInterval(countdownInterval);
-        countdownInterval = null;
-      }
-      countdownOverlay.style.display = "none";
-      const finalTarget = pendingCountdownTarget;
-      pendingCountdownTarget = null;
-      if (finalTarget) sendStartRecording(finalTarget);
-      return;
-    }
-    countdownNumber.textContent = String(seconds);
-  }, 1000);
+  // Send immediately — screen picker appears right away
+  sendStartRecording(target);
 }
 
 function handleInstantLink(url: string) {
@@ -406,7 +367,7 @@ btnConnect.addEventListener("click", () => {
 
 btnNewRecording.addEventListener("click", () => {
   if (accounts.length > 0) {
-    startCountdown({});
+    startRecordingNow({});
   } else {
     alert("Please connect a Google Drive account first.");
   }
@@ -419,17 +380,6 @@ btnToggleMic.addEventListener("click", async () => {
   }
   isMicEnabled = !isMicEnabled;
   renderMicToggleState();
-});
-
-btnSkipCountdown.addEventListener("click", () => {
-  if (countdownInterval) {
-    clearInterval(countdownInterval);
-    countdownInterval = null;
-  }
-  countdownOverlay.style.display = "none";
-  const target = pendingCountdownTarget;
-  pendingCountdownTarget = null;
-  if (target) sendStartRecording(target);
 });
 
 btnStop.addEventListener("click", () => {

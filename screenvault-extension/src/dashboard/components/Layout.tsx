@@ -18,16 +18,17 @@ export function Layout({ session }: { session: any }) {
   useEffect(() => {
     async function init() {
       const storage = await chrome.storage.local.get(['sv_user']);
-      if (storage.sv_user) {
-        setActiveWorkspaceId(storage.sv_user.workspaceId);
-      }
+      if (!storage.sv_user?.accessToken) return;
+
+      setActiveWorkspaceId(storage.sv_user.workspaceId);
 
       try {
         const res = await safeFetch('https://screenvault-backend.karthik-upadhyay98.workers.dev/workspaces');
+        if (!res.ok) return;
         const data = await res.json();
         setWorkspaces(data.workspaces || []);
-      } catch (err) {
-        console.warn('Failed to fetch workspaces:', err);
+      } catch {
+        // silently ignore — user will see workspace once token is refreshed
       }
     }
     init();

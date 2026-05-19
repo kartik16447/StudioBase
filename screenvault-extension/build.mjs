@@ -1,5 +1,10 @@
 import * as esbuild from 'esbuild'
 import fs from 'fs';
+import { execSync } from 'child_process';
+
+// ─── Change the app name here, it propagates everywhere ───────────────────────
+const APP_NAME = 'RecVault Beta';
+// ──────────────────────────────────────────────────────────────────────────────
 
 const shared = {
   bundle: true,
@@ -35,6 +40,22 @@ const staticFiles = [
 ];
 
 for (const [src, dest] of staticFiles) {
-  fs.copyFileSync(src, dest);
+  if (src === 'manifest.json') {
+    // Strip the `key` field (not allowed on CWS) and apply APP_NAME
+    const manifest = JSON.parse(fs.readFileSync(src, 'utf8'));
+    delete manifest.key;
+    manifest.name = APP_NAME;
+    fs.writeFileSync(dest, JSON.stringify(manifest, null, 2));
+  } else {
+    const content = fs.readFileSync(src, 'utf8').replaceAll('ScreenVault', APP_NAME);
+    fs.writeFileSync(dest, content);
+  }
 }
+
+// Privacy page served at /privacy
+fs.mkdirSync('dist/privacy', { recursive: true });
+fs.copyFileSync('src/privacy.html', 'dist/privacy/index.html');
+
+// Generate Tailwind CSS for the player page (replaces CDN script)
+execSync('./node_modules/.bin/tailwindcss -i src/player.css -o dist/player.css --minify', { stdio: 'inherit' });
 

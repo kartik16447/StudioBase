@@ -9,8 +9,6 @@ export async function preAllocateDriveFile(account: StorageAccount, accessToken?
   const now = new Date().toISOString().slice(0, 10);
   const fileName = `screenvault-${now}.webm`;
   
-  console.log(`[SV][PRE_ALLOCATE_START] Account: ${account.email}, Folder: ${options?.folderId || 'Root'}`);
-
   // 1. Create metadata-only file
   const metadata: any = { name: fileName, mimeType: 'video/webm' };
   
@@ -39,7 +37,6 @@ export async function preAllocateDriveFile(account: StorageAccount, accessToken?
   }
 
   const file = await createRes.json();
-  console.log(`[SV][PRE_ALLOCATE_SUCCESS] FileId: ${file.id}`);
 
   // 2. Set public permission (Ensures the link is shareable)
   try {
@@ -140,8 +137,6 @@ export async function uploadFileSimple(
 
 // Add this new function to src/google-drive.ts
 export async function makeFilePublic(fileId: string, accessToken: string, title: string = "Screen Recording", accountEmail?: string): Promise<string> {
-  console.log(`[SV][MAKE_PUBLIC_START] fileId: ${fileId}, Account: ${accountEmail || 'Unknown'}`);
-  
   // Grant anyone-with-link read access
   const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
     method: 'POST',
@@ -157,8 +152,6 @@ export async function makeFilePublic(fileId: string, accessToken: string, title:
     console.error(`[SV][MAKE_PUBLIC_FAILED] Status: ${res.status}, Error: ${errText}`);
     throw new Error(`Failed to set permissions: ${res.status}`);
   }
-
-  console.log(`[SV][MAKE_PUBLIC_SUCCESS] fileId: ${fileId}`);
 
   // Return the custom Cloudflare player URL
   const PLAYER_BASE_URL = 'https://screenvault.karthik-upadhyay98.workers.dev';

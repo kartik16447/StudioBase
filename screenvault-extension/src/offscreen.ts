@@ -42,8 +42,6 @@ let tokenPrefetched = false;
 
 const ENABLE_PROGRESSIVE_UPLOAD = true;
 
-console.log("Offscreen context initialized");
-console.log("Storage available:", !!chrome?.storage);
 
 // Progressive Upload State
 let resumableUploadUrl: string | null = null;
@@ -194,7 +192,6 @@ async function uploadWithFallback(
       if (account.id !== activeAccount?.id || !fileId) {
         const token = await getFreshToken(account.id, false);
         
-        console.log(`[SV][OFFSCREEN_UPLOAD] Using account: ${account.email}, New file needed: ${!fileId || account.id !== activeAccount?.id}`);
 
         // Task 4, 5: Folder Logic per Account
         let workspaceFolderId: string | undefined;
@@ -209,7 +206,6 @@ async function uploadWithFallback(
 
           // Sync Root ID to backend if new
           if (account.driveRootFolderId !== mapping.rootId) {
-            console.log(`[SV][OFFSCREEN_UPLOAD] New Root ID for ${account.email}: ${mapping.rootId}`);
             syncAccountRootFolder(account.id, mapping.rootId);
             account.driveRootFolderId = mapping.rootId; 
             chrome.runtime.sendMessage({ type: 'SYNC_ACCOUNTS', accounts: offscreenAccounts });
@@ -218,11 +214,9 @@ async function uploadWithFallback(
 
         const newFile = await preAllocateDriveFile(account, token, { folderId: workspaceFolderId });
         fileId = newFile.id;
-        console.log(`[SV][OFFSCREEN_UPLOAD] Created new file: ${fileId} for account: ${account.email}`);
       }
       
       const token = await getFreshToken(account.id, false);
-      console.log(`[SV][OFFSCREEN_UPLOAD] Starting data upload to ${fileId} using ${account.email}`);
       await uploadDataToExistingFile(fileId, blob, account, onProgress, token);
       
       let meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
@@ -556,7 +550,6 @@ function startMediaRecorder(stream: MediaStream) {
       return;
     }
     if (e.data && e.data.size > 0 && activeSessionId) {
-      console.log(`[SV][CHUNK] Received chunk: ${e.data.size} bytes for session: ${activeSessionId}`);
       // Capture first 2 seconds for instant preview
       if (!previewCaptured) {
         previewChunks.push(e.data);
@@ -1109,7 +1102,6 @@ async function syncWorkspaceFolder(workspaceId: string, driveFolderId: string) {
       body: JSON.stringify({ driveFolderId })
     });
     
-    console.log(`Workspace ${workspaceId} mapped to Drive folder ${driveFolderId}`);
   } catch (err) {
     console.warn('Failed to sync workspace folder to backend:', err);
   }
@@ -1128,7 +1120,6 @@ async function syncAccountRootFolder(accountId: string, driveRootFolderId: strin
       body: JSON.stringify({ driveRootFolderId })
     });
     
-    console.log(`Account ${accountId} root folder mapped to ${driveRootFolderId}`);
   } catch (err) {
     console.warn('Failed to sync account root folder to backend:', err);
   }
