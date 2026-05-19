@@ -707,6 +707,11 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const steps  = session?.steps  || [];
   const assets = session?.assets || {};
 
+  const sessionStartMs = useMemo(() => {
+    const s = (session as any)?.startedAt;
+    return s ? new Date(s).getTime() : ((steps[0] as any)?.timestamp || 0);
+  }, [session, steps]);
+
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const goTo = useCallback((idx: number) => {
     const clamped = Math.max(0, Math.min(steps.length - 1, idx));
@@ -769,10 +774,6 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const tags         = session.aiOutputs?.tags || [];
   const chapterMap   = buildChapterMap(session.metadata?.chapterBreaks);
   const videoUrl     = (session as any).videoKey ? assets[(session as any).videoKey] ?? null : null;
-  const sessionStartMs = useMemo(() => {
-    const s = (session as any).startedAt;
-    return s ? new Date(s).getTime() : ((steps[0] as any)?.timestamp || 0);
-  }, [session, steps]);
   const currentStep  = steps[currentIndex];
   const currentTitle = currentStep?.stepTitle || currentStep?.elementText || `Step ${currentIndex + 1}`;
   const currentText  = currentStep?.textOverride || currentStep?.generatedText || '';
