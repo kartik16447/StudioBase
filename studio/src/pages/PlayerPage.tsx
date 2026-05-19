@@ -376,6 +376,16 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const speedRef = useRef(1);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Override html/body overflow:hidden from index.css so the page scrolls
+  useEffect(() => {
+    document.documentElement.style.overflow = 'auto';
+    document.body.style.overflow = 'auto';
+    return () => {
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+    };
+  }, []);
+
   // Load session
   useEffect(() => {
     if (!shareToken) { setError('No share token.'); setLoading(false); return; }

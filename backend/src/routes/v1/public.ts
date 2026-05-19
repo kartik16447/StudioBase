@@ -68,12 +68,41 @@ publicRoutes.get('/:shareToken/json', async (c) => {
   const origin = new URL(c.req.url).origin;
   const assets: Record<string, string> = {};
 
+  // Pass 1: per-step screenshotKey (set by older pipeline versions)
   if (Array.isArray(json.steps)) {
     for (const step of json.steps) {
       const key = step.screenshotKey;
       if (key && !assets[key]) {
         assets[key] = `${origin}/v1/public/${shareToken}/asset/${encodeURIComponent(key)}`;
       }
+    }
+  }
+
+  // Pass 2: top-level screenshots[] array written by the extension uploader
+  // Format: [{ stepIndex: number, r2Key: string }]
+  const screenshotsArr = json.screenshots as Array<{ stepIndex: number; r2Key: string }> | undefined;
+  if (Array.isArray(screenshotsArr)) {
+    // Build index → r2Key map and register all keys in assets
+    const byIndex = new Map<number, string>();
+    for (const s of screenshotsArr) {
+      if (s.r2Key) {
+        byIndex.set(s.stepIndex, s.r2Key);
+        if (!assets[s.r2Key]) {
+          assets[s.r2Key] = `${origin}/v1/public/${shareToken}/asset/${encodeURIComponent(s.r2Key)}`;
+        }
+      }
+    }
+
+    // Attach screenshotKey to each step that doesn't already have one
+    if (Array.isArray(json.steps)) {
+      json.steps = json.steps.map((step: any, i: number) => {
+        if (step.screenshotKey) return step;
+        const key =
+          byIndex.get(step.sequence ?? i) ??   // prefer sequence field
+          byIndex.get(i) ??                      // fallback to array index
+          null;
+        return key ? { ...step, screenshotKey: key } : step;
+      });
     }
   }
 
