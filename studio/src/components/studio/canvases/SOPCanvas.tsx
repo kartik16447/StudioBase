@@ -275,21 +275,59 @@ export const SOPCanvas: React.FC = () => {
             <Button
               variant="ghost" size="sm" icon={I.Download}
               onClick={() => {
-                const style = document.createElement('style');
-                style.id = 'sb-print-style';
-                style.innerHTML = `@media print {
-                  body > * { display: none !important; }
-                  [data-print="sop"] { display: block !important; background: white !important; padding: 32px !important; }
-                  header, aside, .studio-gradient, [class*="fixed"] { display: none !important; }
-                  .shadow-card { box-shadow: none !important; }
-                  img { max-width: 100% !important; page-break-inside: avoid; }
-                  article { page-break-inside: avoid; margin-bottom: 24px !important; }
-                }`;
-                document.head.appendChild(style);
-                setTimeout(() => {
-                  window.print();
-                  setTimeout(() => document.getElementById('sb-print-style')?.remove(), 1000);
-                }, 120);
+                if (!session) return;
+                const steps = session.steps || [];
+                const title = session.aiOutputs?.title || session.capturedTitle || 'Untitled';
+                const summary = session.aiOutputs?.summary || '';
+                const tags = session.aiOutputs?.tags || [];
+
+                // Build print HTML matching competitor layout
+                const tagsHtml = tags.length ? `<p class="tags">${tags.map(t => `<span>${t}</span>`).join('')}</p>` : '';
+
+                const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
+                <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; color: #111; background: white; }
+                  .cover { padding: 72px 64px 48px; }
+                  .cover h1 { font-size: 32px; font-weight: 700; line-height: 1.25; margin-bottom: 20px; }
+                  .summary-block { border-left: 3px solid #ddd; padding-left: 20px; margin-bottom: 28px; }
+                  .summary-block p { font-size: 14px; line-height: 1.7; color: #444; }
+                  .tags { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+                  .tags span { background: #f0f0f0; border-radius: 4px; padding: 3px 10px; font-size: 12px; color: #555; }
+                  .step-page { page-break-before: always; padding: 48px 64px 40px; }
+                  .screenshot-wrap { margin-bottom: 28px; }
+                  .screenshot-wrap img { width: 100%; border-radius: 8px; box-shadow: 0 2px 16px rgba(0,0,0,0.12); display: block; }
+                  h2 { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
+                  p { font-size: 14px; line-height: 1.7; color: #333; }
+                  .first-step h2 { margin-top: 0; }
+                </style></head><body>
+                <div class="cover">
+                  <h1>${title}</h1>
+                  ${summary ? `<div class="summary-block"><p>${summary}</p></div>` : ''}
+                  ${tagsHtml}
+                  ${steps[0] ? (() => {
+                    const s = steps[0];
+                    const st = s.stepTitle || s.elementText || 'Step 1';
+                    const tx = s.textOverride || s.generatedText || s.elementText || '';
+                    return `<div class="first-step" style="margin-top:32px"><h2>Step 1: ${st}</h2><p>${tx}</p></div>`;
+                  })() : ''}
+                </div>
+                ${steps.slice(1).map((step, i) => {
+                  const screenshotUrl = step.screenshotKey && session.assets?.[step.screenshotKey]
+                    ? session.assets[step.screenshotKey] : null;
+                  const st = step.stepTitle || step.elementText || `Step ${i + 2}`;
+                  const tx = step.textOverride || step.generatedText || step.elementText || '';
+                  return `<div class="step-page">${screenshotUrl ? `<div class="screenshot-wrap"><img src="${screenshotUrl}" /></div>` : ''}<h2>Step ${i + 2}: ${st}</h2><p>${tx}</p></div>`;
+                }).join('')}
+                </body></html>`;
+
+                const w = window.open('', '_blank');
+                if (!w) return;
+                w.document.write(html);
+                w.document.close();
+                // Wait for images to load then print
+                w.onload = () => { w.focus(); w.print(); };
+                setTimeout(() => { try { w.focus(); w.print(); } catch(e) {} }, 1500);
               }}
             >
               Export PDF
