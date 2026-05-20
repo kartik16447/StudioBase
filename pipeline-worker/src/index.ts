@@ -75,8 +75,8 @@ Critical rules:
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function buildStepPayload(steps: any[]) {
-  return steps.map((s) => ({
-    id: s.id,
+  return steps.map((s, i) => ({
+    id: s.id || `step-${i}`,
     action: s.action || s.type || "click",
     elementText: s.elementText || s.data?.elementText || null,
     elementRole: s.elementRole || s.data?.elementRole || null,
@@ -170,6 +170,12 @@ export default {
           };
 
           const aiStepMap = new Map(generated.steps.map((s) => [s.id, s]));
+
+          // Stamp stable IDs onto step objects (same index-based fallback as buildStepPayload)
+          // so R2 always has steps with proper id fields.
+          steps.forEach((step, i) => {
+            if (!step.id) step.id = `step-${i}`;
+          });
 
           for (const step of steps) {
             const ai = aiStepMap.get(step.id);
