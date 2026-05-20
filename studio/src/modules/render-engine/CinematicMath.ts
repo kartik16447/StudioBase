@@ -136,21 +136,48 @@ export const CinematicMath = {
    * If the step has no position data (no coordinates / animationTarget) the
    * camera stays at full overview throughout.
    */
-  getStepCameraTarget(step: any, stepProgress: number): CameraTarget {
+  getStepCameraTarget(
+    step: any,
+    stepProgress: number,
+    prevStep: any = null,
+    nextStep: any = null,
+  ): CameraTarget {
     const L = RenderConstants.CAMERA_SCALE_LIMITS;
     const overview: CameraTarget = { pctX: 50, pctY: 50, scale: L.min };
     const pos = this._getTargetPosition(step);
 
     if (!pos.hasData) return overview;
 
-    // Retreat phase: target swings back to overview so the spring eases out
-    if (stepProgress < 0.20 || stepProgress >= 0.80) return overview;
-
-    // Event phase: zoom gently toward the interaction point
     const scale = step?.animationTarget?.zoomScale != null
       ? clamp(step.animationTarget.zoomScale, L.min, L.max)
       : L.event;
 
+    // Retreat phase: target swings back to overview unless next step is same context
+    if (stepProgress >= 0.80) {
+      if (nextStep && this.isSameContext(step, nextStep)) {
+        const nextPos = this._getTargetPosition(nextStep);
+        if (nextPos.hasData) {
+          return { pctX: pos.pctX, pctY: pos.pctY, scale };
+        }
+      }
+      return overview;
+    }
+
+    // Intro/transition phase: start at previous step's target if same context
+    if (stepProgress < 0.20) {
+      if (prevStep && this.isSameContext(prevStep, step)) {
+        const prevPos = this._getTargetPosition(prevStep);
+        if (prevPos.hasData) {
+          const prevScale = prevStep.animationTarget?.zoomScale != null
+            ? clamp(prevStep.animationTarget.zoomScale, L.min, L.max)
+            : L.event;
+          return { pctX: prevPos.pctX, pctY: prevPos.pctY, scale: prevScale };
+        }
+      }
+      return overview;
+    }
+
+    // Event phase: zoom gently toward the interaction point
     return { pctX: pos.pctX, pctY: pos.pctY, scale };
   },
 

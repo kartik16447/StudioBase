@@ -13,6 +13,7 @@ export const MIN_STEP_MS     = 1000; // never shorter than 1 s
 export interface TimelineStep {
   id: string;
   voiceoverDurationMs?: number | null;
+  timestamp?: number | null;
 }
 
 export interface StepSegment {
@@ -28,27 +29,64 @@ export interface Timeline {
 }
 
 /** Build a Timeline from an array of steps.  Pure function — no side-effects. */
-export function buildTimeline(steps: TimelineStep[]): Timeline {
+export function buildTimeline(
+  steps: TimelineStep[],
+  useVideoTimestamps = false,
+  sessionStartMs = 0,
+): Timeline {
   const segments: StepSegment[] = [];
   let cursor = 0;
 
-  for (let i = 0; i < steps.length; i++) {
-    const raw = steps[i].voiceoverDurationMs;
-    const durationMs = raw != null && raw > 0
-      ? Math.max(MIN_STEP_MS, raw)
-      : DEFAULT_STEP_MS;
+  if (useVideoTimestamps) {
+    const getRelativeMs = (step: TimelineStep) => {
+      const raw = step.timestamp || 0;
+      const EPOCH_FLOOR = 1_000_000_000_000;
+      return raw > EPOCH_FLOOR ? Math.max(0, raw - sessionStartMs) : raw;
+    };
 
-    segments.push({
-      stepIndex:  i,
-      startMs:    cursor,
-      durationMs,
-      endMs:      cursor + durationMs,
-    });
+    for (let i = 0; i < steps.length; i++) {
+      const startMs = i === 0 ? 0 : getRelativeMs(steps[i]);
+      let durationMs = 0;
 
-    cursor += durationMs;
+      if (i < steps.length - 1) {
+        const nextStartMs = getRelativeMs(steps[i + 1]);
+        durationMs = Math.max(MIN_STEP_MS, nextStartMs - startMs);
+      } else {
+        const raw = steps[i].voiceoverDurationMs;
+        durationMs = raw != null && raw > 0
+          ? Math.max(MIN_STEP_MS, raw)
+          : DEFAULT_STEP_MS;
+      }
+
+      segments.push({
+        stepIndex:  i,
+        startMs,
+        durationMs,
+        endMs:      startMs + durationMs,
+      });
+    }
+
+    const totalMs = segments.length > 0 ? segments[segments.length - 1].endMs : 0;
+    return { segments, totalMs };
+  } else {
+    for (let i = 0; i < steps.length; i++) {
+      const raw = steps[i].voiceoverDurationMs;
+      const durationMs = raw != null && raw > 0
+        ? Math.max(MIN_STEP_MS, raw)
+        : DEFAULT_STEP_MS;
+
+      segments.push({
+        stepIndex:  i,
+        startMs:    cursor,
+        durationMs,
+        endMs:      cursor + durationMs,
+      });
+
+      cursor += durationMs;
+    }
+
+    return { segments, totalMs: cursor };
   }
-
-  return { segments, totalMs: cursor };
 }
 
 /**

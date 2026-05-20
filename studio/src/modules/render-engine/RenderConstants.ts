@@ -29,9 +29,9 @@ export const RenderConstants = {
 
   // Cinematic camera springs — pan is a bit more responsive, zoom is heavy & restrained
   // XY (pan):   stiffness 45, damping 26, mass 1.4 → settles ~1.2s, no bounce
-  // Scale (zoom): stiffness 28, damping 28, mass 1.8 → very slow, settles ~2s, over-damped
+  // Scale (zoom): stiffness 36, damping 24, mass 1.2 → responsive, settles ~1.2s, over-damped
   CAMERA_XY_SPRING:    { stiffness: 45, damping: 26, mass: 1.4, restDelta: 0.001 },
-  CAMERA_SCALE_SPRING: { stiffness: 28, damping: 28, mass: 1.8, restDelta: 0.001 },
+  CAMERA_SCALE_SPRING: { stiffness: 36, damping: 24, mass: 1.2, restDelta: 0.001 },
 
   // Hard zoom scale limits — keeps the view readable, prevents tunnel-vision
   CAMERA_SCALE_LIMITS: {

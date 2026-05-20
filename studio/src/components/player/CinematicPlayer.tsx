@@ -247,7 +247,10 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   primaryColor   = '#5E5CE6',
 }, ref) {
   // ── Timeline ───────────────────────────────────────────────────────────────
-  const timeline       = useMemo(() => buildTimeline(steps), [steps]);
+  const timeline       = useMemo(
+    () => buildTimeline(steps, renderMode === 'hybrid' && !!videoUrl, sessionStartMs),
+    [steps, renderMode, videoUrl, sessionStartMs]
+  );
   const { segments, totalMs } = timeline;
   const chapterMarkers = useMemo(
     () => buildChapterMarkers(segments, chapterBreaks ?? [], steps, totalMs),
@@ -344,8 +347,13 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   // ── Video seek on step change ──────────────────────────────────────────────
   useEffect(() => {
+    if (isPlayingRef.current) return;
     if (!videoRef.current || !videoUrl || !currentStep?.timestamp) return;
-    const relSec = Math.max(0, (currentStep.timestamp - sessionStartMs) / 1000);
+    const EPOCH_FLOOR = 1_000_000_000_000;
+    const rawTs = currentStep.timestamp;
+    const relMs = rawTs > EPOCH_FLOOR ? Math.max(0, rawTs - sessionStartMs) : rawTs;
+    const relSec = relMs / 1000;
+
     if (Math.abs(videoRef.current.currentTime - relSec) > 0.2) {
       videoRef.current.currentTime = relSec;
     }
@@ -415,7 +423,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       // physics on camX/Y/Scale handle all the easing between phases.
       const camStep = stepsRef.current[currentIdxRef.current];
       if (camStep) {
-        const ct = CinematicMath.getStepCameraTarget(camStep, stepProgress);
+        const prevStep = stepsRef.current[currentIdxRef.current - 1] ?? null;
+        const nextStep = stepsRef.current[currentIdxRef.current + 1] ?? null;
+        const ct = CinematicMath.getStepCameraTarget(camStep, stepProgress, prevStep, nextStep);
         camX.set(ct.pctX);
         camY.set(ct.pctY);
         camScale.set(ct.scale);
