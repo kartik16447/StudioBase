@@ -141,6 +141,7 @@ export const CinematicMath = {
     stepProgress: number,
     prevStep: any = null,
     nextStep: any = null,
+    isPlaying: boolean = true,
   ): CameraTarget {
     const L = RenderConstants.CAMERA_SCALE_LIMITS;
     const overview: CameraTarget = { pctX: 50, pctY: 50, scale: L.min };
@@ -151,6 +152,13 @@ export const CinematicMath = {
     const scale = step?.animationTarget?.zoomScale != null
       ? clamp(step.animationTarget.zoomScale, L.min, L.max)
       : L.event;
+
+    // If paused, bypass overview/retreat transitions so the camera target
+    // settles on the active step's focus area (event phase). This allows
+    // real-time editing of the zoom scale and focus point to render immediately.
+    if (!isPlaying) {
+      return { pctX: pos.pctX, pctY: pos.pctY, scale };
+    }
 
     // Retreat phase: target swings back to overview unless next step is same context
     if (stepProgress >= 0.80) {

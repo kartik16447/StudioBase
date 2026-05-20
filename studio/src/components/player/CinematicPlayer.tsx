@@ -425,7 +425,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       if (camStep) {
         const prevStep = stepsRef.current[currentIdxRef.current - 1] ?? null;
         const nextStep = stepsRef.current[currentIdxRef.current + 1] ?? null;
-        const ct = CinematicMath.getStepCameraTarget(camStep, stepProgress, prevStep, nextStep);
+        const ct = CinematicMath.getStepCameraTarget(camStep, stepProgress, prevStep, nextStep, isPlayingRef.current);
         camX.set(ct.pctX);
         camY.set(ct.pctY);
         camScale.set(ct.scale);

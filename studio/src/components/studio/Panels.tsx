@@ -532,7 +532,7 @@ export const ZoomsPanel: React.FC = () => {
   const target = currentStep.animationTarget || {
     centerX: 50,
     centerY: 50,
-    zoomScale: 1.55,
+    zoomScale: 1.0,
     transitionType: 'zoom',
     transitionDurationMs: 800
   };
@@ -559,9 +559,9 @@ export const ZoomsPanel: React.FC = () => {
 
       <div className="flex-1 scroll-y px-5 py-5 space-y-6">
         <section>
-          <SectionLabel hint={`${target.zoomScale.toFixed(1)}x`}>Zoom scale</SectionLabel>
+          <SectionLabel hint={`${target.zoomScale.toFixed(2)}x`}>Zoom scale</SectionLabel>
           <input 
-            type="range" min="1" max="4" step="0.1" 
+            type="range" min="1.0" max="1.4" step="0.05" 
             value={target.zoomScale}
             onChange={(e) => updateTarget({ zoomScale: parseFloat(e.target.value) })}
             className="w-full h-1.5 bg-surface-2 rounded-lg appearance-none cursor-pointer accent-primary"

@@ -39,7 +39,7 @@ export const RenderConstants = {
     near:  1.08,  // legacy distance-based (export only)
     mid:   1.18,
     far:   1.28,
-    max:   3.00,  // Raised to 3.00 to respect high manual database scales exactly
+    max:   1.40,  // Clamped to 1.40 to restrict manual zoom scale limits
     event: 1.15,  // Subtle cinematic zoom default
   },
 };
