@@ -462,8 +462,10 @@ export const VideoCanvas: React.FC = () => {
   const [screenshotProgress, setScreenshotProgress]   = useState('');
 
   // PATCH 4: Intro / Outro slide state
-  const [showIntroSlide, setShowIntroSlide] = useState(false);
-  const [introVisible,   setIntroVisible]   = useState(false);
+  // Intro trigger was in the old play button — not yet wired to CinematicPlayer.
+  // Destructure only the value (no setter) so TS doesn't flag unused setters.
+  const [showIntroSlide] = useState(false);
+  const [introVisible]   = useState(false);
   const [showOutroSlide, setShowOutroSlide] = useState(false);
   const [outroVisible,   setOutroVisible]   = useState(false);
 
@@ -833,8 +835,6 @@ export const VideoCanvas: React.FC = () => {
   }, [currentStepIndex, isPlaying, brand, renderMode, steps, viewMode]);
 
   if (!session) return null;
-
-  const totalSteps = steps.length;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col relative">

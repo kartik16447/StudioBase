@@ -41,7 +41,7 @@ import {
 
 export interface PlayerStep {
   id: string;
-  screenshotKey?: string;
+  screenshotKey?: string | null;
   stepTitle?: string;
   generatedText?: string;
   textOverride?: string;
