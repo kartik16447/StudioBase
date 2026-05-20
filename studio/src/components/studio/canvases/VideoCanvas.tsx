@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence, useSpring } from 'framer-motion';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../../components/icons';
@@ -9,6 +9,7 @@ import { WorkerExtractor } from '../../../services/WorkerExtractor';
 import { CanvasRenderer } from '../../../modules/render-engine/CanvasRenderer';
 import { CinematicMath } from '../../../modules/render-engine/CinematicMath';
 import { TelemetryService } from '../../../services/TelemetryService';
+import { CinematicPlayer, type CinematicPlayerHandle } from '../../player/CinematicPlayer';
 import { analyticsClient } from '../../../lib/analyticsClient';
 import { EmbedModal } from '../panels/EmbedModal';
 import { exportScreenshotsToVideo } from '../../../modules/render-engine/VideoExporter';
@@ -469,11 +470,14 @@ export const VideoCanvas: React.FC = () => {
   // PATCH 5: Chapter card state
   const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
 
-  const playerRef      = useRef<HTMLDivElement>(null);
-  const videoRef       = useRef<HTMLVideoElement>(null);
-  const rawVideoRef    = useRef<HTMLVideoElement>(null);
+  const playerRef         = useRef<HTMLDivElement>(null);
+  const cinPlayerRef      = useRef<CinematicPlayerHandle>(null);
+  const lastStepFromPlayer = useRef(-1); // prevents seek loop between player ↔ store
+  const rawVideoRef       = useRef<HTMLVideoElement>(null);
+  // canvasRef / videoRef / progressBarRef / renderer retained for export pipeline only
   const canvasRef      = useRef<HTMLCanvasElement>(null);
-  const progressBarRef = useRef<HTMLDivElement>(null); // direct DOM update for smooth fill
+  const videoRef       = useRef<HTMLVideoElement>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null);
   const renderer       = useMemo(() => new CanvasRenderer(), []);
 
   // ── Camera springs (framer-motion) ──────────────────────────────────────
@@ -492,6 +496,9 @@ export const VideoCanvas: React.FC = () => {
     ? (session.assets?.[session.videoKey] ?? null)
     : null;
   const hybridVideoUrl = renderMode === 'hybrid' ? rawVideoUrl : null;
+  const sessionStartMs = (session as any)?.startedAt
+    ? new Date((session as any).startedAt).getTime()
+    : session?.capturedAt ? new Date(session.capturedAt).getTime() : 0;
 
   // ── Export trigger ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -499,6 +506,25 @@ export const VideoCanvas: React.FC = () => {
       handleSOPVideoExport({ session, theme: brand, renderMode: 'slideshow' });
     }
   }, [exportTrigger]);
+
+  // ── Sync external step changes (sidebar click, keyboard) → CinematicPlayer ──
+  // Only seeks if the change came from outside the player (not from its own advance).
+  useEffect(() => {
+    if (currentStepIndex !== lastStepFromPlayer.current) {
+      cinPlayerRef.current?.seekToStep(currentStepIndex);
+      lastStepFromPlayer.current = currentStepIndex;
+    }
+  }, [currentStepIndex]);
+
+  // ── Callbacks from CinematicPlayer → store ─────────────────────────────────
+  const handlePlayerStepSelect = useCallback((idx: number) => {
+    lastStepFromPlayer.current = idx;
+    setStepIndex(idx);
+  }, [setStepIndex]);
+
+  const handlePlayerPlayState = useCallback((playing: boolean) => {
+    setPlaying(playing);
+  }, [setPlaying]);
 
   // PATCH 4: Stable session-end handler — captures latest brand.showOutro
   const handleSessionEndRef = useRef<() => void>(() => { setIsEnded(true); });
@@ -879,47 +905,26 @@ export const VideoCanvas: React.FC = () => {
             }}
           />
 
-          {/* Inner card */}
+          {/* Inner card — CinematicPlayer fills the padded inset */}
           <div className="absolute inset-[1.5px] rounded-2xl overflow-hidden bg-[#12121a]">
 
-          {/* DOM background layers — visual richness for preview (z-0, behind canvas) */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
-            <div className="absolute inset-0"
-              style={{
-                background: `radial-gradient(ellipse at 20% 80%, ${brand.primaryColor}1a 0%, transparent 55%),
-                             radial-gradient(ellipse at 80% 20%, rgba(139,92,246,0.12) 0%, transparent 50%)`,
-              }}
-            />
-            <div
-              className="beam-drift absolute top-0 bottom-0 w-[40%]"
-              style={{
-                background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.028), transparent)',
-                filter: 'blur(40px)',
-              }}
-            />
-            <div
-              className="absolute inset-0 animate-pulse"
-              style={{
-                background: `radial-gradient(ellipse at 50% 50%, ${brand.primaryColor}12 0%, transparent 65%)`,
-                animationDuration: '4s',
-              }}
-            />
-          </div>
-
-          <canvas
-            ref={canvasRef}
-            className="absolute inset-0 w-full h-full block z-10"
-            style={{ imageRendering: 'auto' }}
+          {/* CinematicPlayer — owns canvas, springs, timeline controls */}
+          <CinematicPlayer
+            ref={cinPlayerRef}
+            steps={steps}
+            assets={session?.assets ?? {}}
+            videoUrl={hybridVideoUrl}
+            sessionStartMs={sessionStartMs ?? 0}
+            chapterBreaks={session?.metadata?.chapterBreaks}
+            renderMode={renderMode === 'hybrid' ? 'hybrid' : 'slideshow'}
+            primaryColor={brand.primaryColor}
+            onStepSelect={handlePlayerStepSelect}
+            onPlayStateChange={handlePlayerPlayState}
           />
 
-          {/* Inset edge glow */}
-          <div className="absolute inset-0 rounded-2xl pointer-events-none z-10"
-            style={{ boxShadow: 'inset 0 0 0 1px rgba(139,92,246,0.10), inset 0 0 24px rgba(99,102,241,0.04)' }}
-          />
-
-          {/* Watermark */}
+          {/* Watermark overlay — on top of player */}
           {brand.watermark && (
-            <div className="absolute bottom-3 right-4 z-20 pointer-events-none opacity-55">
+            <div className="absolute bottom-14 right-4 z-20 pointer-events-none opacity-55">
               {brand.logoUrl
                 ? <img src={brand.logoUrl} className="h-5 object-contain" alt={brand.watermark} />
                 : <span className="text-white text-[11px] font-semibold tracking-wide">{brand.watermark}</span>
@@ -1049,90 +1054,11 @@ export const VideoCanvas: React.FC = () => {
         )}
       </div>
 
-      {/* ── Controls bar ───────────────────────────────────────────────── */}
+      {/* ── Controls bar — export/embed/view toggle only; playback is inside CinematicPlayer ── */}
       <div className="border-t border-border bg-bg relative z-10">
-
-        {/* Row 1: progress bar (cinematic only) */}
-        {viewMode === 'cinematic' && (
-          <div
-            className="h-1 bg-surface-2 cursor-pointer group/p"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct  = (e.clientX - rect.left) / rect.width;
-              setStepIndex(Math.round(pct * (totalSteps - 1)));
-            }}
-          >
-            <div
-              ref={progressBarRef}
-              className="h-full bg-primary group-hover/p:opacity-80"
-              style={{ width: `${(currentStepIndex / totalSteps) * 100}%`, transition: 'none' }}
-            />
-          </div>
-        )}
-
-        {/* Row 2: controls */}
-        <div className="flex items-center px-4 h-14 gap-3 pr-36">
-
-          {/* Playback */}
-          {viewMode === 'cinematic' && (
-            <div className="flex items-center gap-1 shrink-0">
-              <Button variant="ghost" size="sm" icon={I.SkipBack}
-                onClick={() => setStepIndex(Math.max(0, currentStepIndex - 1))} />
-              <Button
-                variant="primary" size="md"
-                className="w-9 h-9 !p-0 rounded-full"
-                icon={isPlaying ? I.Pause : I.Play}
-                onClick={() => {
-                  if (isEnded) { setStepIndex(0); setIsEnded(false); setPlaying(true); return; }
-                  if (!isPlaying && currentStepIndex === 0 && brand.showIntro) {
-                    setShowIntroSlide(true);
-                    setIntroVisible(true);
-                    setTimeout(() => {
-                      setIntroVisible(false);
-                      setTimeout(() => { setShowIntroSlide(false); setPlaying(true); }, 400);
-                    }, 3000);
-                    return;
-                  }
-                  setPlaying(!isPlaying);
-                }}
-              />
-              <Button variant="ghost" size="sm" icon={I.SkipForward}
-                onClick={() => setStepIndex(Math.min(totalSteps - 1, currentStepIndex + 1))} />
-            </div>
-          )}
-
-          {/* Time */}
-          {viewMode === 'cinematic' && (
-            <span className="text-[11px] text-text-3 tabular-nums shrink-0">
-              {Math.round(steps.slice(0, currentStepIndex).reduce((s, st) => s + Math.max(2000, st.voiceoverDurationMs || 3500), 0) / 1000)}s
-              {' / '}
-              {Math.round(steps.reduce((s, st) => s + Math.max(2000, st.voiceoverDurationMs || 3500), 0) / 1000)}s
-              <span className="ml-2 text-text-3/60">{currentStepIndex + 1}/{totalSteps}</span>
-            </span>
-          )}
+        <div className="flex items-center px-4 h-12 gap-3 pr-36">
 
           <div className="flex-1" />
-
-          {/* Speed (cinematic only) */}
-          {viewMode === 'cinematic' && (
-            <>
-              <div className="flex items-center bg-surface-2 rounded-sm p-0.5 shrink-0">
-                {[1, 1.5, 2].map((speed) => (
-                  <button
-                    key={speed}
-                    onClick={() => useStudioStore.getState().setPlaybackRate(speed)}
-                    className={cn(
-                      'px-2.5 h-6 rounded-sm text-[11px] font-bold transition-all',
-                      playbackRate === speed ? 'bg-white shadow-sm text-primary' : 'text-text-3 hover:text-text-2',
-                    )}
-                  >
-                    {speed}x
-                  </button>
-                ))}
-              </div>
-              <div className="h-4 w-px bg-border shrink-0" />
-            </>
-          )}
 
           {/* View toggle */}
           <div className="flex items-center bg-surface-2 rounded-sm p-0.5 shrink-0">

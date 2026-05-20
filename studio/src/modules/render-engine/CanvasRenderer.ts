@@ -76,7 +76,9 @@ export class CanvasRenderer implements IRenderer {
     this.drawElementHighlight(ctx, step, layout, worldW, worldH, theme.primaryColor, progress);
 
     // ── 8. Click cursor (ripple at exact click coord) ──────────────────────
-    this.drawCursor(ctx, step, layout, worldW, worldH, theme.primaryColor, progress);
+    if (spec.showCursor !== false) {
+      this.drawCursor(ctx, step, layout, worldW, worldH, theme.primaryColor, progress);
+    }
 
     ctx.restore();
 

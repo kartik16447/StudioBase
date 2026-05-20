@@ -22,6 +22,13 @@ export interface RenderSpec {
   };
   /** Wall-clock or simulated time in ms — drives background shimmer animation */
   timeMs?: number;
+  /**
+   * Whether to draw the cursor dot/ripple overlay.
+   * Default: true (export pipeline shows click indicator).
+   * Set false for live player — camera pan already communicates the click point,
+   * and the static dot creates a confusing second cursor.
+   */
+  showCursor?: boolean;
 }
 
 export interface IRenderer {

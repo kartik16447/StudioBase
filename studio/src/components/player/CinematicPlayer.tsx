@@ -73,6 +73,8 @@ export interface CinematicPlayerProps {
   renderMode?:    'hybrid' | 'slideshow';
   /** Edit-mode hook — called when user clicks a timeline segment. No-op by default. */
   onStepSelect?:  (stepIndex: number) => void;
+  /** Called whenever play/pause state changes — lets parent sync external store. */
+  onPlayStateChange?: (isPlaying: boolean) => void;
   /** Override brand primary colour */
   primaryColor?:  string;
 }
@@ -237,6 +239,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   chapterBreaks,
   renderMode     = 'slideshow',
   onStepSelect,
+  onPlayStateChange,
   primaryColor   = '#5E5CE6',
 }, ref) {
   // ── Timeline ───────────────────────────────────────────────────────────────
@@ -287,6 +290,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const sessionStartMsRef = useRef(sessionStartMs);
 
   useEffect(() => { isPlayingRef.current   = isPlaying;    }, [isPlaying]);
+  useEffect(() => { onPlayStateChange?.(isPlaying);        }, [isPlaying, onPlayStateChange]);
   useEffect(() => { speedRef.current       = speed;        }, [speed]);
   useEffect(() => { segmentsRef.current    = segments;     }, [segments]);
   useEffect(() => { totalMsRef.current     = totalMs;      }, [totalMs]);
@@ -473,6 +477,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 scale: camScale.get(),
               },
               timeMs: now,
+              showCursor: false,  // camera pan communicates focus point; dot creates confusing 2nd cursor
             },
             masterFrame,
           );
