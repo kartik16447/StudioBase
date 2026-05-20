@@ -1,11 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { useSpring } from 'framer-motion';
 import { I } from '../components/icons';
 import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
-import { CanvasRenderer } from '../modules/render-engine/CanvasRenderer';
-import { CinematicMath } from '../modules/render-engine/CinematicMath';
-import { RenderConstants } from '../modules/render-engine/RenderConstants';
+import { CinematicPlayer, type CinematicPlayerHandle } from '../components/player/CinematicPlayer';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -38,18 +35,7 @@ type ViewMode = 'video' | 'guide';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STEP_MS      = 5000;
-const DISSOLVE_MS  = 400;  // cross-dissolve duration when switching screenshots
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-const lerp       = (a: number, b: number, t: number) => a + (b - a) * t;
-const easeInOut  = (t: number) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
-const fmtTime = (ms: number) => {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(s / 60);
-  return `${m}:${String(s % 60).padStart(2, '0')}`;
-};
 
 const fmtDate = (ts: any) => {
   if (!ts) return '';
@@ -66,494 +52,6 @@ function buildChapterMap(breaks?: { afterStepId: string; chapterTitle: string }[
   (breaks || []).forEach(b => map.set(b.afterStepId, b.chapterTitle));
   return map;
 }
-
-// ─── CinematicVideoPlayer ─────────────────────────────────────────────────────
-// Uses the exact same CanvasRenderer + CinematicMath + framer-motion springs as
-// the dashboard VideoCanvas — identical cinematic quality on the public share page.
-
-interface PlayerProps {
-  steps: PStep[];
-  assets: Record<string, string>;
-  currentIndex: number;
-  isPlaying: boolean;
-  speed: number;
-  videoUrl: string | null;       // raw screen recording URL (if available)
-  sessionStartMs: number;        // epoch ms when recording started (for video seek sync)
-  onSeek: (idx: number) => void;
-  onTogglePlay: () => void;
-  onPrev: () => void;
-  onNext: () => void;
-  onSpeedChange: (s: number) => void;
-}
-
-const CinematicVideoPlayer: React.FC<PlayerProps> = ({
-  steps, assets, currentIndex, isPlaying, speed,
-  videoUrl, sessionStartMs,
-  onSeek, onTogglePlay, onPrev, onNext, onSpeedChange,
-}) => {
-  const containerRef       = useRef<HTMLDivElement>(null);
-  const canvasRef          = useRef<HTMLCanvasElement>(null);
-  const videoRef           = useRef<HTMLVideoElement>(null);
-  const slideImageRef      = useRef<HTMLImageElement | null>(null);
-  const prevSlideImageRef  = useRef<HTMLImageElement | null>(null);  // for cross-dissolve
-  const blendCanvasRef     = useRef<HTMLCanvasElement | null>(null); // offscreen blend surface
-  const transitionStartRef = useRef<number>(-Infinity);             // wall-clock when step changed
-  const leavingStepRef     = useRef<PStep | null>(null);            // step we just left (cursor lerp)
-  const previousIdxRef     = useRef<number>(0);                     // tracks previous step index
-  const progressBarRef     = useRef<HTMLDivElement>(null);
-  const stepStartWall      = useRef(performance.now());
-  const renderer           = useMemo(() => new CanvasRenderer(), []);
-
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showControls, setShowControls] = useState(true);
-  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [isEnded, setIsEnded] = useState(false);
-
-  // Refs for RAF loop (avoids stale closures)
-  const isPlayingRef      = useRef(isPlaying);
-  const currentIdxRef     = useRef(currentIndex);
-  const speedRef          = useRef(speed);
-  const stepsRef          = useRef(steps);
-  const onNextRef         = useRef(onNext);
-  const onToggleRef       = useRef(onTogglePlay);
-  const sessionStartMsRef = useRef(sessionStartMs);
-  const videoUrlRef       = useRef(videoUrl);
-  useEffect(() => { isPlayingRef.current      = isPlaying;      }, [isPlaying]);
-  useEffect(() => { currentIdxRef.current     = currentIndex;   }, [currentIndex]);
-  useEffect(() => { speedRef.current          = speed;          }, [speed]);
-  useEffect(() => { stepsRef.current          = steps;          }, [steps]);
-  useEffect(() => { onNextRef.current         = onNext;         }, [onNext]);
-  useEffect(() => { onToggleRef.current       = onTogglePlay;   }, [onTogglePlay]);
-  useEffect(() => { sessionStartMsRef.current = sessionStartMs; }, [sessionStartMs]);
-  useEffect(() => { videoUrlRef.current       = videoUrl;       }, [videoUrl]);
-
-  // ── Camera springs (framer-motion — matches dashboard exactly) ──────────────
-  const { stiffness: sxy, damping: dxy, mass: mxy } = RenderConstants.CAMERA_XY_SPRING;
-  const { stiffness: ss,  damping: ds,  mass: ms  } = RenderConstants.CAMERA_SCALE_SPRING;
-  const camX     = useSpring(50,  { stiffness: sxy, damping: dxy, mass: mxy });
-  const camY     = useSpring(50,  { stiffness: sxy, damping: dxy, mass: mxy });
-  const camScale = useSpring(1.0, { stiffness: ss,  damping: ds,  mass: ms  });
-
-  const currentStep = steps[currentIndex];
-  const prevStep    = steps[currentIndex - 1] ?? null;
-
-  // Reset step wall-clock timer on step change; seek video to step position
-  useEffect(() => {
-    stepStartWall.current = performance.now();
-    setIsEnded(false);
-    // Seek video to the relative timestamp of this step
-    if (videoRef.current && videoUrl && currentStep?.timestamp) {
-      const relSec = Math.max(0, (currentStep.timestamp - sessionStartMs) / 1000);
-      if (Math.abs(videoRef.current.currentTime - relSec) > 0.2) {
-        videoRef.current.currentTime = relSec;
-      }
-    }
-  }, [currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Camera spring target on step change — hybrid distance-based model
-  useEffect(() => {
-    if (!currentStep) return;
-
-    // Measure distance from current animated position to decide bucket + reveal
-    const { target, revealTarget } = CinematicMath.getHybridTarget(
-      currentStep, camX.get(), camY.get(),
-    );
-
-    if (revealTarget) {
-      // Far move: pull back to context view, then glide to destination
-      camX.set(revealTarget.pctX);
-      camY.set(revealTarget.pctY);
-      camScale.set(revealTarget.scale);
-      const t = setTimeout(() => {
-        camX.set(target.pctX);
-        camY.set(target.pctY);
-        camScale.set(target.scale);
-      }, 350);
-      return () => clearTimeout(t);
-    } else {
-      // Near / mid: direct spring — pan with proportional zoom
-      camX.set(target.pctX);
-      camY.set(target.pctY);
-      camScale.set(target.scale);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex, currentStep?.id]);
-
-  // Preload screenshot — saves outgoing image/step first for cross-dissolve + cursor lerp
-  useEffect(() => {
-    // Capture state of the step we're leaving before anything changes
-    prevSlideImageRef.current  = slideImageRef.current;
-    leavingStepRef.current     = stepsRef.current[previousIdxRef.current] ?? null;
-    previousIdxRef.current     = currentIdxRef.current;
-    transitionStartRef.current = performance.now();
-
-    slideImageRef.current = null;
-    if (!currentStep?.screenshotKey) return;
-    const url = assets[currentStep.screenshotKey];
-    if (!url) return;
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = url;
-    img.onload = () => { slideImageRef.current = img; };
-  }, [currentStep?.id, currentStep?.screenshotKey, assets]);
-
-  // ── Single persistent RAF render loop ──────────────────────────────────────
-  useEffect(() => {
-    let rafId: number;
-
-    const tick = () => {
-      const canvas = canvasRef.current;
-      const step   = stepsRef.current[currentIdxRef.current];
-
-      if (canvas && step) {
-        const cW = RenderConstants.PREVIEW_WIDTH;
-        const cH = RenderConstants.PREVIEW_HEIGHT;
-        if (canvas.width !== cW || canvas.height !== cH) {
-          canvas.width  = cW;
-          canvas.height = cH;
-        }
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          const video     = videoRef.current;
-          const hasVideo  = !!(videoUrlRef.current && video);
-
-          // Auto-advance + progress bar
-          if (isPlayingRef.current) {
-            const ci  = currentIdxRef.current;
-            const len = stepsRef.current.length;
-
-            if (hasVideo && video) {
-              // ── Video-driven advance: sync steps to video.currentTime ──────
-              const videoMs   = video.currentTime * 1000;
-              const nextStep  = stepsRef.current[ci + 1];
-              if (nextStep?.timestamp) {
-                const nextRelMs = nextStep.timestamp - sessionStartMsRef.current;
-                if (videoMs >= nextRelMs) {
-                  stepStartWall.current = performance.now();
-                  onNextRef.current();
-                }
-              }
-              if (!nextStep && video.ended) {
-                onToggleRef.current();
-              }
-              // Progress bar based on video duration
-              if (progressBarRef.current && video.duration) {
-                progressBarRef.current.style.width = `${Math.min(100, (video.currentTime / video.duration) * 100)}%`;
-              }
-            } else {
-              // ── Slideshow fallback: fixed timing ──────────────────────────
-              const elapsed = performance.now() - stepStartWall.current;
-              const stepMs  = STEP_MS / speedRef.current;
-
-              if (progressBarRef.current) {
-                const pct = Math.min(100, ((ci + Math.min(elapsed / stepMs, 1)) / len) * 100);
-                progressBarRef.current.style.width = `${pct}%`;
-              }
-
-              if (elapsed >= stepMs) {
-                stepStartWall.current = performance.now();
-                if (ci < len - 1) {
-                  onNextRef.current();
-                } else {
-                  onToggleRef.current();
-                }
-              }
-            }
-          }
-
-          // ── Cross-dissolve: blend old → new screenshot over DISSOLVE_MS ──────
-          // This ensures screenshot never jumps hard; it fades while camera springs.
-          const tRaw   = Math.min(1, (performance.now() - transitionStartRef.current) / DISSOLVE_MS);
-          const tEased = easeInOut(tRaw);
-          const newImgReady = !!slideImageRef.current;
-
-          let masterFrame: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | null;
-
-          if (hasVideo && video && !video.paused && !video.ended) {
-            // Video mode — continuous playback, no dissolve needed
-            masterFrame = video;
-          } else if (!newImgReady && prevSlideImageRef.current) {
-            // New image still loading — hold old frame (no blank flash)
-            masterFrame = prevSlideImageRef.current;
-          } else if (tRaw < 1 && prevSlideImageRef.current && newImgReady) {
-            // Dissolve: blend old screenshot (fading out) with new screenshot (fading in)
-            if (!blendCanvasRef.current) blendCanvasRef.current = document.createElement('canvas');
-            const bc  = blendCanvasRef.current;
-            const bw  = (prevSlideImageRef.current as HTMLImageElement).naturalWidth  || 1440;
-            const bh  = (prevSlideImageRef.current as HTMLImageElement).naturalHeight || 900;
-            if (bc.width !== bw || bc.height !== bh) { bc.width = bw; bc.height = bh; }
-            const bctx = bc.getContext('2d')!;
-            bctx.clearRect(0, 0, bw, bh);
-            bctx.globalAlpha = 1 - tEased;
-            bctx.drawImage(prevSlideImageRef.current, 0, 0, bw, bh);
-            bctx.globalAlpha = tEased;
-            bctx.drawImage(slideImageRef.current!, 0, 0, bw, bh);
-            bctx.globalAlpha = 1;
-            masterFrame = bc;
-          } else {
-            masterFrame = slideImageRef.current;
-          }
-
-          // ── Cursor lerp: move cursor from old position to new in sync ────────
-          // Without this, cursor jumps to new coords while camera still pans there.
-          const leaving    = leavingStepRef.current;
-          const renderStep = (tRaw < 1 && leaving?.coordinates && step?.coordinates)
-            ? { ...step, coordinates: {
-                ...step.coordinates,
-                x: lerp(leaving.coordinates.x, step.coordinates.x, tEased),
-                y: lerp(leaving.coordinates.y, step.coordinates.y, tEased),
-              }}
-            : step;
-
-          renderer.render(
-            ctx,
-            {
-              dimensions: { width: cW, height: cH },
-              step: renderStep,
-              prevStep: stepsRef.current[currentIdxRef.current - 1] ?? null,
-              progress: 1.0,
-              theme: { primaryColor: '#5E5CE6' },
-              renderMode: hasVideo ? 'hybrid' : 'slideshow',
-              camera: {
-                pctX:  camX.get(),
-                pctY:  camY.get(),
-                scale: camScale.get(),
-              },
-              timeMs: performance.now(),
-            },
-            masterFrame,
-          );
-        }
-      }
-
-      rafId = requestAnimationFrame(tick);
-    };
-
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally empty — everything is read via refs
-
-  // ── Video play/pause ────────────────────────────────────────────────────────
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v || !videoUrl) return;
-    if (isPlaying) v.play().catch(() => {});
-    else v.pause();
-  }, [isPlaying, videoUrl]);
-
-  useEffect(() => {
-    if (videoRef.current) videoRef.current.playbackRate = speed;
-  }, [speed]);
-
-  // ── Auto-hide controls ──────────────────────────────────────────────────────
-  const showControlsTemporarily = useCallback(() => {
-    setShowControls(true);
-    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    if (isPlayingRef.current) {
-      controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isPlaying) { setShowControls(true); }
-    else { showControlsTemporarily(); }
-    return () => { if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current); };
-  }, [isPlaying, showControlsTemporarily]);
-
-  // ── Fullscreen ──────────────────────────────────────────────────────────────
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) containerRef.current?.requestFullscreen();
-    else document.exitFullscreen();
-  };
-  useEffect(() => {
-    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener('fullscreenchange', onFs);
-    return () => document.removeEventListener('fullscreenchange', onFs);
-  }, []);
-
-  const totalSteps = steps.length;
-  const elapsedMs  = currentIndex * STEP_MS;
-  const totalMs    = totalSteps * STEP_MS;
-  const stepTitle  = currentStep?.stepTitle || currentStep?.elementText || `Step ${currentIndex + 1}`;
-
-  return (
-    <div
-      ref={containerRef}
-      className="w-full select-none"
-      onMouseMove={showControlsTemporarily}
-      style={{ cursor: isPlaying && !showControls ? 'none' : 'default' }}
-    >
-      {/* Hidden video element — feeds canvas renderer in hybrid mode */}
-      {videoUrl && (
-        <video
-          ref={videoRef}
-          src={videoUrl}
-          crossOrigin="anonymous"
-          className="hidden"
-          playsInline
-          muted={false}
-          preload="auto"
-        />
-      )}
-
-      {/* Player shell */}
-      <div
-        className="relative w-full rounded-2xl overflow-hidden"
-        style={{
-          aspectRatio: '16/9',
-          boxShadow: '0 24px 64px rgba(0,0,0,0.70), 0 0 0 1px rgba(94,92,230,0.2)',
-        }}
-      >
-        {/* Canvas card */}
-        <div
-          className="absolute inset-0 rounded-2xl overflow-hidden bg-[#12121a]"
-          onClick={() => { if (!isEnded) onTogglePlay(); }}
-          style={{ cursor: 'pointer' }}
-        >
-          {/* Canvas — the cinematic renderer draws here */}
-          <canvas
-            ref={canvasRef}
-            className="absolute inset-0 w-full h-full block"
-            style={{ imageRendering: 'auto' }}
-          />
-
-          {/* Play overlay when paused */}
-          {!isPlaying && !isEnded && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-20 h-20 rounded-full bg-black/55 backdrop-blur-sm border border-white/20 flex items-center justify-center"
-                style={{ boxShadow: '0 0 0 1px rgba(94,92,230,0.3), 0 8px 32px rgba(0,0,0,0.5)' }}>
-                <I.Play size={28} className="text-white ml-1.5" />
-              </div>
-            </div>
-          )}
-
-          {/* Ended overlay */}
-          {isEnded && (
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8">
-              <div className="w-16 h-16 rounded-full bg-indigo-500/20 flex items-center justify-center mb-5">
-                <I.CheckCircle size={30} className="text-indigo-400" strokeWidth={2} />
-              </div>
-              <h2 className="text-[22px] font-bold text-white mb-2">End of Walkthrough</h2>
-              <p className="text-[14px] text-white/50 max-w-xs mb-7">You've reached the end.</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={(e) => { e.stopPropagation(); onSeek(0); setIsEnded(false); onTogglePlay(); }}
-                  className="flex items-center gap-2 px-5 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[13px] font-semibold transition-colors"
-                >
-                  <I.RotateCcw size={14} /> Watch again
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setIsEnded(false); }}
-                  className="flex items-center gap-2 px-5 h-10 rounded-xl border border-white/20 text-white/70 hover:text-white text-[13px] font-semibold transition-colors"
-                >
-                  Stay here
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Step counter badge */}
-          {!isEnded && (
-            <div
-              className="absolute top-3 right-3 px-2.5 py-1 bg-black/60 rounded-full text-white text-[11px] font-semibold backdrop-blur-sm pointer-events-none"
-              style={{ opacity: showControls || !isPlaying ? 1 : 0, transition: 'opacity 0.3s' }}
-            >
-              {currentIndex + 1} / {totalSteps}
-            </div>
-          )}
-
-          {/* Lower-third step label */}
-          {!isEnded && (
-            <div
-              className="absolute bottom-[52px] left-0 right-0 px-5 pb-3 pointer-events-none"
-              style={{
-                background: 'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%)',
-                opacity: showControls || !isPlaying ? 1 : 0,
-                transition: 'opacity 0.3s',
-              }}
-            >
-              <p className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider mb-0.5">
-                Step {currentIndex + 1}
-              </p>
-              <p className="text-[13px] font-semibold text-white leading-snug line-clamp-1">{stepTitle}</p>
-            </div>
-          )}
-
-          {/* Controls overlay (auto-hides during playback) */}
-          {!isEnded && (
-            <div
-              className="absolute bottom-0 left-0 right-0"
-              style={{
-                opacity: showControls || !isPlaying ? 1 : 0,
-                transition: 'opacity 0.3s',
-                pointerEvents: showControls || !isPlaying ? 'auto' : 'none',
-              }}
-              onClick={e => e.stopPropagation()}
-            >
-              {/* Progress bar */}
-              <div
-                className="h-1 bg-white/10 cursor-pointer group"
-                onClick={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const pct  = (e.clientX - rect.left) / rect.width;
-                  onSeek(Math.min(totalSteps - 1, Math.floor(pct * totalSteps)));
-                }}
-              >
-                <div
-                  ref={progressBarRef}
-                  className="h-full bg-gradient-to-r from-indigo-500 to-violet-500"
-                  style={{ width: `${(currentIndex / totalSteps) * 100}%`, transition: 'none' }}
-                />
-                <div
-                  className="absolute top-0 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity -translate-x-1/2 pointer-events-none"
-                  style={{ left: `${(currentIndex / totalSteps) * 100}%` }}
-                />
-              </div>
-
-              {/* Controls row */}
-              <div className="flex items-center gap-2 px-4 h-12 bg-black/80 backdrop-blur-sm">
-                <button onClick={onPrev} disabled={currentIndex === 0}
-                  className="p-1.5 text-white/50 hover:text-white disabled:opacity-20 transition-colors">
-                  <I.SkipBack size={16} />
-                </button>
-                <button
-                  onClick={onTogglePlay}
-                  className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:bg-white/90 active:scale-95 flex-shrink-0 transition-all shadow"
-                >
-                  {isPlaying
-                    ? <I.Pause size={15} className="text-black" />
-                    : <I.Play  size={15} className="text-black ml-0.5" />}
-                </button>
-                <button onClick={onNext} disabled={currentIndex === totalSteps - 1}
-                  className="p-1.5 text-white/50 hover:text-white disabled:opacity-20 transition-colors">
-                  <I.SkipForward size={16} />
-                </button>
-                <span className="text-[11px] text-white/35 tabular-nums ml-1 font-mono select-none">
-                  {fmtTime(elapsedMs)} / {fmtTime(totalMs)}
-                </span>
-                <div className="flex-1" />
-                <div className="flex items-center gap-0.5 bg-white/[0.08] rounded-md p-0.5">
-                  {[0.5, 1, 1.5, 2].map(s => (
-                    <button key={s} onClick={() => onSpeedChange(s)}
-                      className={cn('px-2 h-5 rounded text-[10px] font-bold transition-colors',
-                        speed === s ? 'bg-white text-black' : 'text-white/40 hover:text-white')}>
-                      {s}×
-                    </button>
-                  ))}
-                </div>
-                <button onClick={toggleFullscreen} className="p-1.5 text-white/40 hover:text-white transition-colors ml-1">
-                  {isFullscreen ? <I.Minimize2 size={14} /> : <I.Maximize size={14} />}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 // ─── TranscriptPanel ─────────────────────────────────────────────────────────
 
 const TranscriptPanel: React.FC<{
@@ -737,11 +235,10 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const [copied,     setCopied]     = useState(false);
   const [viewMode,   setViewMode]   = useState<ViewMode>('video');
 
-  // Player state
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isPlaying,    setIsPlaying]    = useState(false);
-  const [speed,        setSpeed]        = useState(1);
-  const speedRef = useRef(1);
+  // displayIndex tracks which step the player is on — updated via onStepSelect
+  // Used for step info card, transcript highlight, chapter label.
+  const [displayIndex, setDisplayIndex] = useState(0);
+  const playerRef = useRef<CinematicPlayerHandle>(null);
 
   // ── Fetch session JSON (shared by initial load + background refresh) ──────
   const sessionJsonUrlRef = useRef<string | null>(null);
@@ -787,41 +284,11 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     return s ? new Date(s).getTime() : ((steps[0] as any)?.timestamp || 0);
   }, [session, steps]);
 
-  const videoElRef = useRef<HTMLVideoElement | null>(null);
-  const goTo = useCallback((idx: number) => {
-    const clamped = Math.max(0, Math.min(steps.length - 1, idx));
-    setCurrentIndex(clamped);
-    // Seek video to the step's relative position
-    const step = steps[clamped] as any;
-    if (videoElRef.current && step?.timestamp && sessionStartMs) {
-      const relSec = Math.max(0, (step.timestamp - sessionStartMs) / 1000);
-      videoElRef.current.currentTime = relSec;
-    }
-  }, [steps, sessionStartMs]);
-
-  const handleSpeedChange = (s: number) => {
-    setSpeed(s);
-    speedRef.current = s;
-  };
-
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (e.key === 'ArrowRight') goTo(currentIndex + 1);
-      if (e.key === 'ArrowLeft')  goTo(currentIndex - 1);
-      if (e.key === ' ')          { e.preventDefault(); setIsPlaying(p => !p); }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [currentIndex, goTo]);
 
   // ── Loading ──
   if (loading) return (
@@ -849,13 +316,13 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const tags         = session.aiOutputs?.tags || [];
   const chapterMap   = buildChapterMap(session.metadata?.chapterBreaks);
   const videoUrl     = (session as any).videoKey ? assets[(session as any).videoKey] ?? null : null;
-  const currentStep  = steps[currentIndex];
-  const currentTitle = currentStep?.stepTitle || currentStep?.elementText || `Step ${currentIndex + 1}`;
+  const currentStep  = steps[displayIndex];
+  const currentTitle = currentStep?.stepTitle || currentStep?.elementText || `Step ${displayIndex + 1}`;
   const currentText  = currentStep?.textOverride || currentStep?.generatedText || '';
   const siteDomain   = getDomain(session.capturedUrl);
 
   let currentChapter = '';
-  for (let i = currentIndex; i >= 0; i--) {
+  for (let i = displayIndex; i >= 0; i--) {
     const sid = steps[i]?.id;
     if (sid && chapterMap.has(sid)) { currentChapter = chapterMap.get(sid)!; break; }
   }
@@ -931,19 +398,15 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
 
             {/* Left: cinematic player + step card */}
             <div className="flex-1 min-w-0 space-y-4">
-              <CinematicVideoPlayer
+              <CinematicPlayer
+                ref={playerRef}
                 steps={steps}
                 assets={assets}
-                currentIndex={currentIndex}
-                isPlaying={isPlaying}
-                speed={speed}
                 videoUrl={videoUrl}
                 sessionStartMs={sessionStartMs}
-                onSeek={goTo}
-                onTogglePlay={() => setIsPlaying(p => !p)}
-                onPrev={() => goTo(currentIndex - 1)}
-                onNext={() => goTo(currentIndex + 1)}
-                onSpeedChange={handleSpeedChange}
+                chapterBreaks={session.metadata?.chapterBreaks}
+                renderMode={videoUrl ? 'hybrid' : 'slideshow'}
+                onStepSelect={setDisplayIndex}
               />
 
               {/* Current step info card */}
@@ -952,18 +415,18 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
                   <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider mb-2">{currentChapter}</p>
                 )}
                 <h2 className="text-[20px] sm:text-[22px] font-bold text-white leading-snug mb-2">
-                  <span className="text-indigo-400 mr-1.5">Step {currentIndex + 1}.</span>
+                  <span className="text-indigo-400 mr-1.5">Step {displayIndex + 1}.</span>
                   {currentTitle}
                 </h2>
                 {currentText && <p className="text-[14px] text-white/60 leading-relaxed">{currentText}</p>}
 
                 <div className="flex items-center gap-2 mt-5 pt-4 border-t border-white/[0.06]">
-                  <button onClick={() => goTo(currentIndex - 1)} disabled={currentIndex === 0}
+                  <button onClick={() => playerRef.current?.seekToStep(displayIndex - 1)} disabled={displayIndex === 0}
                     className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium text-white/50 hover:text-white hover:bg-white/[0.07] disabled:opacity-30 transition-colors">
                     <I.ChevronLeft size={14} /> Prev
                   </button>
-                  <span className="text-[12px] text-white/30 flex-1 text-center">{currentIndex + 1} of {steps.length}</span>
-                  <button onClick={() => goTo(currentIndex + 1)} disabled={currentIndex === steps.length - 1}
+                  <span className="text-[12px] text-white/30 flex-1 text-center">{displayIndex + 1} of {steps.length}</span>
+                  <button onClick={() => playerRef.current?.seekToStep(displayIndex + 1)} disabled={displayIndex === steps.length - 1}
                     className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium text-white/50 hover:text-white hover:bg-white/[0.07] disabled:opacity-30 transition-colors">
                     Next <I.ChevronRight size={14} />
                   </button>
@@ -983,8 +446,8 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
                 style={{ height: 'calc(100vh - 100px)' }}>
                 <TranscriptPanel
                   steps={steps} assets={assets}
-                  currentIndex={currentIndex} chapterMap={chapterMap}
-                  onSelect={(i) => { goTo(i); setIsPlaying(false); }}
+                  currentIndex={displayIndex} chapterMap={chapterMap}
+                  onSelect={(i) => { playerRef.current?.seekToStep(i); setDisplayIndex(i); }}
                 />
               </div>
             </div>

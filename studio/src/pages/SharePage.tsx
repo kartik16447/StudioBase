@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { I } from '../components/icons';
 import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
+import { CinematicPlayer } from '../components/player/CinematicPlayer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -483,7 +484,12 @@ export const SharePage: React.FC = () => {
 
         {/* ── Video Tab ── */}
         {activeTab === 'video' && (
-          <VideoPlayer steps={steps} assets={session.assets} />
+          <CinematicPlayer
+            steps={steps}
+            assets={session.assets ?? {}}
+            chapterBreaks={(session as any).metadata?.chapterBreaks}
+            renderMode="slideshow"
+          />
         )}
 
         {/* Footer */}
