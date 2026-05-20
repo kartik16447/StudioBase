@@ -81,10 +81,14 @@ export async function exportScreenshotsToVideo(
   }
 
   function drawStep(img: HTMLImageElement, step: any, zoom: number, alpha: number) {
-    ctx.save();
-    ctx.globalAlpha = alpha;
+    // Always clear + fill background at full opacity so previous frames don't bleed through
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.fillStyle = '#0a0a0f';
     ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    // Draw the screenshot at the requested alpha
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
 
     const layout = CinematicMath.getScreenshotLayout(CANVAS_W, CANVAS_H, img.naturalWidth, img.naturalHeight);
     const target = CinematicMath.getTarget(step, 'slideshow');
