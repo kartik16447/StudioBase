@@ -514,6 +514,7 @@ export const VideoCanvas: React.FC = () => {
   // getCurrentStep() === currentStepIndex and we skip the seek entirely.
   useEffect(() => {
     const playerStep = cinPlayerRef.current?.getCurrentStep() ?? currentStepIndex;
+    console.log('[VideoCanvas] sync effect | store:', currentStepIndex, '| playerStep:', playerStep, '| will seek:', playerStep !== currentStepIndex);
     if (playerStep !== currentStepIndex) {
       cinPlayerRef.current?.seekToStep(currentStepIndex);
     }
@@ -521,6 +522,7 @@ export const VideoCanvas: React.FC = () => {
 
   // ── Callbacks from CinematicPlayer → store ─────────────────────────────────
   const handlePlayerStepSelect = useCallback((idx: number) => {
+    console.log('[VideoCanvas] handlePlayerStepSelect → setStepIndex', idx);
     setStepIndex(idx);
   }, [setStepIndex]);
 

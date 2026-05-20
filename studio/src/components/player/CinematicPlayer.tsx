@@ -402,12 +402,12 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         getSegmentAt(currentMsRef.current, segs);
 
       if (newIdx !== currentIdxRef.current) {
+        console.log('[CinematicPlayer] step advance', currentIdxRef.current, '→', newIdx, '| currentMs:', Math.round(currentMsRef.current), '| totalMs:', Math.round(totMs));
         currentIdxRef.current = newIdx;
         setCurrentIndex(newIdx);
         // Notify parent of natural advance — parent updates display state
         // without triggering a seek-back loop (getCurrentStep() check).
         onStepSelectRef.current?.(newIdx);
-
       }
 
       // ── Camera — overview → event zoom → overview per step ───────────────
@@ -419,6 +419,12 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         camX.set(ct.pctX);
         camY.set(ct.pctY);
         camScale.set(ct.scale);
+        // Log camera target once per phase change (not every frame)
+        const phase = stepProgress < 0.20 ? 'overview' : stepProgress >= 0.80 ? 'retreat' : 'event';
+        if (phase !== (camStep as any).__lastPhase) {
+          (camStep as any).__lastPhase = phase;
+          console.log('[CinematicPlayer] camera phase →', phase, '| step:', currentIdxRef.current, '| progress:', stepProgress.toFixed(2), '| target:', JSON.stringify(ct));
+        }
       }
 
       // ── Canvas render ─────────────────────────────────────────────────────
@@ -615,6 +621,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   }, [isEnded]);
 
   const scrubTo = useCallback((ms: number) => {
+    console.log('[CinematicPlayer] scrubTo', Math.round(ms), 'ms | currentIdxRef:', currentIdxRef.current);
     const clamped = Math.max(0, Math.min(ms, totalMsRef.current));
     currentMsRef.current  = clamped;
     lastTickRef.current   = performance.now();
