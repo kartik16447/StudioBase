@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { motion, AnimatePresence, useSpring } from 'framer-motion';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../../components/icons';
 import { cn, Button } from '../../../components/ui';
@@ -476,23 +476,10 @@ export const VideoCanvas: React.FC = () => {
   const cinPlayerRef      = useRef<CinematicPlayerHandle>(null);
   const lastStepFromPlayer = useRef(-1); // prevents seek loop between player ↔ store
   const rawVideoRef       = useRef<HTMLVideoElement>(null);
-  // canvasRef / videoRef / progressBarRef / renderer retained for export pipeline only
-  const canvasRef      = useRef<HTMLCanvasElement>(null);
-  const videoRef       = useRef<HTMLVideoElement>(null);
-  const progressBarRef = useRef<HTMLDivElement>(null);
-  const renderer       = useMemo(() => new CanvasRenderer(), []);
-
-  // ── Camera springs (framer-motion) ──────────────────────────────────────
-  const { stiffness: sxy, damping: dxy, mass: mxy } = RenderConstants.CAMERA_XY_SPRING;
-  const { stiffness: ss,  damping: ds,  mass: ms  } = RenderConstants.CAMERA_SCALE_SPRING;
-  const camX     = useSpring(50,  { stiffness: sxy, damping: dxy, mass: mxy });
-  const camY     = useSpring(50,  { stiffness: sxy, damping: dxy, mass: mxy });
-  const camScale = useSpring(1.0, { stiffness: ss,  damping: ds,  mass: ms  });
 
   const renderMode = useStudioStore((s) => s.renderMode);
   const steps      = session?.steps || [];
   const currentStep = steps[currentStepIndex];
-  const prevStep    = steps[currentStepIndex - 1] ?? null;
 
   const rawVideoUrl = session?.videoKey
     ? (session.assets?.[session.videoKey] ?? null)
@@ -561,88 +548,10 @@ export const VideoCanvas: React.FC = () => {
     return () => clearTimeout(t);
   }, [currentStepIndex, isPlaying]);
 
-  // ── Step change: update camera springs (hybrid distance-based model) ────
+  // ── Raw video playback rate ──────────────────────────────────────────────
   useEffect(() => {
-    if (!currentStep || isExporting) return;
-
-    // Read current animated camera position to measure move distance
-    const { target, revealTarget } = CinematicMath.getHybridTarget(
-      currentStep, camX.get(), camY.get(),
-    );
-
-    if (revealTarget) {
-      // Far move: ease to contextual reveal first (zoom-out + partial pan),
-      // then after 350 ms glide into the final target.
-      camX.set(revealTarget.pctX);
-      camY.set(revealTarget.pctY);
-      camScale.set(revealTarget.scale);
-      const t = setTimeout(() => {
-        camX.set(target.pctX);
-        camY.set(target.pctY);
-        camScale.set(target.scale);
-      }, 350);
-      return () => clearTimeout(t);
-    } else {
-      // Near / mid: direct spring pan with proportional zoom
-      camX.set(target.pctX);
-      camY.set(target.pctY);
-      camScale.set(target.scale);
-    }
-
-    // Reset raw video seek position
-    if (videoRef.current && hybridVideoUrl && !isPlaying) {
-      const seekT = (currentStep.timestamp || 0) / 1000;
-      if (Math.abs(videoRef.current.currentTime - seekT) > 0.15) {
-        videoRef.current.currentTime = seekT;
-      }
-    }
-
-    (window as any)._stepChangeTime = performance.now();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStepIndex, currentStep?.id, currentStep?.animationTarget, renderMode]);
-
-  // ── Slide preloader ──────────────────────────────────────────────────────
-  const slideImageRef      = useRef<HTMLImageElement | null>(null);
-  const prevSlideImageRef  = useRef<HTMLImageElement | null>(null);
-  const blendCanvasRef     = useRef<HTMLCanvasElement | null>(null);
-  const transitionStartRef = useRef<number>(-Infinity);
-  const leavingStepRef     = useRef<any>(null);
-  const previousIdxRef     = useRef<number>(0);
-
-  // Save outgoing state before loading new screenshot (cross-dissolve + cursor lerp)
-  useEffect(() => {
-    prevSlideImageRef.current  = slideImageRef.current;
-    leavingStepRef.current     = steps[previousIdxRef.current] ?? null;
-    previousIdxRef.current     = currentStepIndex;
-    transitionStartRef.current = performance.now();
-  }, [currentStepIndex]);
-
-  useEffect(() => {
-    if (!currentStep?.screenshotKey) return;
-    const url = session?.assets?.[currentStep.screenshotKey];
-    if (!url) return;
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = url;
-    img.onload = () => { slideImageRef.current = img; };
-  }, [currentStep?.id]);
-
-  // ── Video playback control ───────────────────────────────────────────────
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v || !hybridVideoUrl) return;
-    if (isPlaying && renderMode === 'hybrid') v.play().catch(() => {});
-    else v.pause();
-  }, [isPlaying, hybridVideoUrl, renderMode]);
-
-  useEffect(() => {
-    if (videoRef.current) videoRef.current.playbackRate = playbackRate;
     if (rawVideoRef.current) rawVideoRef.current.playbackRate = playbackRate;
   }, [playbackRate]);
-
-  // ── Auto-advance (slideshow) ─────────────────────────────────────────────
-  const stepStartWall = useRef(performance.now());
-  useEffect(() => { stepStartWall.current = performance.now(); }, [currentStepIndex]);
 
   // Analytics tracking refs
   const viewedSteps = useRef<Set<number>>(new Set());
@@ -701,156 +610,10 @@ export const VideoCanvas: React.FC = () => {
     }
   }, [currentStepIndex, isPlaying, playbackRate, currentStep?.voiceoverKey]);
 
-  // ── Main rAF render loop ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (viewMode !== 'cinematic') return; // Raw player handles its own rendering
-
-    let rafId: number;
-
-    const tick = () => {
-      const canvas  = canvasRef.current;
-      const video   = videoRef.current;
-      if (!canvas || !currentStep) { rafId = requestAnimationFrame(tick); return; }
-
-      const cW = RenderConstants.PREVIEW_WIDTH;
-      const cH = RenderConstants.PREVIEW_HEIGHT;
-      if (canvas.width !== cW || canvas.height !== cH) {
-        canvas.width  = cW;
-        canvas.height = cH;
-      }
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { rafId = requestAnimationFrame(tick); return; }
-
-      // ── Hybrid auto-advance via video timestamp ────────────────────────
-      if (renderMode === 'hybrid' && isPlaying && video) {
-        const videoMs   = (video.currentTime || 0) * 1000;
-        const nextStep  = steps[currentStepIndex + 1];
-        const curState  = useStudioStore.getState();
-        if (nextStep && videoMs >= (nextStep.timestamp || 0)) {
-          if (currentStepIndex < steps.length - 1) {
-            curState.setStepIndex(currentStepIndex + 1);
-          }
-        }
-        if (isPlaying && !nextStep && video.ended) {
-          handleSessionEndRef.current();
-        }
-      }
-
-      // ── Slideshow auto-advance — runs in slideshow mode OR hybrid with no video ──
-      const usesSlideshowAdvance = renderMode === 'slideshow' || (renderMode === 'hybrid' && !hybridVideoUrl);
-      if (usesSlideshowAdvance && isPlaying) {
-        const elapsed   = performance.now() - stepStartWall.current;
-        const stepMs    = Math.max(2000, currentStep?.voiceoverDurationMs || 3500);
-        const effectiveMs = stepMs / (playbackRate || 1);
-
-        // Smooth progress bar — direct DOM write, no React re-render
-        if (progressBarRef.current) {
-          const completedFraction = currentStepIndex / steps.length;
-          const stepFraction      = (elapsed / effectiveMs) / steps.length;
-          const pct = Math.min(100, (completedFraction + stepFraction) * 100);
-          progressBarRef.current.style.width = `${pct}%`;
-        }
-
-        if (elapsed >= effectiveMs) {
-          const cs = useStudioStore.getState();
-          if (cs.currentStepIndex < steps.length - 1) {
-            cs.setStepIndex(cs.currentStepIndex + 1);
-          } else {
-            handleSessionEndRef.current();
-          }
-        }
-      }
-
-      // ── Cross-dissolve + cursor lerp (mirrors PlayerPage logic) ──────────
-      const DISSOLVE_MS_VC = 400;
-      const lerpFn    = (a: number, b: number, t: number) => a + (b - a) * t;
-      const easeIO    = (t: number) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-      const tRaw      = Math.min(1, (performance.now() - transitionStartRef.current) / DISSOLVE_MS_VC);
-      const tEased    = easeIO(tRaw);
-      const newReady  = !!slideImageRef.current;
-
-      let masterFrame: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | null;
-
-      if (renderMode === 'hybrid' && video && !video.paused && !video.ended) {
-        masterFrame = video;
-      } else if (!newReady && prevSlideImageRef.current) {
-        masterFrame = prevSlideImageRef.current;
-      } else if (tRaw < 1 && prevSlideImageRef.current && newReady) {
-        if (!blendCanvasRef.current) blendCanvasRef.current = document.createElement('canvas');
-        const bc  = blendCanvasRef.current;
-        const bw  = prevSlideImageRef.current.naturalWidth  || 1440;
-        const bh  = prevSlideImageRef.current.naturalHeight || 900;
-        if (bc.width !== bw || bc.height !== bh) { bc.width = bw; bc.height = bh; }
-        const bctx = bc.getContext('2d')!;
-        bctx.clearRect(0, 0, bw, bh);
-        bctx.globalAlpha = 1 - tEased;
-        bctx.drawImage(prevSlideImageRef.current, 0, 0, bw, bh);
-        bctx.globalAlpha = tEased;
-        bctx.drawImage(slideImageRef.current!, 0, 0, bw, bh);
-        bctx.globalAlpha = 1;
-        masterFrame = bc;
-      } else {
-        masterFrame = slideImageRef.current ?? (video ?? null);
-      }
-
-      // Cursor lerp: move from old click-point to new in sync with camera spring
-      const leaving = leavingStepRef.current;
-      const renderStep = (tRaw < 1 && leaving?.coordinates && currentStep?.coordinates)
-        ? { ...currentStep, coordinates: {
-            ...currentStep.coordinates,
-            x: lerpFn(leaving.coordinates.x, currentStep.coordinates.x, tEased),
-            y: lerpFn(leaving.coordinates.y, currentStep.coordinates.y, tEased),
-          }}
-        : currentStep;
-
-      renderer.render(
-        ctx,
-        {
-          dimensions: { width: cW, height: cH },
-          step: renderStep,
-          prevStep,
-          progress: 1.0,
-          theme: {
-            primaryColor: brand.primaryColor,
-            logoUrl: brand.logoUrl ?? undefined,
-            watermark: brand.watermark ?? undefined,
-          },
-          renderMode: renderMode || 'hybrid',
-          camera: {
-            pctX:  camX.get(),
-            pctY:  camY.get(),
-            scale: camScale.get(),
-          },
-          timeMs: performance.now(),
-        },
-        masterFrame,
-      );
-
-      rafId = requestAnimationFrame(tick);
-    };
-
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
-  }, [currentStepIndex, isPlaying, brand, renderMode, steps, viewMode]);
-
   if (!session) return null;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col relative">
-      {/* Hidden video element — feeds cinematic canvas in hybrid mode */}
-      {hybridVideoUrl && (
-        <video
-          ref={videoRef}
-          src={hybridVideoUrl}
-          crossOrigin="anonymous"
-          className="hidden"
-          playsInline
-          muted
-          preload="auto"
-        />
-      )}
-
       <style>{`
         .studio-gradient {
           background:

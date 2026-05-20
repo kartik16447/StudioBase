@@ -299,6 +299,10 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   useEffect(() => { videoUrlRef.current    = videoUrl;     }, [videoUrl]);
   useEffect(() => { sessionStartMsRef.current = sessionStartMs; }, [sessionStartMs]);
 
+  // Ref-shadow for onStepSelect so we can call it from rAF without stale closure
+  const onStepSelectRef = useRef(onStepSelect);
+  useEffect(() => { onStepSelectRef.current = onStepSelect; }, [onStepSelect]);
+
   const renderer = useMemo(() => new CanvasRenderer(), []);
 
   // ── Camera springs ─────────────────────────────────────────────────────────
@@ -403,6 +407,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         if (newIdx !== currentIdxRef.current) {
           currentIdxRef.current = newIdx;
           setCurrentIndex(newIdx);
+          // Notify parent of natural step advance so it can sync its store without
+          // triggering a seek-back (the parent uses this to update lastStepFromPlayer)
+          onStepSelectRef.current?.(newIdx);
         }
 
         // Update progress bar directly (no re-render)
