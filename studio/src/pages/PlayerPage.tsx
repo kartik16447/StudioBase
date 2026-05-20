@@ -150,27 +150,31 @@ const CinematicVideoPlayer: React.FC<PlayerProps> = ({
     }
   }, [currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Camera spring target on step change (mirrors VideoCanvas exactly)
+  // Camera spring target on step change — hybrid distance-based model
   useEffect(() => {
     if (!currentStep) return;
-    const target   = CinematicMath.getTarget(currentStep, 'slideshow');
-    const sameCtx  = CinematicMath.isSameContext(prevStep, currentStep);
 
-    if (sameCtx) {
-      camX.set(target.pctX);
-      camY.set(target.pctY);
-      camScale.set(target.scale);
-    } else {
-      // Cross-context: briefly return to overview, then spring to new target
-      camScale.set(1.0);
-      camX.set(50);
-      camY.set(50);
+    // Measure distance from current animated position to decide bucket + reveal
+    const { target, revealTarget } = CinematicMath.getHybridTarget(
+      currentStep, camX.get(), camY.get(),
+    );
+
+    if (revealTarget) {
+      // Far move: pull back to context view, then glide to destination
+      camX.set(revealTarget.pctX);
+      camY.set(revealTarget.pctY);
+      camScale.set(revealTarget.scale);
       const t = setTimeout(() => {
         camX.set(target.pctX);
         camY.set(target.pctY);
         camScale.set(target.scale);
       }, 350);
       return () => clearTimeout(t);
+    } else {
+      // Near / mid: direct spring — pan with proportional zoom
+      camX.set(target.pctX);
+      camY.set(target.pctY);
+      camScale.set(target.scale);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, currentStep?.id]);

@@ -27,9 +27,18 @@ export const RenderConstants = {
 
   PANEL_SPRING: { type: 'spring' as const, stiffness: 280, damping: 36 },
 
-  // Cinematic camera springs — critically damped, heavy, no oscillation
-  // XY (pan): stiffness 40, damping 24, mass 1.6 → slow lazy pan, settles ~1.4s
-  // Scale (zoom): stiffness 32, damping 26, mass 1.8 → even heavier zoom, settles ~1.8s
-  CAMERA_XY_SPRING:    { stiffness: 40, damping: 24, mass: 1.6, restDelta: 0.001 },
-  CAMERA_SCALE_SPRING: { stiffness: 32, damping: 26, mass: 1.8, restDelta: 0.001 },
+  // Cinematic camera springs — pan is a bit more responsive, zoom is heavy & restrained
+  // XY (pan):   stiffness 45, damping 26, mass 1.4 → settles ~1.2s, no bounce
+  // Scale (zoom): stiffness 28, damping 28, mass 1.8 → very slow, settles ~2s, over-damped
+  CAMERA_XY_SPRING:    { stiffness: 45, damping: 26, mass: 1.4, restDelta: 0.001 },
+  CAMERA_SCALE_SPRING: { stiffness: 28, damping: 28, mass: 1.8, restDelta: 0.001 },
+
+  // Hard zoom scale limits — keeps the view readable, prevents tunnel-vision
+  CAMERA_SCALE_LIMITS: {
+    min:  1.0,   // full overview, no zoom
+    near: 1.08,  // tiny zoom for nearby targets (0–10% distance)
+    mid:  1.18,  // mild zoom for medium moves (10–30% distance)
+    far:  1.28,  // modest zoom for far moves  (30%+ distance)
+    max:  1.35,  // hard cap — never exceed this
+  },
 };

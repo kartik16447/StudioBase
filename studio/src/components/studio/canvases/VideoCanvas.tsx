@@ -205,8 +205,8 @@ export async function handleSOPVideoExport(config: {
       const step     = steps[i];
       const prevStep = i > 0 ? steps[i - 1] : null;
 
-      // Camera target for this step — spring carries momentum from previous step
-      const target = CinematicMath.getTarget(step, renderMode);
+      // Distance-based camera target — hybrid model, scale capped at maxScale
+      const { target, revealTarget } = CinematicMath.getHybridTarget(step, springX, springY);
 
       // Chapter card (PATCH 5) — 1.5 s branded title card before this step
       const exportChapter = i > 0 ? chapterMap.get(steps[i - 1].id) : null;
@@ -238,14 +238,14 @@ export async function handleSOPVideoExport(config: {
         }
       }
 
-      // Cross-context reorientation beat — hold at overview for ~350 ms of real frames
-      const sameCtx = CinematicMath.isSameContext(prevStep, step);
-      if (!sameCtx && i > 0) {
-        const overviewFrames = Math.round(fps * 0.35);
-        for (let of = 0; of < overviewFrames; of++) {
-          const sox = simSpring(springX, velX, 50, RenderConstants.CAMERA_XY_SPRING.stiffness, RenderConstants.CAMERA_XY_SPRING.damping, RenderConstants.CAMERA_XY_SPRING.mass);
-          const soy = simSpring(springY, velY, 50, RenderConstants.CAMERA_XY_SPRING.stiffness, RenderConstants.CAMERA_XY_SPRING.damping, RenderConstants.CAMERA_XY_SPRING.mass);
-          const sos = simSpring(springScale, velScale, 1.0, RenderConstants.CAMERA_SCALE_SPRING.stiffness, RenderConstants.CAMERA_SCALE_SPRING.damping, RenderConstants.CAMERA_SCALE_SPRING.mass);
+      // Contextual reveal beat for far moves — zoom-out + partial pan toward target,
+      // then the main step frames spring the rest of the way in.
+      if (revealTarget && i > 0) {
+        const revealFrames = Math.round(fps * 0.35);
+        for (let rf = 0; rf < revealFrames; rf++) {
+          const sox = simSpring(springX, velX, revealTarget.pctX, RenderConstants.CAMERA_XY_SPRING.stiffness, RenderConstants.CAMERA_XY_SPRING.damping, RenderConstants.CAMERA_XY_SPRING.mass);
+          const soy = simSpring(springY, velY, revealTarget.pctY, RenderConstants.CAMERA_XY_SPRING.stiffness, RenderConstants.CAMERA_XY_SPRING.damping, RenderConstants.CAMERA_XY_SPRING.mass);
+          const sos = simSpring(springScale, velScale, revealTarget.scale, RenderConstants.CAMERA_SCALE_SPRING.stiffness, RenderConstants.CAMERA_SCALE_SPRING.damping, RenderConstants.CAMERA_SCALE_SPRING.mass);
           springX = sox.value; velX = sox.velocity;
           springY = soy.value; velY = soy.velocity;
           springScale = sos.value; velScale = sos.velocity;
@@ -533,28 +533,32 @@ export const VideoCanvas: React.FC = () => {
     return () => clearTimeout(t);
   }, [currentStepIndex, isPlaying]);
 
-  // ── Step change: update camera springs ──────────────────────────────────
+  // ── Step change: update camera springs (hybrid distance-based model) ────
   useEffect(() => {
     if (!currentStep || isExporting) return;
-    const target  = CinematicMath.getTarget(currentStep, renderMode);
-    const sameCtx = CinematicMath.isSameContext(prevStep, currentStep);
 
-    if (sameCtx) {
-      // Same page — spring directly to new target
-      camX.set(target.pctX);
-      camY.set(target.pctY);
-      camScale.set(target.scale);
-    } else {
-      // Cross-context — briefly return to overview then snap to new target
-      camScale.set(1.0);
-      camX.set(50);
-      camY.set(50);
+    // Read current animated camera position to measure move distance
+    const { target, revealTarget } = CinematicMath.getHybridTarget(
+      currentStep, camX.get(), camY.get(),
+    );
+
+    if (revealTarget) {
+      // Far move: ease to contextual reveal first (zoom-out + partial pan),
+      // then after 350 ms glide into the final target.
+      camX.set(revealTarget.pctX);
+      camY.set(revealTarget.pctY);
+      camScale.set(revealTarget.scale);
       const t = setTimeout(() => {
         camX.set(target.pctX);
         camY.set(target.pctY);
         camScale.set(target.scale);
       }, 350);
       return () => clearTimeout(t);
+    } else {
+      // Near / mid: direct spring pan with proportional zoom
+      camX.set(target.pctX);
+      camY.set(target.pctY);
+      camScale.set(target.scale);
     }
 
     // Reset raw video seek position
@@ -566,6 +570,7 @@ export const VideoCanvas: React.FC = () => {
     }
 
     (window as any)._stepChangeTime = performance.now();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStepIndex, currentStep?.id, currentStep?.animationTarget, renderMode]);
 
   // ── Slide preloader ──────────────────────────────────────────────────────
