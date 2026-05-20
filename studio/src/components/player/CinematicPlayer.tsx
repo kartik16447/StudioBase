@@ -260,6 +260,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // ── Playback state ─────────────────────────────────────────────────────────
   const [isPlaying,    setIsPlaying]    = useState(false);
   const [speed,        setSpeed]        = useState(1);
+  const [isMuted,      setIsMuted]      = useState(false);
   const [isEnded,      setIsEnded]      = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -530,6 +531,12 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     audioRef.current.playbackRate = speed;
   }, [speed]);
 
+  useEffect(() => {
+    audioRef.current.muted = isMuted;
+    // Also mute the backing video track so it never competes with the voiceover
+    if (videoRef.current) videoRef.current.muted = isMuted;
+  }, [isMuted]);
+
   // ── Voiceover — step change ────────────────────────────────────────────────
   // Fires on every step change (natural advance or seek).
   // assets map must contain resolved URLs for any voiceoverKey values.
@@ -604,6 +611,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         scrubBy(5000);
       } else if (e.key === 'f' || e.key === 'F') {
         toggleFullscreen();
+      } else if (e.key === 'm' || e.key === 'M') {
+        setIsMuted(m => !m);
       }
     };
     document.addEventListener('keydown', handler);
@@ -699,7 +708,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           crossOrigin="anonymous"
           className="hidden"
           playsInline
-          muted={false}
+          muted={true}
           preload="auto"
         />
       )}
@@ -881,6 +890,15 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                     </button>
                   ))}
                 </div>
+
+                {/* Mute toggle */}
+                <button
+                  onClick={() => setIsMuted(m => !m)}
+                  className="p-1.5 text-white/40 hover:text-white transition-colors ml-1"
+                  title={isMuted ? 'Unmute (M)' : 'Mute (M)'}
+                >
+                  {isMuted ? <I.Volume size={14} className="opacity-30" /> : <I.Volume size={14} />}
+                </button>
 
                 {/* Fullscreen */}
                 <button

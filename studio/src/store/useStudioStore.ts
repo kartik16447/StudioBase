@@ -102,6 +102,13 @@ interface StudioState {
   fetchNotifications: () => Promise<void>;
   markNotificationRead: (notifId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
+
+  // Phase 7 — Audio
+  audioPollingStepId: string | null;
+  generateAudio: (sessionId: string, stepId: string, text: string, language?: string) => Promise<void>;
+  revertAudio: (sessionId: string, stepId: string) => Promise<void>;
+  pollAudioStatus: (sessionId: string, stepId: string) => Promise<void>;
+  patchAudioDuration: (sessionId: string, stepId: string, durationMs: number) => Promise<void>;
 }
 
 // const RESTORABLE_ROUTES: RouteName[] = ['home', 'brand', 'templates', 'team', 'analytics'];
@@ -375,10 +382,29 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         });
       }
 
+      // ─── Audio hydration from D1 step_audio ───
+      // D1 is authoritative for audio state — merge after step normalization so
+      // voiceoverKey is correct before the asset map is built below.
+      const stepAudioMap = (data as any).stepAudioMap as Record<string, any> | undefined;
+      if (stepAudioMap && sessionData.steps) {
+        sessionData.steps = sessionData.steps.map((s: any) => {
+          const audio = stepAudioMap[s.id];
+          if (!audio) return s;
+          return {
+            ...s,
+            voiceoverKey:          audio.voiceoverKey          ?? s.voiceoverKey,
+            originalVoiceoverKey:  audio.originalVoiceoverKey  ?? null,
+            syntheticVoiceoverKey: audio.syntheticVoiceoverKey ?? null,
+            voiceoverSource:       audio.voiceoverSource       ?? null,
+            voiceoverDurationMs:   audio.voiceoverDurationMs   ?? s.voiceoverDurationMs,
+          };
+        });
+      }
+
       // ─── Asset Mapping ───
       // We must build the assets map AFTER flattening so that screenshotKey is available at the root
       const assets: Record<string, string> = { ...(sessionData.assets || {}) };
-      
+
       if (sessionData.videoKey && !assets[sessionData.videoKey]) {
         assets[sessionData.videoKey] = apiClient.getUrl(`/assets/${sessionData.videoKey}`);
       }
@@ -389,6 +415,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         }
         if (step.voiceoverKey && !assets[step.voiceoverKey]) {
           assets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`);
+        }
+        if ((step as any).originalVoiceoverKey && !assets[(step as any).originalVoiceoverKey]) {
+          assets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}`);
+        }
+        if ((step as any).syntheticVoiceoverKey && !assets[(step as any).syntheticVoiceoverKey]) {
+          assets[(step as any).syntheticVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).syntheticVoiceoverKey}`);
         }
       }
       sessionData.assets = assets;
@@ -614,5 +646,54 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       }
     );
     return { shareUrl: result.shareUrl, shareToken: result.shareToken };
+  },
+
+  // Phase 7 — Audio
+  audioPollingStepId: null,
+
+  generateAudio: async (sessionId, stepId, text, language) => {
+    const { updateStep } = get();
+    await apiClient.post(`/sessions/${sessionId}/steps/${stepId}/generate-audio`, { text, language });
+    updateStep(stepId, { voiceoverSource: 'generating' } as any);
+    set({ audioPollingStepId: stepId });
+  },
+
+  revertAudio: async (sessionId, stepId) => {
+    const { updateStep } = get();
+    const result = await apiClient.post<{ voiceoverKey: string | null; voiceoverSource: string | null }>(
+      `/sessions/${sessionId}/steps/${stepId}/revert-audio`,
+      {}
+    );
+    updateStep(stepId, { voiceoverKey: result.voiceoverKey, voiceoverSource: result.voiceoverSource } as any);
+  },
+
+  pollAudioStatus: async (sessionId, stepId) => {
+    const { updateStep } = get();
+    const result = await apiClient.get<{
+      voiceoverSource: string | null;
+      voiceoverKey: string | null;
+      voiceoverDurationMs: number | null;
+    }>(`/sessions/${sessionId}/steps/${stepId}/audio-status`);
+
+    if (result.voiceoverSource !== 'generating') {
+      set({ audioPollingStepId: null });
+      if (result.voiceoverKey) {
+        const url = apiClient.getUrl(`/assets/${result.voiceoverKey}`);
+        const sess = get().session;
+        if (sess) {
+          set({ session: { ...sess, assets: { ...sess.assets, [result.voiceoverKey]: url } } });
+        }
+      }
+      updateStep(stepId, {
+        voiceoverKey: result.voiceoverKey,
+        voiceoverSource: result.voiceoverSource,
+        voiceoverDurationMs: result.voiceoverDurationMs,
+      } as any);
+    }
+  },
+
+  patchAudioDuration: async (sessionId, stepId, durationMs) => {
+    await apiClient.patch(`/sessions/${sessionId}/steps/${stepId}/audio-duration`, { durationMs });
+    get().updateStep(stepId, { voiceoverDurationMs: durationMs } as any);
   },
 }));

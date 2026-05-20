@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 
 import { BackendUser } from '../../types';
+import { BACKEND_URL } from '../../../../shared/constants';
 
 export function JoinPage() {
   const [searchParams] = useSearchParams();
@@ -24,7 +25,7 @@ export function JoinPage() {
         const storage = (await chrome.storage.local.get(['sv_user'])) as { sv_user?: BackendUser };
         const sv_user = storage.sv_user;
 
-        const res = await safeFetch(`https://studiobase-backend.karthik-upadhyay98.workers.dev/workspace/join`, {
+        const res = await safeFetch(`${BACKEND_URL}/workspace/join`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json'

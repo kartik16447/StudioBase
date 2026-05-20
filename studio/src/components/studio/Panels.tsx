@@ -510,9 +510,7 @@ export const ComingSoon: React.FC<{ title: string, phase: number, description: s
   );
 };
 
-export const AIVoicePanel: React.FC = () => (
-  <ComingSoon title="AI Voiceovers" phase={3} description="Generate natural studio-quality narration from your scripts. 30+ voices, 12 languages, per-step preview." />
-);
+export { AudioPanel as AIVoicePanel } from './panels/AudioPanel';
 export const MusicPanel: React.FC = () => (
   <ComingSoon title="Background Music" phase={3} description="Royalty-free tracks tuned to your walkthrough length. Auto-ducked under voiceovers." />
 );

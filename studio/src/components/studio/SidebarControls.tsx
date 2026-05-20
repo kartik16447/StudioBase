@@ -40,7 +40,7 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
             <div className="flex items-center gap-0 min-w-max">
               {tabs.map(t => {
                 const active = activeTab === t.id;
-                const isLocked = ['voice', 'music', 'visuals', 'elements'].includes(t.id);
+                const isLocked = ['music', 'visuals', 'elements'].includes(t.id);
                 return (
                   <button
                     key={t.id}

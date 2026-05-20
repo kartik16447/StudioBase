@@ -12,8 +12,9 @@ import {
 
 
 import { sbLog } from "../../logger";
+import { BACKEND_URL, STUDIO_URL } from "../../../../shared/constants";
 
-const VIEWER_BASE_URL = "https://studiobase.karthik-upadhyay98.workers.dev";
+const VIEWER_BASE_URL = STUDIO_URL;
 
 interface WorkspaceMember {
   userId: string;
@@ -142,7 +143,7 @@ export function LibraryPage() {
     const { workspaceId, accessToken } = sb_user;
 
     try {
-      let url = `https://studiobase-backend.karthik-upadhyay98.workers.dev/videos?workspaceId=${workspaceId}&limit=12`;
+      let url = `${BACKEND_URL}/videos?workspaceId=${workspaceId}&limit=12`;
       if (cursor) url += `&cursor=${cursor}`;
 
       const res = await safeFetch(url);
@@ -271,7 +272,7 @@ export function LibraryPage() {
     setLoadingMembers(true);
     try {
       const res = await safeFetch(
-        `https://studiobase-backend.karthik-upadhyay98.workers.dev/workspace/members?workspaceId=${workspaceId}`,
+        `${BACKEND_URL}/workspace/members?workspaceId=${workspaceId}`,
       );
       const data = await res.json();
       setMembers(data);
@@ -288,7 +289,7 @@ export function LibraryPage() {
     setLoadingInvites(true);
     try {
       const res = await safeFetch(
-        `https://studiobase-backend.karthik-upadhyay98.workers.dev/workspace/invites?workspaceId=${workspaceId}`,
+        `${BACKEND_URL}/workspace/invites?workspaceId=${workspaceId}`,
       );
       const data = await res.json();
       setInvites(data);
@@ -315,7 +316,7 @@ export function LibraryPage() {
       return;
     try {
       await safeFetch(
-        `https://studiobase-backend.karthik-upadhyay98.workers.dev/workspace/invite/revoke`,
+        `${BACKEND_URL}/workspace/invite/revoke`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -332,7 +333,7 @@ export function LibraryPage() {
     if (!confirm("Are you sure you want to remove this member?")) return;
     try {
       await safeFetch(
-        `https://studiobase-backend.karthik-upadhyay98.workers.dev/workspace/member/${userIdToRemove}?workspaceId=${user?.workspaceId}`,
+        `${BACKEND_URL}/workspace/member/${userIdToRemove}?workspaceId=${user?.workspaceId}`,
         {
           method: "DELETE",
         },
@@ -364,7 +365,7 @@ export function LibraryPage() {
       if (!sb_user?.workspaceId || !sb_user?.accessToken) return;
 
       const res = await safeFetch(
-        `https://studiobase-backend.karthik-upadhyay98.workers.dev/workspace/invite`,
+        `${BACKEND_URL}/workspace/invite`,
         {
           method: "POST",
           headers: {
@@ -401,7 +402,7 @@ export function LibraryPage() {
       if (!sb_user?.workspaceId || !sb_user?.accessToken) return;
 
       const res = await safeFetch(
-        `https://studiobase-backend.karthik-upadhyay98.workers.dev/workspace/leave`,
+        `${BACKEND_URL}/workspace/leave`,
         {
           method: "POST",
           headers: {
@@ -572,7 +573,7 @@ export function LibraryPage() {
           setFiles((prev) => prev.filter((f) => f.id !== video.id));
           if (video.backendId && sb_user?.accessToken) {
             safeFetch(
-              `https://studiobase-backend.karthik-upadhyay98.workers.dev/videos/${video.backendId}`,
+              `${BACKEND_URL}/videos/${video.backendId}`,
               { method: "DELETE" },
             ).catch((err) =>
               console.warn("Auto-clean backend sync failed:", err),
@@ -714,7 +715,7 @@ export function LibraryPage() {
       // 1. Sync with Backend API
       if (file.backendId && sb_user?.accessToken) {
         await fetch(
-          `https://studiobase-backend.karthik-upadhyay98.workers.dev/videos/${file.backendId}`,
+          `${BACKEND_URL}/videos/${file.backendId}`,
           {
             method: "PATCH",
             headers: {
@@ -793,7 +794,7 @@ export function LibraryPage() {
           file.backendId || (file.id?.length > 20 ? file.id : null);
         if (deleteTargetId && sb_user?.accessToken) {
           safeFetch(
-            `https://studiobase-backend.karthik-upadhyay98.workers.dev/videos/${deleteTargetId}`,
+            `${BACKEND_URL}/videos/${deleteTargetId}`,
             {
               method: "DELETE",
               headers: { "Content-Type": "application/json" },
@@ -1511,7 +1512,7 @@ export function LibraryPage() {
 
                               // Telemetry
                               safeFetch(
-                                `https://studiobase-backend.karthik-upadhyay98.workers.dev/workspace/invite/log-copy`,
+                                `${BACKEND_URL}/workspace/invite/log-copy`,
                                 {
                                   method: "POST",
                                   headers: {

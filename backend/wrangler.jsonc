@@ -31,6 +31,10 @@
 	"ai": {
 		"binding": "AI",
 	},
+	"media": {
+		"binding": "MEDIA",
+		"remote": true,
+	},
 	"queues": {
 		"producers": [
 			{
@@ -51,6 +55,7 @@
 	"vars": {
 		"ENVIRONMENT": "production",
 		"ADMIN_EMAIL": "admin@studiobase.app",
+		"AUDIO_PROVIDER": "workersai",
 		"ALLOWED_ORIGINS": "https://studio.studiobase.app,https://studiobase-umber.vercel.app,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
 		"ENCRYPTION_KEY": "REPLACE_ME_WITH_SECURE_KEY"
 	},

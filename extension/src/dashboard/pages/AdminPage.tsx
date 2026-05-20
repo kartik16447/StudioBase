@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
+import { BACKEND_URL } from '../../../../shared/constants';
 
 
 export function AdminPage({ session }: { session: any }) {
@@ -17,7 +18,7 @@ export function AdminPage({ session }: { session: any }) {
       if (query) setIsSearching(true);
       else setLoading(true);
 
-      let url = `https://studiobase-backend.karthik-upadhyay98.workers.dev/admin`;
+      let url = `${BACKEND_URL}/admin`;
       
       if (query) {
         if (query.includes('@')) {

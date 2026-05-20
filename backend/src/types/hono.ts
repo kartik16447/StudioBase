@@ -7,9 +7,11 @@ export interface Env {
   R2: R2Bucket;
   PIPELINE_QUEUE: Queue;
   AI: Ai;
+  MEDIA: any; // CloudflareMediaTransformations — no official type yet
   ANALYTICS: AnalyticsEngineDataset;
   ADMIN_EMAIL: string;
   ENCRYPTION_KEY: string;
+  AUDIO_PROVIDER: string; // 'workersai' | 'elevenlabs'
   GOOGLE_CLIENT_SECRET?: string;
   SENTRY_DSN?: string;
   ALLOWED_ORIGINS?: string;

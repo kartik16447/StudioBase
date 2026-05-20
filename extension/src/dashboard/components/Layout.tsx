@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 
 import { BackendUser } from '../../types';
+import { BACKEND_URL } from '../../../../shared/constants';
 
 interface Workspace {
   id: string;
@@ -25,7 +26,7 @@ export function Layout({ session }: { session: any }) {
       }
 
       try {
-        const res = await safeFetch('https://studiobase-backend.karthik-upadhyay98.workers.dev/workspaces');
+        const res = await safeFetch(`${BACKEND_URL}/v1/workspaces`);
         const data = await res.json();
         setWorkspaces(data.workspaces || []);
       } catch (err) {

@@ -68,12 +68,27 @@ export class SessionService {
 
     if (!session) return null;
 
+    // Fetch step_audio rows — single query, non-fatal if table is missing in dev
+    let stepAudioMap: Record<string, any> = {};
+    try {
+      const { results: audioRows } = await this.env.DB.prepare(
+        `SELECT stepId, voiceoverKey, originalVoiceoverKey, syntheticVoiceoverKey,
+                voiceoverSource, voiceoverDurationMs
+         FROM step_audio WHERE sessionId = ?`
+      ).bind(session.id).all();
+      for (const row of audioRows as any[]) {
+        stepAudioMap[row.stepId] = row;
+      }
+    } catch (e) {
+      console.error('[SessionService] step_audio fetch failed', e);
+    }
+
     try {
       // Fetch steps by joining with sops to find steps associated with this sessionId
       const { results: steps } = await this.env.DB.prepare(
-        `SELECT steps.* FROM steps 
-         JOIN sops ON steps.sopId = sops.id 
-         WHERE sops.sessionId = ? 
+        `SELECT steps.* FROM steps
+         JOIN sops ON steps.sopId = sops.id
+         WHERE sops.sessionId = ?
          ORDER BY steps.stepIndex ASC`
       ).bind(session.id).all();
 
@@ -104,11 +119,12 @@ export class SessionService {
       return {
         ...session,
         steps: parsedSteps,
-        artifacts: mappedArtifacts
+        artifacts: mappedArtifacts,
+        stepAudioMap,
       };
     } catch (e) {
       console.error('[SessionService] Hydration failed, returning raw session', e);
-      return session;
+      return { ...session, stepAudioMap };
     }
   }
 

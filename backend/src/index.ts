@@ -23,6 +23,7 @@ import { notifications } from './routes/v1/notifications';
 import analyticsRoutes from './routes/v1/analytics';
 import billingRoutes from './routes/v1/billing';
 import { publicRoutes } from './routes/v1/public';
+import stepRoutes from './routes/v1/steps';
 
 import { handleScheduled } from './handlers/scheduled';
 import { handleQueue } from './handlers/queue';
@@ -39,6 +40,7 @@ const v1 = new Hono<{ Bindings: Env; Variables: Variables }>();
 v1.route('/auth', authRoutes);
 v1.route('/workspaces', workspaceRoutes);
 v1.route('/sessions', sessionRoutes);
+v1.route('/sessions', stepRoutes);
 v1.route('/assets', assetRoutes);
 v1.route('/pipeline', pipelineRoutes);
 v1.route('/telemetry', telemetryRoutes);
