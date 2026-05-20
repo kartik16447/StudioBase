@@ -244,7 +244,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   renderMode     = 'slideshow',
   onStepSelect,
   primaryColor   = '#5E5CE6',
-}, ref) => {
+}, ref) {
   // ── Timeline ───────────────────────────────────────────────────────────────
   const timeline       = useMemo(() => buildTimeline(steps), [steps]);
   const { segments, totalMs } = timeline;
