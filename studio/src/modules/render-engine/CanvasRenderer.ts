@@ -46,14 +46,31 @@ export class CanvasRenderer implements IRenderer {
     const cam    = spec.camera ?? CinematicMath.getTarget(step);
     const rawPt  = CinematicMath.targetToCanvasPoint(cam, layout);
 
-    // Clamp so the screenshot always fills the canvas — no background bleeds
-    // through at the edges regardless of where the camera target is.
+    // Clamp so the screenshot always fills the canvas (no background bleeds)
+    // ONLY when the scaled dimension actually overflows the canvas. Otherwise,
+    // center it to prevent inverted clamps that lock the camera axis.
     const halfW = cW / (2 * cam.scale);
     const halfH = cH / (2 * cam.scale);
-    const pt = {
-      x: Math.max(layout.drawX + halfW, Math.min(layout.drawX + layout.drawW - halfW, rawPt.x)),
-      y: Math.max(layout.drawY + halfH, Math.min(layout.drawY + layout.drawH - halfH, rawPt.y)),
-    };
+
+    let x = rawPt.x;
+    if (layout.drawW * cam.scale > cW) {
+      const minX = layout.drawX + halfW;
+      const maxX = layout.drawX + layout.drawW - halfW;
+      x = Math.max(minX, Math.min(maxX, rawPt.x));
+    } else {
+      x = layout.drawX + layout.drawW / 2;
+    }
+
+    let y = rawPt.y;
+    if (layout.drawH * cam.scale > cH) {
+      const minY = layout.drawY + halfH;
+      const maxY = layout.drawY + layout.drawH - halfH;
+      y = Math.max(minY, Math.min(maxY, rawPt.y));
+    } else {
+      y = layout.drawY + layout.drawH / 2;
+    }
+
+    const pt = { x, y };
 
     // ── 4. Screenshot shadow (drawn BEFORE camera transform) ───────────────
     this.drawScreenshotShadow(ctx, layout, cam.scale);
