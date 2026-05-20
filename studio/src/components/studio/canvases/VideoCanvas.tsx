@@ -477,7 +477,6 @@ export const VideoCanvas: React.FC = () => {
 
   const renderMode = useStudioStore((s) => s.renderMode);
   const steps      = session?.steps || [];
-  const currentStep = steps[currentStepIndex];
 
   const rawVideoUrl = session?.videoKey
     ? (session.assets?.[session.videoKey] ?? null)
