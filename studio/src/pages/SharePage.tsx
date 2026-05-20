@@ -9,13 +9,13 @@ import { CinematicPlayer } from '../components/player/CinematicPlayer';
 interface PublicStep {
   id: string;
   sequence?: number;
-  screenshotKey?: string;
-  stepTitle?: string;
-  generatedText?: string;
-  textOverride?: string;
-  elementText?: string;
-  action?: string;
-  url?: string;
+  screenshotKey?: string | null;
+  stepTitle?: string | null;
+  generatedText?: string | null;
+  textOverride?: string | null;
+  elementText?: string | null;
+  action?: string | null;
+  url?: string | null;
   coordinates?: { x: number; y: number; viewportWidth: number; viewportHeight: number } | null;
   animationTarget?: { centerX: number; centerY: number; zoomScale: number; transitionType?: string } | null;
 }

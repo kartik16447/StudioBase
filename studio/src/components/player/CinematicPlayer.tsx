@@ -42,12 +42,12 @@ import {
 export interface PlayerStep {
   id: string;
   screenshotKey?: string | null;
-  stepTitle?: string;
-  generatedText?: string;
-  textOverride?: string;
-  elementText?: string;
-  action?: string;
-  timestamp?: number;
+  stepTitle?: string | null;
+  generatedText?: string | null;
+  textOverride?: string | null;
+  elementText?: string | null;
+  action?: string | null;
+  timestamp?: number | null;
   voiceoverDurationMs?: number | null;
   coordinates?: {
     x: number; y: number;

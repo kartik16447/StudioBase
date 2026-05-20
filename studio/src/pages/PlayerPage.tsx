@@ -9,15 +9,15 @@ import { CinematicPlayer, type CinematicPlayerHandle } from '../components/playe
 interface PStep {
   id: string;
   sequence?: number;
-  screenshotKey?: string;
-  stepTitle?: string;
-  generatedText?: string;
-  textOverride?: string;
-  elementText?: string;
-  action?: string;
-  url?: string;
-  timestamp?: number;
-  voiceoverDurationMs?: number;
+  screenshotKey?: string | null;
+  stepTitle?: string | null;
+  generatedText?: string | null;
+  textOverride?: string | null;
+  elementText?: string | null;
+  action?: string | null;
+  url?: string | null;
+  timestamp?: number | null;
+  voiceoverDurationMs?: number | null;
   coordinates?: { x: number; y: number; viewportWidth: number; viewportHeight: number } | null;
   animationTarget?: { centerX: number; centerY: number; zoomScale: number } | null;
 }
