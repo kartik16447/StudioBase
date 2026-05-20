@@ -33,7 +33,6 @@ import { CinematicMath } from '../../modules/render-engine/CinematicMath';
 import { RenderConstants } from '../../modules/render-engine/RenderConstants';
 import {
   buildTimeline, buildChapterMarkers, getSegmentAt,
-  DEFAULT_STEP_MS,
   type ChapterMarker,
   type StepSegment,
 } from '../../modules/render-engine/PlayerTimeline';
@@ -99,7 +98,7 @@ interface ScrubberProps {
   chapterMarkers:  ChapterMarker[];
   steps:           PlayerStep[];
   assets:          Record<string, string>;
-  progressBarRef:  React.RefObject<HTMLDivElement>;
+  progressBarRef:  React.RefObject<HTMLDivElement | null>;
   onScrub:         (ms: number) => void;
   onStepSelect?:   (stepIndex: number) => void;
 }
@@ -111,7 +110,6 @@ const TimelineScrubber: React.FC<ScrubberProps> = ({
   const barRef       = useRef<HTMLDivElement>(null);
   const isDragging   = useRef(false);
   const [hoverMs, setHoverMs]     = useState<number | null>(null);
-  const [hoverX,  setHoverX]      = useState<number>(0);
 
   const fractionToMs = (clientX: number): number => {
     const bar = barRef.current;
@@ -186,10 +184,6 @@ const TimelineScrubber: React.FC<ScrubberProps> = ({
           onStepSelect?.(seg.stepIndex);
         }}
         onMouseMove={(e) => {
-          const bar = barRef.current;
-          if (!bar) return;
-          const { left, width } = bar.getBoundingClientRect();
-          setHoverX(e.clientX - left);
           setHoverMs(fractionToMs(e.clientX));
         }}
         onMouseLeave={() => setHoverMs(null)}

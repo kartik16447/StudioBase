@@ -13,7 +13,6 @@ export const MIN_STEP_MS     = 1000; // never shorter than 1 s
 export interface TimelineStep {
   id: string;
   voiceoverDurationMs?: number | null;
-  [key: string]: unknown;
 }
 
 export interface StepSegment {
