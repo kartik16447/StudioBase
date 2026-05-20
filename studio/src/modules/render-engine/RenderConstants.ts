@@ -35,10 +35,11 @@ export const RenderConstants = {
 
   // Hard zoom scale limits — keeps the view readable, prevents tunnel-vision
   CAMERA_SCALE_LIMITS: {
-    min:  1.0,   // full overview, no zoom
-    near: 1.08,  // tiny zoom for nearby targets (0–10% distance)
-    mid:  1.18,  // mild zoom for medium moves (10–30% distance)
-    far:  1.28,  // modest zoom for far moves  (30%+ distance)
-    max:  1.35,  // hard cap — never exceed this
+    min:   1.0,   // full overview — whole screenshot visible
+    near:  1.08,  // legacy distance-based (export only)
+    mid:   1.18,
+    far:   1.28,
+    max:   1.35,
+    event: 1.12,  // within-step event zoom — subtle, non-claustrophobic
   },
 };

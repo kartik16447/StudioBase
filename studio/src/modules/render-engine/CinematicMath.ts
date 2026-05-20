@@ -123,6 +123,38 @@ export const CinematicMath = {
   },
 
   /**
+   * Per-step camera target driven by within-step progress (0–1).
+   *
+   * Animation phases:
+   *   0.00–0.20  overview  — full screenshot visible, camera centered (scale 1.0)
+   *   0.20–0.80  event     — mild zoom toward the click/interaction area
+   *   0.80–1.00  retreat   — spring back toward overview (target resets to 50,50,1.0)
+   *
+   * The framer-motion springs handle all the easing between phases — no manual
+   * interpolation needed here.  Just update the target and the spring follows.
+   *
+   * If the step has no position data (no coordinates / animationTarget) the
+   * camera stays at full overview throughout.
+   */
+  getStepCameraTarget(step: any, stepProgress: number): CameraTarget {
+    const L = RenderConstants.CAMERA_SCALE_LIMITS;
+    const overview: CameraTarget = { pctX: 50, pctY: 50, scale: L.min };
+    const pos = this._getTargetPosition(step);
+
+    if (!pos.hasData) return overview;
+
+    // Retreat phase: target swings back to overview so the spring eases out
+    if (stepProgress < 0.20 || stepProgress >= 0.80) return overview;
+
+    // Event phase: zoom gently toward the interaction point
+    const scale = step?.animationTarget?.zoomScale != null
+      ? clamp(step.animationTarget.zoomScale, L.min, L.max)
+      : L.event;
+
+    return { pctX: pos.pctX, pctY: pos.pctY, scale };
+  },
+
+  /**
    * Given canvas dimensions and the screenshot dimensions for this step,
    * compute where (in canvas pixels) the screenshot will be drawn.
    * Uses "contain" fitting so the whole screenshot is always visible at zoom=1.

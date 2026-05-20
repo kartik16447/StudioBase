@@ -49,6 +49,8 @@ export interface PlayerStep {
   action?: string | null;
   timestamp?: number | null;
   voiceoverDurationMs?: number | null;
+  /** Asset key for the step's voiceover audio — looked up in the `assets` map */
+  voiceoverKey?: string | null;
   coordinates?: {
     x: number; y: number;
     viewportWidth: number; viewportHeight: number;
@@ -59,6 +61,8 @@ export interface PlayerStep {
 /** Imperative handle — lets parent seek to a specific step (e.g. transcript click) */
 export interface CinematicPlayerHandle {
   seekToStep: (stepIndex: number) => void;
+  /** Returns the player's current step index — use to avoid seek loops in parent sync effects */
+  getCurrentStep: () => number;
 }
 
 export interface CinematicPlayerProps {
@@ -265,6 +269,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const canvasRef          = useRef<HTMLCanvasElement>(null);
   const videoRef           = useRef<HTMLVideoElement>(null);
   const progressBarRef     = useRef<HTMLDivElement>(null);
+  // Audio — voiceover per step.  Single element, src-swapped on step change.
+  const audioRef           = useRef<HTMLAudioElement>(new Audio());
 
   // Rendering state
   const slideImageRef     = useRef<HTMLImageElement | null>(null);
@@ -314,29 +320,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   const currentStep = steps[currentIndex] ?? null;
 
-  // ── Camera spring target on step change ────────────────────────────────────
-  useEffect(() => {
-    if (!currentStep) return;
-    const { target, revealTarget } = CinematicMath.getHybridTarget(
-      currentStep, camX.get(), camY.get(),
-    );
-    if (revealTarget) {
-      camX.set(revealTarget.pctX);
-      camY.set(revealTarget.pctY);
-      camScale.set(revealTarget.scale);
-      const t = setTimeout(() => {
-        camX.set(target.pctX);
-        camY.set(target.pctY);
-        camScale.set(target.scale);
-      }, 350);
-      return () => clearTimeout(t);
-    } else {
-      camX.set(target.pctX);
-      camY.set(target.pctY);
-      camScale.set(target.scale);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex, currentStep?.id]);
+  // Camera targets are now driven every frame from the rAF loop via
+  // CinematicMath.getStepCameraTarget(step, stepProgress) — no step-change
+  // effect needed.  The springs handle all easing between phase transitions.
 
   // ── Screenshot preload + cross-dissolve setup ──────────────────────────────
   useEffect(() => {
@@ -402,21 +388,37 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           }
         }
 
-        // Derive step index; fire state update only on change (triggers spring effects)
-        const { stepIndex: newIdx } = getSegmentAt(currentMsRef.current, segs);
-        if (newIdx !== currentIdxRef.current) {
-          currentIdxRef.current = newIdx;
-          setCurrentIndex(newIdx);
-          // Notify parent of natural step advance so it can sync its store without
-          // triggering a seek-back (the parent uses this to update lastStepFromPlayer)
-          onStepSelectRef.current?.(newIdx);
-        }
-
         // Update progress bar directly (no re-render)
         if (progressBarRef.current && totMs > 0) {
           progressBarRef.current.style.width =
             `${Math.min(100, (currentMsRef.current / totMs) * 100)}%`;
         }
+      }
+
+      // ── Derive step + within-step progress (runs every frame) ────────────
+      // Computed outside the isPlaying block so camera updates correctly when
+      // paused (e.g. seeked to mid-step position) and after playhead advances.
+      const { stepIndex: newIdx, progress: stepProgress } =
+        getSegmentAt(currentMsRef.current, segs);
+
+      if (newIdx !== currentIdxRef.current) {
+        currentIdxRef.current = newIdx;
+        setCurrentIndex(newIdx);
+        // Notify parent of natural advance — parent updates display state
+        // without triggering a seek-back loop (getCurrentStep() check).
+        onStepSelectRef.current?.(newIdx);
+
+      }
+
+      // ── Camera — overview → event zoom → overview per step ───────────────
+      // getStepCameraTarget maps stepProgress to a camera target; the spring
+      // physics on camX/Y/Scale handle all the easing between phases.
+      const camStep = stepsRef.current[currentIdxRef.current];
+      if (camStep) {
+        const ct = CinematicMath.getStepCameraTarget(camStep, stepProgress);
+        camX.set(ct.pctX);
+        camY.set(ct.pctY);
+        camScale.set(ct.scale);
       }
 
       // ── Canvas render ─────────────────────────────────────────────────────
@@ -499,7 +501,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — all reads via refs
 
-  // ── Video play/pause ───────────────────────────────────────────────────────
+  // ── Video play/pause ──────────────────────────────────────────────────────
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !videoUrl) return;
@@ -509,7 +511,38 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = speed;
+    audioRef.current.playbackRate = speed;
   }, [speed]);
+
+  // ── Voiceover — step change ────────────────────────────────────────────────
+  // Fires on every step change (natural advance or seek).
+  // assets map must contain resolved URLs for any voiceoverKey values.
+  useEffect(() => {
+    const step  = steps[currentIndex];
+    const audio = audioRef.current;
+    audio.pause();
+    if (step?.voiceoverKey) {
+      const url = assets[step.voiceoverKey] ?? '';
+      if (url) {
+        if (audio.src !== url) { audio.src = url; }
+        audio.currentTime = 0;
+        audio.playbackRate = speed;
+        if (isPlaying) audio.play().catch(() => {});
+      }
+    } else {
+      audio.src = '';
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex]); // step change drives audio; play/pause handled separately below
+
+  // ── Voiceover — play/pause ────────────────────────────────────────────────
+  useEffect(() => {
+    if (isPlaying) {
+      if (audioRef.current.src) audioRef.current.play().catch(() => {});
+    } else {
+      audioRef.current.pause();
+    }
+  }, [isPlaying]);
 
   // ── Fullscreen ─────────────────────────────────────────────────────────────
   const toggleFullscreen = useCallback(() => {
@@ -615,6 +648,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       const seg = segmentsRef.current[stepIndex];
       if (seg) scrubTo(seg.startMs);
     },
+    getCurrentStep: () => currentIdxRef.current,
   }), [scrubTo]);
 
   const stepBack = useCallback(() => {

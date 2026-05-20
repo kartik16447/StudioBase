@@ -457,7 +457,6 @@ export const VideoCanvas: React.FC = () => {
   const [viewMode, setViewMode]   = useState<ViewMode>('cinematic');
   const [embedOpen, setEmbedOpen] = useState(false);
   const [isEnded, setIsEnded]     = useState(false);
-  const [audioEl] = useState(() => new Audio());
   const [screenshotExporting, setScreenshotExporting] = useState(false);
   const [screenshotProgress, setScreenshotProgress]   = useState('');
 
@@ -474,7 +473,6 @@ export const VideoCanvas: React.FC = () => {
 
   const playerRef         = useRef<HTMLDivElement>(null);
   const cinPlayerRef      = useRef<CinematicPlayerHandle>(null);
-  const lastStepFromPlayer = useRef(-1); // prevents seek loop between player ↔ store
   const rawVideoRef       = useRef<HTMLVideoElement>(null);
 
   const renderMode = useStudioStore((s) => s.renderMode);
@@ -489,6 +487,21 @@ export const VideoCanvas: React.FC = () => {
     ? new Date((session as any).startedAt).getTime()
     : session?.capturedAt ? new Date(session.capturedAt).getTime() : 0;
 
+  // Enrich the assets map with resolved voiceover URLs so CinematicPlayer can
+  // play audio without knowing about apiClient.  Falls back gracefully if a key
+  // is already in session.assets (e.g. public share page with pre-signed URLs).
+  // This runs on every render but is O(steps) and cheap.
+  const enrichedAssets = (() => {
+    const base: Record<string, string> = { ...(session?.assets ?? {}) };
+    for (const step of steps) {
+      const key = (step as any).voiceoverKey as string | null | undefined;
+      if (key && !base[key]) {
+        base[key] = apiClient.getUrl(`/assets/${key}`);
+      }
+    }
+    return base;
+  })();
+
   // ── Export trigger ───────────────────────────────────────────────────────
   useEffect(() => {
     if (exportTrigger > 0 && !isExporting && useStudioStore.getState().activeView === 'video') {
@@ -497,17 +510,18 @@ export const VideoCanvas: React.FC = () => {
   }, [exportTrigger]);
 
   // ── Sync external step changes (sidebar click, keyboard) → CinematicPlayer ──
-  // Only seeks if the change came from outside the player (not from its own advance).
+  // Uses getCurrentStep() to check the player's actual internal index, making
+  // this loop-proof: if the player already advanced naturally to this step,
+  // getCurrentStep() === currentStepIndex and we skip the seek entirely.
   useEffect(() => {
-    if (currentStepIndex !== lastStepFromPlayer.current) {
+    const playerStep = cinPlayerRef.current?.getCurrentStep() ?? currentStepIndex;
+    if (playerStep !== currentStepIndex) {
       cinPlayerRef.current?.seekToStep(currentStepIndex);
-      lastStepFromPlayer.current = currentStepIndex;
     }
   }, [currentStepIndex]);
 
   // ── Callbacks from CinematicPlayer → store ─────────────────────────────────
   const handlePlayerStepSelect = useCallback((idx: number) => {
-    lastStepFromPlayer.current = idx;
     setStepIndex(idx);
   }, [setStepIndex]);
 
@@ -597,18 +611,7 @@ export const VideoCanvas: React.FC = () => {
     return () => window.removeEventListener('beforeunload', onUnload);
   }, [session]);
 
-  // ── Voiceover ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!isPlaying) { audioEl.pause(); return; }
-    if (currentStep?.voiceoverKey) {
-      const url = apiClient.getUrl(`/assets/${currentStep.voiceoverKey}`);
-      if (audioEl.src !== url) audioEl.src = url;
-      audioEl.playbackRate = playbackRate;
-      audioEl.play().catch(console.error);
-    } else {
-      audioEl.pause();
-    }
-  }, [currentStepIndex, isPlaying, playbackRate, currentStep?.voiceoverKey]);
+  // Voiceover is now handled inside CinematicPlayer via the enrichedAssets map.
 
   if (!session) return null;
 
@@ -675,7 +678,7 @@ export const VideoCanvas: React.FC = () => {
           <CinematicPlayer
             ref={cinPlayerRef}
             steps={steps}
-            assets={session?.assets ?? {}}
+            assets={enrichedAssets}
             videoUrl={hybridVideoUrl}
             sessionStartMs={sessionStartMs ?? 0}
             chapterBreaks={session?.metadata?.chapterBreaks}
