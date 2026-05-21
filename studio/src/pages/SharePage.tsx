@@ -25,6 +25,7 @@ interface PublicSession {
   capturedAt?: string;
   capturedUrl?: string;
   videoKey?: string | null;
+  exportKey?: string | null;
   aiOutputs?: { title?: string; summary?: string; tags?: string[] };
   metadata?: { stepCount?: number; durationMs?: number; chapterBreaks?: { afterStepId: string; chapterTitle: string }[] };
   steps: PublicStep[];
@@ -242,13 +243,17 @@ export const SharePage: React.FC = () => {
     ? session.assets[session.videoKey]
     : null;
 
+  // Exported Cinematic video URL from asset proxy
+  const exportUrl = session.exportKey && session.assets?.[session.exportKey]
+    ? session.assets[session.exportKey]
+    : null;
+
   // Tabs: show all three whenever each format is available.
-  // Raw Video tab appears if there is a video asset (rawEnabled flag does NOT hide it —
-  // the cinematic player already handles the AI experience; raw is always the original).
+  // Raw Video tab appears if there is a video asset and raw is enabled.
   // Cinematic tab appears only when credits have been spent to unlock it.
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     ...(sopEnabled !== false ? [{ id: 'guide' as Tab, label: 'Step Guide', icon: <I.List size={13} /> }] : []),
-    ...(videoUrl ? [{ id: 'recording' as Tab, label: 'Raw Video', icon: <I.Video size={13} /> }] : []),
+    ...(_rawEnabled !== false && videoUrl ? [{ id: 'recording' as Tab, label: 'Raw Video', icon: <I.Video size={13} /> }] : []),
     ...(cinematicEnabled ? [{ id: 'cinematic' as Tab, label: 'Cinematic AI', icon: <I.Play size={13} /> }] : []),
   ];
 
@@ -417,27 +422,42 @@ export const SharePage: React.FC = () => {
               AI Cinematic
             </span>
             <span className="text-[12px] text-gray-400">
-              Spring-physics camera · smooth zoom transitions · step-by-step focus
+              {exportUrl ? 'Pre-rendered high quality export' : 'Spring-physics camera · smooth zoom transitions · step-by-step focus'}
             </span>
           </div>
 
-          <CinematicPlayer
-            steps={steps}
-            assets={session.assets ?? {}}
-            videoUrl={videoUrl}
-            chapterBreaks={session.metadata?.chapterBreaks}
-            renderMode={videoUrl ? 'hybrid' : 'slideshow'}
-          />
+          {exportUrl ? (
+            <div className="w-full rounded-2xl overflow-hidden shadow-2xl bg-black" style={{ boxShadow: '0 24px 64px rgba(0,0,0,0.40)' }}>
+              <video src={exportUrl} controls playsInline className="w-full" style={{ aspectRatio: '16/9', background: '#000' }} />
+            </div>
+          ) : (
+            <CinematicPlayer
+              steps={steps}
+              assets={session.assets ?? {}}
+              videoUrl={videoUrl}
+              chapterBreaks={session.metadata?.chapterBreaks}
+              renderMode={videoUrl ? 'hybrid' : 'slideshow'}
+            />
+          )}
 
-          <p className="mt-3 text-center text-[12px] text-gray-400">
-            <span className="hidden sm:inline">Click to play · space to pause · ← → to step · drag timeline to scrub</span>
-            <span className="sm:hidden">Tap to play · swipe timeline to scrub</span>
-          </p>
+          {!exportUrl && (
+            <p className="mt-3 text-center text-[12px] text-gray-400">
+              <span className="hidden sm:inline">Click to play · space to pause · ← → to step · drag timeline to scrub</span>
+              <span className="sm:hidden">Tap to play · swipe timeline to scrub</span>
+            </p>
+          )}
 
           <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex items-start gap-3">
             <I.Play size={16} className="text-indigo-500 mt-0.5 flex-shrink-0" />
             <p className="text-[13px] text-indigo-700">
-              <strong>AI-powered transitions</strong> — Ken Burns zoom, spring-physics camera pan, and cross-dissolve blends are computed mathematically for each step's click target.
+              {exportUrl 
+                ? <strong>Final Export</strong> 
+                : <strong>AI-powered transitions</strong>
+              }
+              {exportUrl 
+                ? ' — This is the finalized, high-quality rendering of the cinematic sequence.'
+                : ' — Ken Burns zoom, spring-physics camera pan, and cross-dissolve blends are computed mathematically for each step\'s click target.'
+              }
             </p>
           </div>
         </div>

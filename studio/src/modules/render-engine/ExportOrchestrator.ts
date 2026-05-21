@@ -387,7 +387,7 @@ export async function handleSOPVideoExport(config: {
       await apiClient.request(`/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ r2VideoKey: exportKey, r2ExportKey: exportKey }),
+        body: JSON.stringify({ r2ExportKey: exportKey }),
       });
       console.log('[Export] Session record updated successfully.');
     } catch (e) {

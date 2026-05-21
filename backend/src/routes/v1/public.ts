@@ -128,6 +128,15 @@ publicRoutes.get('/:shareToken/json', async (c) => {
     json.videoKey = resolvedVideoKey;
   }
 
+  const resolvedExportKey: string | null =
+    (json.exportKey && typeof json.exportKey === 'string' ? json.exportKey : null) ??
+    (session.r2ExportKey && typeof session.r2ExportKey === 'string' ? session.r2ExportKey : null);
+
+  if (resolvedExportKey) {
+    assets[resolvedExportKey] = `${origin}/v1/public/${shareToken}/asset/${encodeURIComponent(resolvedExportKey)}`;
+    json.exportKey = resolvedExportKey;
+  }
+
   // Pass 1: per-step screenshotKey (set by older pipeline versions)
   if (Array.isArray(json.steps)) {
     for (const step of json.steps) {
