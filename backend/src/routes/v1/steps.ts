@@ -145,33 +145,47 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
     console.log(`[generate-script] LLM raw response length: ${aiResponse?.response?.length ?? 0}`);
 
     let generatedText = '';
-    let rawResponse = '';
+    let rawResponse: any = '';
     try {
-      if (typeof aiResponse === 'string') {
-        rawResponse = aiResponse;
-      } else if (aiResponse?.response) {
-        rawResponse = aiResponse.response;
-      } else if ((aiResponse as any)?.choices?.[0]?.message?.content) {
-        rawResponse = (aiResponse as any).choices[0].message.content;
+      // Sometimes Cloudflare AI auto-parses the JSON response when using json_schema
+      if (aiResponse?.response && typeof aiResponse.response === 'object') {
+        generatedText = (aiResponse.response as any).generatedText;
+        if (!generatedText) {
+          throw new Error('generatedText key missing from pre-parsed JSON response');
+        }
       } else {
-        rawResponse = JSON.stringify(aiResponse);
-      }
-      
-      const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No JSON object found in response string');
-      }
-      
-      const parsed = JSON.parse(jsonMatch[0]);
-      generatedText = parsed.generatedText;
-      
-      if (!generatedText) {
-         throw new Error('generatedText key missing from JSON');
+        if (typeof aiResponse === 'string') {
+          rawResponse = aiResponse;
+        } else if (aiResponse?.response) {
+          rawResponse = aiResponse.response;
+        } else if ((aiResponse as any)?.choices?.[0]?.message?.content) {
+          rawResponse = (aiResponse as any).choices[0].message.content;
+        } else {
+          rawResponse = JSON.stringify(aiResponse);
+        }
+        
+        // Ensure rawResponse is a string before calling string methods
+        if (typeof rawResponse !== 'string') {
+          rawResponse = JSON.stringify(rawResponse);
+        }
+        
+        const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error('No JSON object found in response string');
+        }
+        
+        const parsed = JSON.parse(jsonMatch[0]);
+        generatedText = parsed.generatedText;
+        
+        if (!generatedText) {
+           throw new Error('generatedText key missing from JSON');
+        }
       }
       console.log(`[generate-script] Parsed generatedText: "${generatedText}"`);
     } catch (e: any) {
-      console.error(`[generate-script] Failed to parse LLM response JSON: "${rawResponse}"`, e);
-      throw new HTTPException(500, { message: `Failed to parse AI response: ${e.message}. Raw: ${rawResponse.substring(0, 50)}...` });
+      const rawString = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
+      console.error(`[generate-script] Failed to extract LLM response: "${rawString}"`, e);
+      throw new HTTPException(500, { message: `Failed to parse AI response: ${e.message}. Raw: ${rawString.substring(0, 50)}...` });
     }
 
     // Update the step in the R2 session JSON envelope
