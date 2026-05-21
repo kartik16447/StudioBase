@@ -314,6 +314,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       if (!sessionData.aiOutputs) {
         sessionData.aiOutputs = { title: (sessionData as any).title || 'Untitled', summary: '', tags: [] };
       }
+      // D1 stores metadata as a JSON string — parse it before touching properties
+      if (typeof sessionData.metadata === 'string') {
+        try { sessionData.metadata = JSON.parse(sessionData.metadata as any); } catch { sessionData.metadata = null as any; }
+      }
       if (!sessionData.metadata) {
         sessionData.metadata = { stepCount: sessionData.steps?.length || 0, durationMs: 0, chapterBreaks: [] };
       }

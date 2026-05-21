@@ -157,6 +157,8 @@ publicRoutes.get('/:shareToken/json', async (c) => {
   //   • animationTarget (zoom) — from session.metadata.stepOverrides (D1)
   //   • textOverride (text edits) — from steps table (D1)
   //   • coordinates — promoted from step.data.coordinates if not at root
+  const ZOOM_MAX = 1.40; // mirror RenderConstants.CAMERA_SCALE_LIMITS.max
+  const ZOOM_MIN = 1.00;
   if (Array.isArray(json.steps)) {
     json.steps = json.steps.map((step: any) => {
       const override   = stepOverrides[step.id] || {};
@@ -169,11 +171,15 @@ publicRoutes.get('/:shareToken/json', async (c) => {
         null;
 
       // animationTarget: D1 stepOverride wins → R2 root → R2 nested
-      const animationTarget =
+      // Clamp zoomScale here so old pre-clamp R2 values can't exceed the limit
+      const rawTarget =
         override.animationTarget ??
         step.animationTarget ??
         step.data?.animationTarget ??
         null;
+      const animationTarget = rawTarget
+        ? { ...rawTarget, zoomScale: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, rawTarget.zoomScale ?? ZOOM_MIN)) }
+        : null;
 
       // textOverride: D1 step content wins → R2 value
       const textOverride =
