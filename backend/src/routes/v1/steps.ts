@@ -246,7 +246,7 @@ steps.post('/:sessionId/generate-narration', async (c) => {
   }
 
   const { results: stepRows } = await c.env.DB.prepare(
-    `SELECT id, content FROM steps WHERE sopId = ? AND deletedAt IS NULL ORDER BY stepIndex ASC`
+    `SELECT id, content FROM steps WHERE sopId = ? ORDER BY stepIndex ASC`
   ).bind(sop.id).all<{ id: string; content: string }>();
 
   // Build (stepId → text) map — prefer textOverride, fall back to generatedText / elementText
