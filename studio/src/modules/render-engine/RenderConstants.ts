@@ -27,19 +27,31 @@ export const RenderConstants = {
 
   PANEL_SPRING: { type: 'spring' as const, stiffness: 280, damping: 36 },
 
-  // Cinematic camera springs — pan is a bit more responsive, zoom is heavy & restrained
-  // XY (pan):   stiffness 45, damping 26, mass 1.4 → settles ~1.2s, no bounce
-  // Scale (zoom): stiffness 36, damping 24, mass 1.2 → responsive, settles ~1.2s, over-damped
-  CAMERA_XY_SPRING:    { stiffness: 45, damping: 26, mass: 1.4, restDelta: 0.001 },
-  CAMERA_SCALE_SPRING: { stiffness: 36, damping: 24, mass: 1.2, restDelta: 0.001 },
+  // Cinematic camera springs — tuned for human eye tracking behaviour.
+  //
+  // Cognitive science basis:
+  //   The human eye needs ~400–600 ms to re-orient after a pan.  A spring that
+  //   settles in ~1.2 s (old values) is too fast — it chases the target so
+  //   eagerly that the viewer never gets a still frame to read the element.
+  //
+  // XY (pan):   stiffness 28, damping 32, mass 1.8 → settles ~2.0 s, no bounce
+  //             Heavier than before — the camera "commits" to a position and
+  //             holds it instead of constantly chasing the next target.
+  //
+  // Scale (zoom): stiffness 18, damping 28, mass 2.2 → settles ~2.8 s
+  //             Zoom should be noticeably SLOWER than pan.  Human perception
+  //             treats them as separate cognitive channels — a fast zoom while
+  //             panning overloads the vestibular system (motion-sickness cue).
+  CAMERA_XY_SPRING:    { stiffness: 28, damping: 32, mass: 1.8, restDelta: 0.001 },
+  CAMERA_SCALE_SPRING: { stiffness: 18, damping: 28, mass: 2.2, restDelta: 0.001 },
 
   // Hard zoom scale limits — keeps the view readable, prevents tunnel-vision
   CAMERA_SCALE_LIMITS: {
     min:   1.0,   // full overview — whole screenshot visible
-    near:  1.08,  // legacy distance-based (export only)
-    mid:   1.18,
-    far:   1.28,
+    near:  1.06,  // subtle nudge — barely perceptible
+    mid:   1.12,  // comfortable mid-range
+    far:   1.20,  // cross-page moves need more context; was 1.28 (too much)
     max:   1.40,  // Clamped to 1.40 to restrict manual zoom scale limits
-    event: 1.15,  // Subtle cinematic zoom default
+    event: 1.10,  // Default cinematic zoom; was 1.15 — gentler, keeps more context
   },
 };

@@ -125,16 +125,38 @@ export const CinematicMath = {
   /**
    * Per-step camera target driven by within-step progress (0–1).
    *
-   * Animation phases:
-   *   0.00–0.20  overview  — full screenshot visible, camera centered (scale 1.0)
-   *   0.20–0.80  event     — mild zoom toward the click/interaction area
-   *   0.80–1.00  retreat   — spring back toward overview (target resets to 50,50,1.0)
+   * ── Human Eye Model ──────────────────────────────────────────────────────
+   * The human eye tracks like this during a screen tutorial:
    *
-   * The framer-motion springs handle all the easing between phases — no manual
-   * interpolation needed here.  Just update the target and the spring follows.
+   *  1. Brief orientation frame  (50–400 ms) — "where am I on the page?"
+   *  2. Track toward the action  (spring settles naturally, 800–1200 ms)
+   *  3. READ / comprehend        (1000–3000 ms of still, focused view)
+   *  4. Exit signal              (subtle zoom-out, 300–500 ms)
+   *  5. Next context loads
    *
-   * If the step has no position data (no coordinates / animationTarget) the
-   * camera stays at full overview throughout.
+   * The old 20/80 split forced the camera to be in motion for 64% of each
+   * step and at rest for only 36% — the opposite of what the eye needs.
+   *
+   * ── Phase Timing ─────────────────────────────────────────────────────────
+   * Dynamic based on distance and context.  Distance is measured between the
+   * PREVIOUS step's focus point and this step's focus point (viewport %).
+   *
+   *  Same page, near move (<20% distance):
+   *    intro  0–0%   (skip — spring carries from prev position naturally)
+   *    event  0–92%  (long hold; camera transitions mid-pan)
+   *    exit  92–100% (very brief; skip if next step also near + same page)
+   *
+   *  Same page, far move (≥20% distance):
+   *    intro  0–8%   (brief overview so viewer gets their bearings)
+   *    event  8–90%
+   *    exit  90–100%
+   *
+   *  Cross-page / URL change:
+   *    intro  0–12%  (full overview — new page needs orientation)
+   *    event 12–88%
+   *    exit  88–100%
+   *
+   * The framer-motion springs handle all easing — targets are just set here.
    */
   getStepCameraTarget(
     step: any,
@@ -153,39 +175,70 @@ export const CinematicMath = {
       ? clamp(step.animationTarget.zoomScale, L.min, L.max)
       : L.event;
 
-    // If paused, bypass overview/retreat transitions so the camera target
-    // settles on the active step's focus area (event phase). This allows
-    // real-time editing of the zoom scale and focus point to render immediately.
+    // Edit mode: settle immediately on event target — no transitions
     if (!isPlaying) {
       return { pctX: pos.pctX, pctY: pos.pctY, scale };
     }
 
-    // Retreat phase: target swings back to overview unless next step is same context
-    if (stepProgress >= 0.80) {
-      if (nextStep && this.isSameContext(step, nextStep)) {
-        const nextPos = this._getTargetPosition(nextStep);
-        if (nextPos.hasData) {
-          return { pctX: pos.pctX, pctY: pos.pctY, scale };
-        }
+    // ── Context analysis ─────────────────────────────────────────────────────
+    const samePrev = prevStep ? this.isSameContext(prevStep, step) : false;
+    const sameNext = nextStep ? this.isSameContext(step, nextStep) : false;
+
+    // Distance from prev step's focus to this step's focus (in viewport-% space)
+    const prevPos = prevStep ? this._getTargetPosition(prevStep) : null;
+    const dx = prevPos?.hasData ? (pos.pctX - prevPos.pctX) : 50;
+    const dy = prevPos?.hasData ? (pos.pctY - prevPos.pctY) : 50;
+    const distFromPrev = Math.sqrt(dx * dx + dy * dy);
+
+    // Distance to next step (to decide whether to hold or retreat at exit)
+    const nextPos = nextStep ? this._getTargetPosition(nextStep) : null;
+    const ndx = nextPos?.hasData ? (nextPos.pctX - pos.pctX) : 50;
+    const ndy = nextPos?.hasData ? (nextPos.pctY - pos.pctY) : 50;
+    const distToNext = Math.sqrt(ndx * ndx + ndy * ndy);
+
+    // ── Phase thresholds ──────────────────────────────────────────────────────
+    let INTRO_END: number;
+    let EXIT_START: number;
+
+    if (!samePrev) {
+      // Cross-page: viewer needs full orientation
+      INTRO_END   = 0.12;
+      EXIT_START  = 0.88;
+    } else if (distFromPrev >= 20) {
+      // Same page but far jump (e.g. top nav → footer CTA)
+      INTRO_END   = 0.08;
+      EXIT_START  = 0.90;
+    } else {
+      // Same page, near move — skip intro entirely; spring carries from prev
+      INTRO_END   = 0.00;
+      EXIT_START  = sameNext && distToNext < 20 ? 1.00 : 0.92;
+    }
+
+    // ── Exit / retreat phase ──────────────────────────────────────────────────
+    if (stepProgress >= EXIT_START) {
+      if (sameNext && nextPos?.hasData) {
+        // Hold at current position — spring will transition to next step naturally
+        return { pctX: pos.pctX, pctY: pos.pctY, scale };
       }
+      // Zoom out to overview; but if next step is cross-page use full overview
       return overview;
     }
 
-    // Intro/transition phase: start at previous step's target if same context
-    if (stepProgress < 0.20) {
-      if (prevStep && this.isSameContext(prevStep, step)) {
-        const prevPos = this._getTargetPosition(prevStep);
-        if (prevPos.hasData) {
-          const prevScale = prevStep.animationTarget?.zoomScale != null
-            ? clamp(prevStep.animationTarget.zoomScale, L.min, L.max)
-            : L.event;
-          return { pctX: prevPos.pctX, pctY: prevPos.pctY, scale: prevScale };
-        }
+    // ── Intro / orientation phase ─────────────────────────────────────────────
+    if (stepProgress < INTRO_END) {
+      if (samePrev && prevPos?.hasData) {
+        // Start from where the previous step left off — seamless pan
+        const prevScale = prevStep?.animationTarget?.zoomScale != null
+          ? clamp(prevStep.animationTarget.zoomScale, L.min, L.max)
+          : L.event;
+        return { pctX: prevPos.pctX, pctY: prevPos.pctY, scale: prevScale };
       }
+      // Cross-page or no prev: show full overview while screenshot cross-dissolves in
       return overview;
     }
 
-    // Event phase: zoom gently toward the interaction point
+    // ── Event / comprehension phase ───────────────────────────────────────────
+    // This is where the eye READS the element. Camera holds here.
     return { pctX: pos.pctX, pctY: pos.pctY, scale };
   },
 
@@ -232,25 +285,46 @@ export const CinematicMath = {
 
   // ── Private ────────────────────────────────────────────────────────────────
 
-  /** Extract the XY position only (no scale decision). */
+  /**
+   * Extract the XY position only (no scale decision).
+   *
+   * ── Spatial anchor / context bias ────────────────────────────────────────
+   * A camera centered exactly on the click coordinate often loses context.
+   * Example: clicking a button in the top-right nav bar → if we center on
+   * the button, the left side of the nav (brand logo, other links) scrolls
+   * out of view.  The viewer loses the spatial anchor.
+   *
+   * Fix: apply a 20% pull toward the viewport center.  This means:
+   *   click at 10% X → camera targets 18% X  (keeps left context)
+   *   click at 90% X → camera targets 82% X  (keeps right context)
+   *   click at 50% X → unchanged (center)
+   *
+   * Manual animationTarget overrides skip this bias — the editor made a
+   * deliberate framing choice.
+   */
   _getTargetPosition(step: any): { pctX: number; pctY: number; hasData: boolean } {
-    // 1. Manual animationTarget
+    const CONTEXT_BIAS = 0.20; // pull 20% toward center; 0 = exact click, 1 = always center
+
+    // 1. Manual animationTarget — editor's explicit framing, skip bias
     const manual = step?.animationTarget;
     if (manual && manual.centerX != null) {
       return {
-        pctX:    clamp(manual.centerX, 15, 85),
-        pctY:    clamp(manual.centerY, 15, 85),
+        pctX:    clamp(manual.centerX, 10, 90),
+        pctY:    clamp(manual.centerY, 10, 90),
         hasData: true,
       };
     }
-    // 2. Captured click coordinates
+    // 2. Captured click coordinates — apply context bias
     const coords = step?.coordinates;
     if (coords && coords.x != null && coords.viewportWidth) {
-      const pctX = (coords.x / coords.viewportWidth) * 100;
-      const pctY = (coords.y / (coords.viewportHeight || coords.viewportWidth * 0.625)) * 100;
+      const rawX = (coords.x / coords.viewportWidth) * 100;
+      const rawY = (coords.y / (coords.viewportHeight || coords.viewportWidth * 0.625)) * 100;
+      // Soft bias toward center — preserves spatial awareness
+      const pctX = rawX + (50 - rawX) * CONTEXT_BIAS;
+      const pctY = rawY + (50 - rawY) * CONTEXT_BIAS;
       return {
-        pctX:    clamp(pctX, 15, 85),
-        pctY:    clamp(pctY, 15, 85),
+        pctX:    clamp(pctX, 12, 88),
+        pctY:    clamp(pctY, 12, 88),
         hasData: true,
       };
     }
