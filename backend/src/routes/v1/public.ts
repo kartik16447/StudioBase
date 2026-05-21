@@ -8,7 +8,7 @@ export const publicRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 async function resolveSession(db: Env['DB'], token: string) {
   // Try shareToken first (production share links — must be public)
   let row = await db.prepare(
-    `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, status, ownerId, shareToken,
+    `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, r2VideoKey, status, ownerId, shareToken,
             cinematicEnabled, sopEnabled, rawEnabled
      FROM sessions WHERE shareToken = ? AND isPublic = 1`
   ).bind(token).first<any>();
@@ -16,7 +16,7 @@ async function resolveSession(db: Env['DB'], token: string) {
   // Fallback: treat token as session id — allows direct links without Publish step
   if (!row) {
     row = await db.prepare(
-      `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, status, ownerId, shareToken,
+      `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, r2VideoKey, status, ownerId, shareToken,
               cinematicEnabled, sopEnabled, rawEnabled
        FROM sessions WHERE id = ? AND deletedAt IS NULL`
     ).bind(token).first<any>();
@@ -115,9 +115,17 @@ publicRoutes.get('/:shareToken/json', async (c) => {
   const origin = new URL(c.req.url).origin;
   const assets: Record<string, string> = {};
 
-  // Expose raw screen recording video through the public proxy
-  if (json.videoKey && typeof json.videoKey === 'string') {
-    assets[json.videoKey] = `${origin}/v1/public/${shareToken}/asset/${encodeURIComponent(json.videoKey)}`;
+  // Expose raw screen recording video through the public proxy.
+  // The R2 JSON envelope stores videoKey; older sessions may not have it, so
+  // fall back to the r2VideoKey column in D1 (written by the extension finalizer).
+  const resolvedVideoKey: string | null =
+    (json.videoKey && typeof json.videoKey === 'string' ? json.videoKey : null) ??
+    (session.r2VideoKey && typeof session.r2VideoKey === 'string' ? session.r2VideoKey : null);
+
+  if (resolvedVideoKey) {
+    assets[resolvedVideoKey] = `${origin}/v1/public/${shareToken}/asset/${encodeURIComponent(resolvedVideoKey)}`;
+    // Patch the envelope so the frontend can look up the URL via session.videoKey
+    json.videoKey = resolvedVideoKey;
   }
 
   // Pass 1: per-step screenshotKey (set by older pipeline versions)
