@@ -3,7 +3,7 @@
   "outputDirectory": "studio/dist",
   "framework": null,
   "rewrites": [
-    { "source": "/",                         "destination": "/home.html" },
+    { "source": "/landing",                  "destination": "/home.html" },
     { "source": "/s/:token",                 "destination": "/index.html" },
     { "source": "/sessions/:path*",          "destination": "/index.html" },
     { "source": "/app:path*",                "destination": "/index.html" },

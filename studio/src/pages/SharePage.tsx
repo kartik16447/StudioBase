@@ -221,7 +221,7 @@ export const SharePage: React.FC = () => {
         </div>
         <h2 className="text-xl font-semibold text-gray-900 mb-2">Walkthrough unavailable</h2>
         <p className="text-sm text-gray-500 max-w-xs">{error || 'This link may have expired or been made private.'}</p>
-        <a href="https://studiobase-umber.vercel.app" className="mt-6 text-sm font-medium text-indigo-600 hover:underline">
+        <a href="https://studiobase-umber.vercel.app/landing" className="mt-6 text-sm font-medium text-indigo-600 hover:underline">
           Create your own walkthrough →
         </a>
       </div>
@@ -285,7 +285,7 @@ export const SharePage: React.FC = () => {
               <span className="hidden sm:inline">{copied ? 'Copied!' : 'Copy link'}</span>
             </button>
             <a
-              href="https://studiobase-umber.vercel.app"
+              href="https://studiobase-umber.vercel.app/landing"
               className="flex items-center gap-1.5 px-2.5 sm:px-3 h-8 rounded-lg text-[12px] sm:text-[13px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors whitespace-nowrap"
             >
               <span className="hidden sm:inline">Create for free</span>
@@ -453,7 +453,7 @@ export const SharePage: React.FC = () => {
             Made with <span className="font-semibold text-gray-700">StudioBase</span>
           </p>
           <a
-            href="https://studiobase-umber.vercel.app"
+            href="https://studiobase-umber.vercel.app/landing"
             className="text-[13px] font-semibold text-indigo-600 hover:underline"
           >
             Create your own walkthrough →

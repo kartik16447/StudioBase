@@ -305,7 +305,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
       </div>
       <h2 className="text-xl font-semibold text-white mb-2">Walkthrough unavailable</h2>
       <p className="text-sm text-white/40 max-w-xs">{error || 'This link may have expired.'}</p>
-      <a href="https://studiobase-umber.vercel.app" className="mt-6 text-sm font-medium text-indigo-400 hover:underline">
+      <a href="https://studiobase-umber.vercel.app/landing" className="mt-6 text-sm font-medium text-indigo-400 hover:underline">
         Create your own walkthrough →
       </a>
     </div>
@@ -348,7 +348,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
             {copied ? <I.Check size={14} className="text-green-400" /> : <I.Link size={14} />}
             {copied ? 'Copied!' : 'Copy link'}
           </button>
-          <a href="https://studiobase-umber.vercel.app"
+          <a href="https://studiobase-umber.vercel.app/landing"
             className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[13px] font-semibold text-white bg-indigo-600 hover:bg-indigo-500 transition-colors">
             Try for free
           </a>
@@ -472,7 +472,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
             <span className="text-white font-bold text-sm">S</span>
           </div>
           <p className="text-[13px] text-white/40">Made with <span className="font-semibold text-white/60">StudioBase</span></p>
-          <a href="https://studiobase-umber.vercel.app" className="text-[13px] font-semibold text-indigo-400 hover:underline">
+          <a href="https://studiobase-umber.vercel.app/landing" className="text-[13px] font-semibold text-indigo-400 hover:underline">
             Create your own walkthrough →
           </a>
         </div>
