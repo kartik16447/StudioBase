@@ -136,7 +136,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     rawEnabled:       (session as any)?.rawEnabled       !== false,
     cinematicEnabled: !!(session as any)?.cinematicEnabled,
   });
-  const [formatSaving, setFormatSaving] = useState(false);
+  const [_formatSaving, setFormatSaving] = useState(false);
 
   // Cinematic unlock
   const [cinematicLoading, setCinematicLoading] = useState(false);
