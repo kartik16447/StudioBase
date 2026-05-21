@@ -221,4 +221,155 @@ steps.patch('/:sessionId/steps/:stepId/audio-duration',
   }
 );
 
+// ─── POST generate-narration (session-level: all steps at once) ──────────────
+//
+// Generates AI voiceover for every step that has script text, deducting 1
+// credit per step.  Returns the list of stepIds queued (client can then
+// poll /audio-status for each, or just reload after a few seconds).
+
+steps.post('/:sessionId/generate-narration', async (c) => {
+  const user = c.get('user');
+  const { sessionId } = c.req.param();
+  const body = await c.req.json().catch(() => ({})) as { language?: string };
+  const language = typeof body.language === 'string' ? body.language : undefined;
+
+  const session = await requireSession(c.env, sessionId, user.id);
+  const workspaceId = session.workspaceId;
+
+  // Load steps that have text to narrate
+  const sop = await c.env.DB.prepare(
+    `SELECT id FROM sops WHERE sessionId = ? LIMIT 1`
+  ).bind(sessionId).first<{ id: string }>();
+
+  if (!sop) {
+    throw new HTTPException(404, { message: 'No SOP found for this session' });
+  }
+
+  const { results: stepRows } = await c.env.DB.prepare(
+    `SELECT id, content FROM steps WHERE sopId = ? AND deletedAt IS NULL ORDER BY stepIndex ASC`
+  ).bind(sop.id).all<{ id: string; content: string }>();
+
+  // Build (stepId → text) map — prefer textOverride, fall back to generatedText / elementText
+  const stepsWithText: { id: string; text: string }[] = [];
+  for (const row of stepRows) {
+    try {
+      const c2 = JSON.parse(row.content) as any;
+      const text: string = c2.textOverride || c2.generatedText || c2.elementText || '';
+      if (text.trim()) stepsWithText.push({ id: row.id, text });
+    } catch { /* skip malformed */ }
+  }
+
+  if (stepsWithText.length === 0) {
+    throw new HTTPException(400, { message: 'No steps with text found to narrate' });
+  }
+
+  // Credits check — 1 per step
+  const creditCost = stepsWithText.length * AUDIO_TTS_CREDIT_COST;
+  const userRecord = await c.env.DB.prepare(
+    'SELECT creditsBalance FROM users WHERE id = ?'
+  ).bind(user.id).first() as any;
+
+  if ((userRecord?.creditsBalance ?? 0) < creditCost) {
+    throw new HTTPException(402, {
+      message: `Need ${creditCost} credits for ${stepsWithText.length} steps, have ${userRecord?.creditsBalance ?? 0}`,
+    });
+  }
+
+  const now = Date.now();
+
+  // Deduct credits + mark all steps as 'generating' in one batch
+  const dbStatements: any[] = [
+    c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance - ? WHERE id = ?')
+      .bind(creditCost, user.id),
+    c.env.DB.prepare(
+      'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(crypto.randomUUID(), user.id, -creditCost, 'audio_narration', sessionId, now),
+  ];
+
+  const jobs: { stepId: string; jobId: string; text: string }[] = [];
+  for (const { id: stepId, text } of stepsWithText) {
+    const jobId = crypto.randomUUID();
+    jobs.push({ stepId, jobId, text });
+    dbStatements.push(
+      c.env.DB.prepare(`
+        INSERT INTO step_audio (stepId, sessionId, userId, voiceoverSource, jobId, jobStartedAt, createdAt, updatedAt)
+        VALUES (?, ?, ?, 'generating', ?, ?, ?, ?)
+        ON CONFLICT(stepId, sessionId) DO UPDATE SET
+          voiceoverSource = 'generating',
+          jobId           = excluded.jobId,
+          jobStartedAt    = excluded.jobStartedAt,
+          updatedAt       = excluded.updatedAt
+      `).bind(stepId, sessionId, user.id, jobId, now, now, now)
+    );
+  }
+
+  try {
+    await c.env.DB.batch(dbStatements);
+  } catch (dbErr: any) {
+    console.error('[generate-narration] DB batch failed:', dbErr?.message ?? dbErr);
+    throw new HTTPException(500, { message: `DB error: ${dbErr?.message ?? 'unknown'}` });
+  }
+
+  // Queue audio jobs for each step
+  const failed: string[] = [];
+  for (const { stepId, jobId, text } of jobs) {
+    try {
+      await c.env.PIPELINE_QUEUE.send({
+        type: 'audio_tts',
+        sessionId,
+        stepId,
+        text,
+        userId: user.id,
+        workspaceId,
+        jobId,
+        language,
+      });
+    } catch (qErr: any) {
+      console.error(`[generate-narration] Queue failed for step ${stepId}:`, qErr?.message);
+      failed.push(stepId);
+    }
+  }
+
+  // Best-effort refund for any steps that failed to queue
+  if (failed.length > 0) {
+    const refund = failed.length * AUDIO_TTS_CREDIT_COST;
+    await c.env.DB.batch([
+      c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + ? WHERE id = ?')
+        .bind(refund, user.id),
+      c.env.DB.prepare(
+        'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(crypto.randomUUID(), user.id, refund, 'audio_narration_refund_queue_err', sessionId, now),
+      ...failed.map(stepId =>
+        c.env.DB.prepare(
+          'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
+        ).bind(now, stepId, sessionId)
+      ),
+    ]).catch(() => {});
+  }
+
+  const queued = jobs.filter(j => !failed.includes(j.stepId)).map(j => j.stepId);
+  return c.json({ queued, skipped: failed, totalCost: queued.length }, 202);
+});
+
+// ─── GET narration-status (session-level: all steps) ─────────────────────────
+
+steps.get('/:sessionId/narration-status', async (c) => {
+  const user = c.get('user');
+  const { sessionId } = c.req.param();
+
+  await requireSession(c.env, sessionId, user.id);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT stepId, voiceoverSource, voiceoverKey, voiceoverDurationMs
+     FROM step_audio WHERE sessionId = ?`
+  ).bind(sessionId).all<{
+    stepId: string;
+    voiceoverSource: string | null;
+    voiceoverKey: string | null;
+    voiceoverDurationMs: number | null;
+  }>();
+
+  return c.json({ steps: results });
+});
+
 export default steps;

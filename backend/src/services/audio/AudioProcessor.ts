@@ -18,7 +18,7 @@ export class AudioProcessor {
 
   async process(job: AudioTTSJob) {
     const { sessionId, stepId, text, userId, workspaceId, language, jobId } = job;
-    const r2Key = `audio/sessions/${sessionId}/steps/${stepId}/tts-v1.mp3`;
+    const r2Key = `audio/sessions/${sessionId}/steps/${stepId}/tts-v1.wav`;
 
     console.log(`[AUDIO] TTS start — session:${sessionId} step:${stepId} jobId:${jobId}`);
 
