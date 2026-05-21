@@ -210,6 +210,9 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
     const { sessionId, stepId } = c.req.param();
     const { text, language } = c.req.valid('json');
 
+    console.log(`[generate-audio] Request received: sessionId=${sessionId}, stepId=${stepId}, language=${language}`);
+    console.log(`[generate-audio] Text to process (length ${text?.length ?? 0}): "${text?.substring(0, 80)}..."`);
+
     const session = await requireSession(c.env, sessionId, user.id);
     const workspaceId = session.workspaceId;
 
@@ -496,6 +499,8 @@ steps.post('/:sessionId/generate-narration', async (c) => {
   const body = await c.req.json().catch(() => ({})) as { language?: string };
   const language = typeof body.language === 'string' ? body.language : undefined;
 
+  console.log(`[generate-narration] Overall request received: sessionId=${sessionId}, language=${language}`);
+
   const session = await requireSession(c.env, sessionId, user.id);
   const workspaceId = session.workspaceId;
 
@@ -521,6 +526,8 @@ steps.post('/:sessionId/generate-narration', async (c) => {
       stepsWithText.push({ id: step.id, text: text.trim() });
     }
   }
+
+  console.log(`[generate-narration] Found ${stepsWithText.length} total steps with valid text to narrate out of ${envelope.steps?.length ?? 0} total steps in session.`);
 
   if (stepsWithText.length === 0) {
     throw new HTTPException(400, { message: 'No steps with text found to narrate' });
@@ -577,6 +584,7 @@ steps.post('/:sessionId/generate-narration', async (c) => {
   const failed: string[] = [];
   for (const { stepId, jobId, text } of jobs) {
     try {
+      console.log(`[generate-narration] Queueing audio_tts job for stepId=${stepId}, jobId=${jobId}`);
       await c.env.AUDIO_QUEUE.send({
         type: 'audio_tts',
         sessionId,
@@ -611,6 +619,7 @@ steps.post('/:sessionId/generate-narration', async (c) => {
   }
 
   const queued = jobs.filter(j => !failed.includes(j.stepId)).map(j => j.stepId);
+  console.log(`[generate-narration] Finished queueing. Queued: ${queued.length}, Skipped/Failed: ${failed.length}`);
   return c.json({ queued, skipped: failed, totalCost: queued.length }, 202);
 });
 
