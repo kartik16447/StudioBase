@@ -410,18 +410,23 @@ const ScriptStepRow: React.FC<{
   };
 
 // ─── Chapters panel ────────────────────────────────────────────────────
+// ─── Chapters panel ────────────────────────────────────────────────────
 export const ChaptersPanel: React.FC = () => {
   const session = useStudioStore(state => state.session);
-  const [chapters, setChapters] = useState(session?.metadata?.chapterBreaks || []);
+  const saveChapterBreaks = useStudioStore(state => state.saveChapterBreaks);
+  const focusedStepId = useStudioStore(state => state.focusedStepId);
+  const currentStepIndex = useStudioStore(state => state.currentStepIndex);
 
   if (!session) return null;
+
+  const chapters = session.metadata?.chapterBreaks || [];
 
   return (
     <div className="h-full flex flex-col">
       <div className="px-5 py-4 border-b border-border">
         <SectionLabel hint={`${chapters.length} chapters`}>Auto-detected chapters</SectionLabel>
         <p className="text-[12.5px] text-text-2 leading-relaxed">
-          We grouped the {session.metadata.stepCount} steps into chapters based on URL changes and action patterns.
+          We grouped the {session.metadata?.stepCount || session.steps?.length || 0} steps into chapters based on URL changes and action patterns.
           Drag the dividers in the script to rebalance.
         </p>
       </div>
@@ -433,22 +438,48 @@ export const ChaptersPanel: React.FC = () => {
           stepRange="Steps 1 – 4"
           isFirst
         />
-        {chapters.map((c, i) => (
-          <ChapterRow
-            key={i}
-            n={i + 2}
-            title={c.chapterTitle}
-            stepRange={`After step ${session.steps.find(s => s.id === c.afterStepId)?.sequence ?? '?'}`}
-            onRename={(t) => {
-              const next = [...chapters];
-              next[i] = { ...c, chapterTitle: t };
-              setChapters(next);
-            }}
-            onDelete={() => setChapters(chapters.filter((_, j) => j !== i))}
-          />
-        ))}
+        {chapters.map((c, i) => {
+          const stepSequence = session.steps.find(s => s.id === c.afterStepId)?.sequence;
+          return (
+            <ChapterRow
+              key={i}
+              n={i + 2}
+              title={c.chapterTitle}
+              stepRange={stepSequence !== undefined ? `After step ${stepSequence}` : `After step ?`}
+              onRename={(t) => {
+                const next = [...chapters];
+                next[i] = { ...c, chapterTitle: t };
+                saveChapterBreaks(next);
+              }}
+              onDelete={() => {
+                saveChapterBreaks(chapters.filter((_, j) => j !== i));
+              }}
+            />
+          );
+        })}
 
-        <button className="w-full mt-3 h-10 rounded-sm border border-dashed border-border text-[13px] text-text-2 inline-flex items-center justify-center gap-2 hover:bg-surface-2 hover:text-text transition-colors">
+        <button
+          onClick={() => {
+            const targetStepId = focusedStepId || session.steps[currentStepIndex]?.id || session.steps[0]?.id;
+            if (!targetStepId) return;
+
+            // Check if there is already a chapter break after this step
+            if (chapters.some(c => c.afterStepId === targetStepId)) {
+              alert("A chapter break already exists for this step.");
+              return;
+            }
+
+            const next = [...chapters, { afterStepId: targetStepId, chapterTitle: 'New Chapter' }];
+            // Sort by step sequence/index chronologically
+            const sorted = next.sort((a, b) => {
+              const idxA = session.steps.findIndex(s => s.id === a.afterStepId);
+              const idxB = session.steps.findIndex(s => s.id === b.afterStepId);
+              return idxA - idxB;
+            });
+            saveChapterBreaks(sorted);
+          }}
+          className="w-full mt-3 h-10 rounded-sm border border-dashed border-border text-[13px] text-text-2 inline-flex items-center justify-center gap-2 hover:bg-surface-2 hover:text-text transition-colors"
+        >
           <I.Plus size={14} /> Add chapter break
         </button>
       </div>

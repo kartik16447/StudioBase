@@ -15,7 +15,17 @@ interface StepAudioStatus {
   voiceoverSource: string | null;
   voiceoverKey: string | null;
   voiceoverDurationMs: number | null;
+  swapVoiceId?: string | null;
+  originalVoiceoverKey?: string | null;
 }
+
+const ELEVENLABS_VOICES = [
+  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel (Female - Standard)' },
+  { id: '29vD33N1CtxCmqQRPOHJ', name: 'Drew (Male - News)' },
+  { id: '2EiwWnXF2V4jofwvRnss', name: 'Clyde (Male - Deep)' },
+  { id: 'piTKgcLEGmPEe24yT1vF', name: 'Nicole (Female - Whisper)' },
+  { id: 'AZnzlk1Xgd1AawpnG3qV', name: 'Dom (Male - Strong)' },
+];
 
 // ─── Mini audio player per step ───────────────────────────────────────────────
 const StepAudioRow: React.FC<{
@@ -23,12 +33,21 @@ const StepAudioRow: React.FC<{
   status: StepAudioStatus | undefined;
   audioUrl: string | null;
   isPolling: boolean;
-}> = ({ step, status, audioUrl, isPolling }) => {
+  sessionId: string;
+  onRefresh: () => void;
+}> = ({ step, status, audioUrl, isPolling, sessionId, onRefresh }) => {
   const [playing, setPlaying] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedVoice, setSelectedVoice] = useState(ELEVENLABS_VOICES[0].id);
+  const [isSwapping, setIsSwapping] = useState(false);
+  const [swapError, setSwapError] = useState<string | null>(null);
+
   const audioRef = useRef<HTMLAudioElement>(null);
   const text = step.textOverride || step.generatedText || step.elementText || '';
-  const done = status?.voiceoverSource === 'tts' || status?.voiceoverSource === 'original';
-  const generating = status?.voiceoverSource === 'generating' || isPolling;
+  
+  const done = status?.voiceoverSource === 'tts' || status?.voiceoverSource === 'original' || status?.voiceoverSource === 'swap';
+  const generating = status?.voiceoverSource === 'generating' || isPolling || isSwapping;
+  const isSwapped = !!status?.originalVoiceoverKey;
 
   function togglePlay() {
     const el = audioRef.current;
@@ -37,51 +56,169 @@ const StepAudioRow: React.FC<{
     else { el.play(); setPlaying(true); }
   }
 
+  async function handleSwap() {
+    if (generating) return;
+    setIsSwapping(true);
+    setSwapError(null);
+    try {
+      await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/swap-voice`, {
+        voiceId: selectedVoice,
+      });
+      onRefresh();
+    } catch (e: any) {
+      setSwapError(e.message || 'Failed to swap voice');
+      setIsSwapping(false);
+    }
+  }
+
+  async function handleRevert() {
+    if (generating) return;
+    setIsSwapping(true);
+    setSwapError(null);
+    try {
+      await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/revert-audio`, {});
+      onRefresh();
+      setIsSwapping(false);
+      setIsExpanded(false);
+    } catch (e: any) {
+      setSwapError(e.message || 'Failed to revert');
+      setIsSwapping(false);
+    }
+  }
+
+  // Auto-close expansion or reset swap loading when state changes
+  useEffect(() => {
+    if (generating) {
+      setIsSwapping(false);
+    }
+  }, [generating]);
+
   return (
-    <div className={cn(
-      'rounded-lg border px-3 py-2.5 flex items-center gap-2.5 transition-colors',
-      done ? 'border-primary/20 bg-primary/5' : 'border-border bg-surface-2',
-    )}>
-      {/* Step badge */}
+    <div className="flex flex-col gap-1.5">
       <div className={cn(
-        'w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0',
-        done ? 'bg-primary/15 text-primary' : 'bg-surface-3 text-text-3',
+        'rounded-lg border px-3 py-2.5 flex items-center gap-2.5 transition-colors',
+        done ? 'border-primary/20 bg-primary/5' : 'border-border bg-surface-2',
       )}>
-        {step.sequence}
+        {/* Step badge */}
+        <div className={cn(
+          'w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold shrink-0',
+          done ? 'bg-primary/15 text-primary' : 'bg-surface-3 text-text-3',
+        )}>
+          {step.sequence}
+        </div>
+
+        {/* Script snippet */}
+        <p className="flex-1 text-[11px] text-text-2 line-clamp-1 min-w-0">
+          {text || <span className="text-text-3 italic">No script</span>}
+        </p>
+
+        {/* State indicator */}
+        {generating ? (
+          <I.Loader size={13} className="text-primary animate-spin shrink-0" />
+        ) : done && audioUrl ? (
+          <>
+            <audio
+              ref={audioRef}
+              src={audioUrl}
+              onEnded={() => setPlaying(false)}
+              className="hidden"
+            />
+            
+            {/* Swapped indicator */}
+            {status?.voiceoverSource === 'swap' && (
+              <span className="text-[9px] bg-primary/10 text-primary border border-primary/25 px-1.5 py-0.5 rounded-full font-medium tracking-wide scale-90 select-none">
+                Swapped
+              </span>
+            )}
+
+            <button
+              onClick={togglePlay}
+              className="w-6 h-6 rounded-full bg-primary/15 hover:bg-primary/25 flex items-center justify-center transition-colors shrink-0"
+              title={playing ? "Pause" : "Play"}
+            >
+              {playing
+                ? <I.Pause size={10} className="text-primary" />
+                : <I.Play size={10} className="text-primary" />}
+            </button>
+
+            {status?.voiceoverDurationMs && (
+              <span className="text-[10px] text-text-3 shrink-0 tabular-nums mr-0.5">
+                {formatDuration(status.voiceoverDurationMs)}
+              </span>
+            )}
+
+            {/* Voice Swapping settings toggler */}
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
+              className={cn(
+                "w-6 h-6 rounded-full flex items-center justify-center transition-colors shrink-0 text-text-3 hover:text-text-1 border border-transparent",
+                isExpanded ? "bg-primary/20 text-primary border-primary/30" : "hover:bg-surface-3"
+              )}
+              title="Voice Swap Settings"
+            >
+              <I.Sparkles size={11} className={cn(status?.voiceoverSource === 'swap' && "animate-pulse")} />
+            </button>
+          </>
+        ) : (
+          <I.Circle size={8} className="text-text-3 shrink-0" />
+        )}
       </div>
 
-      {/* Script snippet */}
-      <p className="flex-1 text-[11px] text-text-2 line-clamp-1 min-w-0">
-        {text || <span className="text-text-3 italic">No script</span>}
-      </p>
+      {/* Expanded drawer for Voice Swap */}
+      {done && isExpanded && !generating && (
+        <div className="mx-2 p-3 bg-surface-2 border border-border rounded-lg flex flex-col gap-2.5 animate-in slide-in-from-top-1 duration-150">
+          <div className="flex items-center gap-1.5">
+            <I.Sparkles size={12} className="text-primary" />
+            <span className="text-[11px] font-semibold text-text-1">Speech-to-Speech (Voice Swap)</span>
+          </div>
 
-      {/* State indicator */}
-      {generating ? (
-        <I.Loader size={13} className="text-primary animate-spin shrink-0" />
-      ) : done && audioUrl ? (
-        <>
-          <audio
-            ref={audioRef}
-            src={audioUrl}
-            onEnded={() => setPlaying(false)}
-            className="hidden"
-          />
-          <button
-            onClick={togglePlay}
-            className="w-6 h-6 rounded-full bg-primary/15 hover:bg-primary/25 flex items-center justify-center transition-colors shrink-0"
-          >
-            {playing
-              ? <I.Pause size={10} className="text-primary" />
-              : <I.Play size={10} className="text-primary" />}
-          </button>
-          {status?.voiceoverDurationMs && (
-            <span className="text-[10px] text-text-3 shrink-0 tabular-nums">
-              {formatDuration(status.voiceoverDurationMs)}
-            </span>
+          <p className="text-[10px] text-text-3 leading-relaxed">
+            Re-synthesize this step's audio narration into a consistent voice while maintaining original pacing and emphasis.
+          </p>
+
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedVoice}
+              onChange={(e) => setSelectedVoice(e.target.value)}
+              className="flex-1 bg-surface-3 border border-border rounded-md px-2 py-1 text-[11px] text-text font-medium focus:outline-none focus:border-primary transition-colors"
+            >
+              {ELEVENLABS_VOICES.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </select>
+
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleSwap}
+              disabled={generating}
+              icon={I.Sparkles}
+            >
+              Swap Voice
+            </Button>
+
+            {isSwapped && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleRevert}
+                disabled={generating}
+                title="Restore original audio"
+              >
+                <I.RotateCcw size={10} />
+              </Button>
+            )}
+          </div>
+
+          {swapError && (
+            <p className="text-[9px] text-danger font-medium flex items-center gap-1 mt-0.5">
+              <I.AlertCircle size={10} />
+              {swapError}
+            </p>
           )}
-        </>
-      ) : (
-        <I.Circle size={8} className="text-text-3 shrink-0" />
+        </div>
       )}
     </div>
   );
@@ -287,6 +424,8 @@ export const AudioPanel: React.FC = () => {
                 status={status}
                 audioUrl={url}
                 isPolling={pollingStepIds.has(step.id)}
+                sessionId={sessionId}
+                onRefresh={loadStatus}
               />
             );
           })}

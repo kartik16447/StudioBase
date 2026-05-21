@@ -15,6 +15,8 @@ export async function handleQueue(batch: MessageBatch, env: Env, ctx: ExecutionC
 
       if (jobType === 'audio_tts') {
         await audioProcessor.process(body);
+      } else if (jobType === 'audio_swap') {
+        await audioProcessor.processSwap(body);
       } else {
         await pipelineProcessor.process(body);
       }
@@ -26,18 +28,29 @@ export async function handleQueue(batch: MessageBatch, env: Env, ctx: ExecutionC
       if (message.attempts > 3) {
         console.error(`[QUEUE] Message:${message.id} exhausted retries — terminal failure.`);
 
-        if (jobType === 'audio_tts') {
+        if (jobType === 'audio_tts' || jobType === 'audio_swap') {
           // Refund credit + reset step state so UI doesn't stay stuck
           const now = Date.now();
+          const ledgerReason = jobType === 'audio_tts' ? 'audio_tts_refund' : 'audio_swap_refund';
           await env.DB.batch([
             env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + 1 WHERE id = ?')
               .bind(body.userId),
             env.DB.prepare(
               'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, 1, ?, ?, ?)'
-            ).bind(crypto.randomUUID(), body.userId, 'audio_tts_refund', body.sessionId, now),
-            env.DB.prepare(
-              'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
-            ).bind(now, body.stepId, body.sessionId),
+            ).bind(crypto.randomUUID(), body.userId, ledgerReason, body.sessionId, now),
+            jobType === 'audio_tts'
+              ? env.DB.prepare(
+                  'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
+                ).bind(now, body.stepId, body.sessionId)
+              : env.DB.prepare(
+                  `UPDATE step_audio SET
+                    voiceoverKey = originalVoiceoverKey,
+                    voiceoverSource = CASE WHEN originalVoiceoverKey LIKE '%tts%' THEN 'tts' ELSE 'original' END,
+                    jobId = NULL,
+                    jobStartedAt = NULL,
+                    updatedAt = ?
+                  WHERE stepId = ? AND sessionId = ?`
+                ).bind(now, body.stepId, body.sessionId),
           ]);
         } else {
           await env.DB.prepare(

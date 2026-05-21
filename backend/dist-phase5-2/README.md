@@ -1,0 +1,1 @@
+This folder contains the built output assets for the worker "studiobase-backend" generated at 2026-05-16T08:31:43.317Z.

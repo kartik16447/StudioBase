@@ -1,5 +1,5 @@
 import { Env } from '../../types/hono';
-import { getAudioService } from './registry';
+import { getAudioService, getElevenLabsService } from './registry';
 import { writeAuditLog } from '../../telemetry/audit';
 
 export interface AudioTTSJob {
@@ -11,6 +11,16 @@ export interface AudioTTSJob {
   workspaceId: string;
   jobId: string;
   language?: string;
+}
+
+export interface AudioSwapJob {
+  type: 'audio_swap';
+  sessionId: string;
+  stepId: string;
+  voiceId: string;
+  userId: string;
+  workspaceId: string;
+  jobId: string;
 }
 
 export class AudioProcessor {
@@ -52,5 +62,65 @@ export class AudioProcessor {
     });
 
     console.log(`[AUDIO] TTS done — key:${r2Key} durationMs:${result.durationMs}`);
+  }
+
+  async processSwap(job: AudioSwapJob) {
+    const { sessionId, stepId, voiceId, userId, workspaceId, jobId } = job;
+
+    console.log(`[AUDIO] Voice Swap start — session:${sessionId} step:${stepId} voice:${voiceId} jobId:${jobId}`);
+
+    // 1. Fetch current audio record
+    const row = await this.env.DB.prepare(
+      'SELECT voiceoverKey, originalVoiceoverKey FROM step_audio WHERE stepId = ? AND sessionId = ?'
+    ).bind(stepId, sessionId).first<{ voiceoverKey: string | null; originalVoiceoverKey: string | null }>();
+
+    if (!row || !row.voiceoverKey) {
+      throw new Error(`Cannot swap voice: no existing audio found for step:${stepId}`);
+    }
+
+    // 2. Load the active audio buffer from R2
+    const r2Object = await this.env.R2.get(row.voiceoverKey);
+    if (!r2Object) {
+      throw new Error(`Active voiceover file not found in R2: ${row.voiceoverKey}`);
+    }
+    const inputBuffer = await r2Object.arrayBuffer();
+
+    // 3. Keep originalVoiceoverKey as fallback
+    const originalKey = row.originalVoiceoverKey || row.voiceoverKey;
+
+    // 4. Perform ElevenLabs Voice Swap (Speech-to-Speech)
+    const elevenLabs = getElevenLabsService(this.env);
+    const result = await elevenLabs.swapVoice(inputBuffer, voiceId);
+
+    // 5. Upload swapped audio
+    const swappedKey = `audio/sessions/${sessionId}/steps/${stepId}/swap-${voiceId}.mp3`;
+    await this.env.R2.put(swappedKey, result.buffer, {
+      httpMetadata: { contentType: result.mimeType },
+    });
+
+    // 6. Update step_audio D1 record
+    const now = Date.now();
+    await this.env.DB.prepare(`
+      UPDATE step_audio SET
+        voiceoverKey         = ?,
+        originalVoiceoverKey = ?,
+        voiceoverSource      = 'swap',
+        swapVoiceId          = ?,
+        voiceoverDurationMs  = ?,
+        jobId                = NULL,
+        jobStartedAt         = NULL,
+        updatedAt            = ?
+      WHERE stepId = ? AND sessionId = ?
+    `).bind(swappedKey, originalKey, voiceId, result.durationMs, now, stepId, sessionId).run();
+
+    await writeAuditLog(this.env, {
+      actorId: userId,
+      workspaceId,
+      action: 'audio.swap_completed',
+      targetId: stepId,
+      metadata: { sessionId, voiceId, durationMs: result.durationMs },
+    });
+
+    console.log(`[AUDIO] Voice Swap done — key:${swappedKey} durationMs:${result.durationMs}`);
   }
 }

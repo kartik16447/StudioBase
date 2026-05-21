@@ -21,7 +21,12 @@ const PatchDurationSchema = z.object({
   durationMs: z.number().int().positive(),
 });
 
+const SwapVoiceSchema = z.object({
+  voiceId: z.string().min(1).max(255),
+});
+
 const AUDIO_TTS_CREDIT_COST = 1;
+const AUDIO_SWAP_CREDIT_COST = 1;
 const STUCK_JOB_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
@@ -163,6 +168,100 @@ steps.post('/:sessionId/steps/:stepId/revert-audio', async (c) => {
   return c.json({ voiceoverKey: revertKey, voiceoverSource: revertSource });
 });
 
+// ─── POST swap-voice ─────────────────────────────────────────────────────────
+
+steps.post('/:sessionId/steps/:stepId/swap-voice',
+  zValidator('json', SwapVoiceSchema),
+  async (c) => {
+    const user = c.get('user');
+    const { sessionId, stepId } = c.req.param();
+    const { voiceId } = c.req.valid('json');
+
+    const session = await requireSession(c.env, sessionId, user.id);
+    const workspaceId = session.workspaceId;
+
+    // Ensure active audio exists and we're not already generating
+    const existing = await c.env.DB.prepare(
+      'SELECT voiceoverSource, voiceoverKey FROM step_audio WHERE stepId = ? AND sessionId = ?'
+    ).bind(stepId, sessionId).first() as any;
+
+    if (!existing || !existing.voiceoverKey) {
+      throw new HTTPException(400, { message: 'No existing audio track found to swap voice on' });
+    }
+
+    if (existing.voiceoverSource === 'generating') {
+      throw new HTTPException(409, { message: 'Audio generation or swap already in progress for this step' });
+    }
+
+    // Credits check
+    const userRecord = await c.env.DB.prepare(
+      'SELECT creditsBalance FROM users WHERE id = ?'
+    ).bind(user.id).first() as any;
+
+    if ((userRecord?.creditsBalance ?? 0) < AUDIO_SWAP_CREDIT_COST) {
+      throw new HTTPException(402, {
+        message: `Need ${AUDIO_SWAP_CREDIT_COST} credit, have ${userRecord?.creditsBalance ?? 0}`,
+      });
+    }
+
+    const now = Date.now();
+    const jobId = crypto.randomUUID();
+
+    try {
+      await c.env.DB.batch([
+        c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance - ? WHERE id = ?')
+          .bind(AUDIO_SWAP_CREDIT_COST, user.id),
+        c.env.DB.prepare(
+          'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind(crypto.randomUUID(), user.id, -AUDIO_SWAP_CREDIT_COST, 'audio_swap', sessionId, now),
+        c.env.DB.prepare(`
+          UPDATE step_audio SET
+            voiceoverSource = 'generating',
+            jobId           = ?,
+            jobStartedAt    = ?,
+            updatedAt       = ?
+          WHERE stepId = ? AND sessionId = ?
+        `).bind(jobId, now, now, stepId, sessionId),
+      ]);
+    } catch (dbErr: any) {
+      console.error('[swap-voice] DB batch failed:', dbErr?.message ?? dbErr);
+      throw new HTTPException(500, {
+        message: `DB error: ${dbErr?.message ?? 'unknown'}`,
+      });
+    }
+
+    try {
+      await c.env.AUDIO_QUEUE.send({
+        type: 'audio_swap',
+        sessionId,
+        stepId,
+        voiceId,
+        userId: user.id,
+        workspaceId,
+        jobId,
+      });
+    } catch (qErr: any) {
+      // Queue send failed — refund the credit and restore original state
+      console.error('[swap-voice] Queue send failed:', qErr?.message ?? qErr);
+      await c.env.DB.batch([
+        c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + ? WHERE id = ?')
+          .bind(AUDIO_SWAP_CREDIT_COST, user.id),
+        c.env.DB.prepare(
+          'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind(crypto.randomUUID(), user.id, AUDIO_SWAP_CREDIT_COST, 'audio_swap_refund_queue_err', sessionId, now),
+        c.env.DB.prepare(
+          'UPDATE step_audio SET voiceoverSource = ?, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
+        ).bind(existing.voiceoverSource, now, stepId, sessionId),
+      ]).catch(() => {}); // best-effort refund
+      throw new HTTPException(503, {
+        message: `Queue unavailable: ${qErr?.message ?? 'unknown'}. Credit refunded.`,
+      });
+    }
+
+    return c.json({ jobId }, 202);
+  }
+);
+
 // ─── GET audio-status ────────────────────────────────────────────────────────
 
 steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
@@ -172,11 +271,17 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
   await requireSession(c.env, sessionId, user.id);
 
   const row = await c.env.DB.prepare(
-    'SELECT voiceoverSource, voiceoverKey, voiceoverDurationMs, jobId, jobStartedAt, userId FROM step_audio WHERE stepId = ? AND sessionId = ?'
+    'SELECT voiceoverSource, voiceoverKey, voiceoverDurationMs, swapVoiceId, originalVoiceoverKey, jobId, jobStartedAt, userId FROM step_audio WHERE stepId = ? AND sessionId = ?'
   ).bind(stepId, sessionId).first() as any;
 
   if (!row) {
-    return c.json({ voiceoverSource: null, voiceoverKey: null, voiceoverDurationMs: null });
+    return c.json({
+      voiceoverSource: null,
+      voiceoverKey: null,
+      voiceoverDurationMs: null,
+      swapVoiceId: null,
+      originalVoiceoverKey: null,
+    });
   }
 
   // Stuck-state TTL recovery: job didn't complete in 5 min → reset + refund
@@ -192,13 +297,21 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
         'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, 1, ?, ?, ?)'
       ).bind(crypto.randomUUID(), row.userId, 'audio_tts_refund_ttl', sessionId, now),
     ]);
-    return c.json({ voiceoverSource: null, voiceoverKey: row.voiceoverKey, voiceoverDurationMs: row.voiceoverDurationMs });
+    return c.json({
+      voiceoverSource: null,
+      voiceoverKey: row.voiceoverKey,
+      voiceoverDurationMs: row.voiceoverDurationMs,
+      swapVoiceId: row.swapVoiceId,
+      originalVoiceoverKey: row.originalVoiceoverKey,
+    });
   }
 
   return c.json({
     voiceoverSource: row.voiceoverSource,
     voiceoverKey: row.voiceoverKey,
     voiceoverDurationMs: row.voiceoverDurationMs,
+    swapVoiceId: row.swapVoiceId,
+    originalVoiceoverKey: row.originalVoiceoverKey,
   });
 });
 
@@ -360,13 +473,15 @@ steps.get('/:sessionId/narration-status', async (c) => {
   await requireSession(c.env, sessionId, user.id);
 
   const { results } = await c.env.DB.prepare(
-    `SELECT stepId, voiceoverSource, voiceoverKey, voiceoverDurationMs
+    `SELECT stepId, voiceoverSource, voiceoverKey, voiceoverDurationMs, swapVoiceId, originalVoiceoverKey
      FROM step_audio WHERE sessionId = ?`
   ).bind(sessionId).all<{
     stepId: string;
     voiceoverSource: string | null;
     voiceoverKey: string | null;
     voiceoverDurationMs: number | null;
+    swapVoiceId: string | null;
+    originalVoiceoverKey: string | null;
   }>();
 
   return c.json({ steps: results });

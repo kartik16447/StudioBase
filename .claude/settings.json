@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./node_modules/.bin/tsc --noEmit *)",
+      "Bash(node_modules/.bin/tsc --noEmit *)",
+      "Bash(git -C * log *)",
+      "Bash(git -C * show *)",
+      "Bash(git -C * diff *)",
+      "Bash(git -C * status *)",
+      "Bash(curl -s * http://localhost:*)"
+    ]
+  }
+}

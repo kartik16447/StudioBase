@@ -18,6 +18,7 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   ENVIRONMENT: 'production' | 'staging' | 'development';
   DEV_BYPASS_EMAIL?: string; // Only present in local dev via wrangler.jsonc [env.development] — never in production.
+  ELEVENLABS_API_KEY?: string;
 }
 
 export interface User {

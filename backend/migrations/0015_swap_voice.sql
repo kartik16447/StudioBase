@@ -1,0 +1,2 @@
+-- Migration 0015: Add swapVoiceId column to track voice swap selections
+-- Already applied manually: ALTER TABLE step_audio ADD COLUMN swapVoiceId TEXT;

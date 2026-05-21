@@ -445,7 +445,6 @@ export const VideoCanvas: React.FC = () => {
   const {
     session,
     currentStepIndex,
-    isPlaying,
     playbackRate,
     setPlaying,
     setStepIndex,
@@ -468,8 +467,7 @@ export const VideoCanvas: React.FC = () => {
   const [showOutroSlide, setShowOutroSlide] = useState(false);
   const [outroVisible,   setOutroVisible]   = useState(false);
 
-  // PATCH 5: Chapter card state
-  const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
+
 
   const playerRef         = useRef<HTMLDivElement>(null);
   const cinPlayerRef      = useRef<CinematicPlayerHandle>(null);
@@ -550,18 +548,7 @@ export const VideoCanvas: React.FC = () => {
     };
   }, [brand.showOutro]);
 
-  // PATCH 5: Chapter card on step change
-  useEffect(() => {
-    if (!isPlaying || currentStepIndex === 0) return;
-    const chapterBreaks = session?.metadata?.chapterBreaks || [];
-    const prevStepId = steps[currentStepIndex - 1]?.id;
-    if (!prevStepId) return;
-    const chapter = (chapterBreaks as any[]).find((c) => c.afterStepId === prevStepId);
-    if (!chapter) return;
-    setShowChapterCard(chapter.chapterTitle);
-    const t = setTimeout(() => setShowChapterCard(null), 2000);
-    return () => clearTimeout(t);
-  }, [currentStepIndex, isPlaying]);
+
 
   // ── Raw video playback rate ──────────────────────────────────────────────
   useEffect(() => {
@@ -740,23 +727,7 @@ export const VideoCanvas: React.FC = () => {
             )}
           </AnimatePresence>
 
-          {/* Chapter card */}
-          <AnimatePresence>
-            {showChapterCard && (
-              <motion.div
-                key="chapter"
-                initial={{ opacity: 0, scale: 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.96 }}
-                transition={{ duration: 0.35 }}
-                className="absolute inset-0 z-30 flex flex-col items-center justify-center text-center p-10"
-                style={{ background: `linear-gradient(135deg, ${brand.primaryColor}e6, ${brand.primaryColor})` }}
-              >
-                <p className="text-white/70 text-sm uppercase tracking-widest mb-3">Chapter</p>
-                <h2 className="text-3xl font-bold text-white">{showChapterCard}</h2>
-              </motion.div>
-            )}
-          </AnimatePresence>
+
 
           {/* Ended overlay */}
           <AnimatePresence>

@@ -25,7 +25,7 @@ import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle,
   useMemo, useRef, useState,
 } from 'react';
-import { useSpring } from 'framer-motion';
+import { useSpring, motion, AnimatePresence } from 'framer-motion';
 import { I } from '../icons';
 import { cn } from '../ui';
 import { CanvasRenderer } from '../../modules/render-engine/CanvasRenderer';
@@ -268,6 +268,23 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // Step index — derived from playhead, but kept as state to trigger effects
   const [currentIndex, setCurrentIndex] = useState(0);
 
+  // Chapter break transition state and refs
+  const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
+  const showChapterCardRef = useRef<string | null>(null);
+  const isTransitioningRef = useRef(false);
+  const transitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chapterBreaksRef = useRef(chapterBreaks);
+
+  useEffect(() => { showChapterCardRef.current = showChapterCard; }, [showChapterCard]);
+  useEffect(() => { chapterBreaksRef.current = chapterBreaks; }, [chapterBreaks]);
+
+  // Clean up timers on unmount
+  useEffect(() => {
+    return () => {
+      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    };
+  }, []);
+
   // ── Refs (avoid stale closures in rAF) ────────────────────────────────────
   const containerRef       = useRef<HTMLDivElement>(null);
   const canvasRef          = useRef<HTMLCanvasElement>(null);
@@ -312,6 +329,36 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // Ref-shadow for onStepSelect so we can call it from rAF without stale closure
   const onStepSelectRef = useRef(onStepSelect);
   useEffect(() => { onStepSelectRef.current = onStepSelect; }, [onStepSelect]);
+
+  // Deletion/Rename self-healing effect
+  useEffect(() => {
+    if (showChapterCard) {
+      const exists = chapterBreaks?.some(c => c.chapterTitle === showChapterCard);
+      if (!exists) {
+        console.log('[CinematicPlayer] Active chapter card was deleted or renamed. Self-healing playback.');
+        if (transitionTimerRef.current) {
+          clearTimeout(transitionTimerRef.current);
+          transitionTimerRef.current = null;
+        }
+        isTransitioningRef.current = false;
+        setShowChapterCard(null);
+
+        // Resume backing media if supposed to be playing
+        if (isPlayingRef.current) {
+          if (videoRef.current && videoUrlRef.current && renderMode === 'hybrid') {
+            videoRef.current.play().catch(() => {});
+          }
+          const step = stepsRef.current[currentIdxRef.current];
+          if (step?.voiceoverKey) {
+            const url = assetsRef.current[step.voiceoverKey] ?? '';
+            if (url) {
+              audioRef.current.play().catch(() => {});
+            }
+          }
+        }
+      }
+    }
+  }, [chapterBreaks, showChapterCard]);
 
   const renderer = useMemo(() => new CanvasRenderer(), []);
 
@@ -387,13 +434,15 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           }
         } else {
           // Slideshow: wall-clock accumulator
-          const next = currentMsRef.current + dt * speedRef.current;
-          if (next >= totMs) {
-            currentMsRef.current = totMs;
-            setIsPlaying(false);
-            setIsEnded(true);
-          } else {
-            currentMsRef.current = next;
+          if (!showChapterCardRef.current) {
+            const next = currentMsRef.current + dt * speedRef.current;
+            if (next >= totMs) {
+              currentMsRef.current = totMs;
+              setIsPlaying(false);
+              setIsEnded(true);
+            } else {
+              currentMsRef.current = next;
+            }
           }
         }
 
@@ -411,12 +460,38 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         getSegmentAt(currentMsRef.current, segs);
 
       if (newIdx !== currentIdxRef.current) {
-        console.log('[CinematicPlayer] step advance', currentIdxRef.current, '→', newIdx, '| currentMs:', Math.round(currentMsRef.current), '| totalMs:', Math.round(totMs));
-        currentIdxRef.current = newIdx;
-        setCurrentIndex(newIdx);
-        // Notify parent of natural advance — parent updates display state
-        // without triggering a seek-back loop (getCurrentStep() check).
-        onStepSelectRef.current?.(newIdx);
+        const prevIdx = currentIdxRef.current;
+        const prevStep = stepsRef.current[prevIdx];
+        const chapter = prevStep ? chapterBreaksRef.current?.find(c => c.afterStepId === prevStep.id) : null;
+
+        if (chapter && isPlayingRef.current && !isTransitioningRef.current) {
+          console.log('[CinematicPlayer] Chapter transition triggered for:', chapter.chapterTitle);
+          isTransitioningRef.current = true;
+          setShowChapterCard(chapter.chapterTitle);
+
+          // Pause backing media immediately during overlay
+          if (videoRef.current) videoRef.current.pause();
+          audioRef.current.pause();
+
+          // Advance indices so the next step's visual screen loads behind the card immediately
+          currentIdxRef.current = newIdx;
+          setCurrentIndex(newIdx);
+          onStepSelectRef.current?.(newIdx);
+
+          if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+          transitionTimerRef.current = setTimeout(() => {
+            console.log('[CinematicPlayer] Chapter transition completed.');
+            isTransitioningRef.current = false;
+            setShowChapterCard(null);
+          }, 1500); // 1.5 seconds transition duration
+        } else {
+          console.log('[CinematicPlayer] step advance', currentIdxRef.current, '→', newIdx, '| currentMs:', Math.round(currentMsRef.current), '| totalMs:', Math.round(totMs));
+          currentIdxRef.current = newIdx;
+          setCurrentIndex(newIdx);
+          // Notify parent of natural advance — parent updates display state
+          // without triggering a seek-back loop (getCurrentStep() check).
+          onStepSelectRef.current?.(newIdx);
+        }
       }
 
       // ── Camera — overview → event zoom → overview per step ───────────────
@@ -522,9 +597,12 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !videoUrl) return;
-    if (isPlaying) v.play().catch(() => {});
-    else v.pause();
-  }, [isPlaying, videoUrl]);
+    if (isPlaying && !isTransitioningRef.current) {
+      v.play().catch(() => {});
+    } else {
+      v.pause();
+    }
+  }, [isPlaying, videoUrl, showChapterCard]);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = speed;
@@ -550,7 +628,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         if (audio.src !== url) { audio.src = url; }
         audio.currentTime = 0;
         audio.playbackRate = speed;
-        if (isPlaying) audio.play().catch(() => {});
+        if (isPlaying && !isTransitioningRef.current) {
+          audio.play().catch(() => {});
+        }
       }
     } else {
       audio.src = '';
@@ -560,12 +640,40 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   // ── Voiceover — play/pause ────────────────────────────────────────────────
   useEffect(() => {
-    if (isPlaying) {
+    if (isPlaying && !isTransitioningRef.current) {
       if (audioRef.current.src) audioRef.current.play().catch(() => {});
     } else {
       audioRef.current.pause();
     }
-  }, [isPlaying]);
+  }, [isPlaying, showChapterCard]);
+
+  // ── Play/Pause handling during chapter transition ──────────────────────────
+  useEffect(() => {
+    if (!isPlaying) {
+      // Pause active transition timer so it doesn't auto-resume while player is paused
+      if (transitionTimerRef.current) {
+        clearTimeout(transitionTimerRef.current);
+        transitionTimerRef.current = null;
+      }
+    } else {
+      // Resume transition timer if we are in transition but timer is not running
+      if (showChapterCard && !transitionTimerRef.current) {
+        transitionTimerRef.current = setTimeout(() => {
+          console.log('[CinematicPlayer] Resumed chapter transition completed.');
+          isTransitioningRef.current = false;
+          setShowChapterCard(null);
+
+          // Resume playback of backing media
+          if (videoRef.current && videoUrlRef.current && renderMode === 'hybrid') {
+            videoRef.current.play().catch(() => {});
+          }
+          if (audioRef.current.src) {
+            audioRef.current.play().catch(() => {});
+          }
+        }, 1500);
+      }
+    }
+  }, [isPlaying, showChapterCard, renderMode]);
 
   // ── Fullscreen ─────────────────────────────────────────────────────────────
   const toggleFullscreen = useCallback(() => {
@@ -640,6 +748,14 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   }, [isEnded]);
 
   const scrubTo = useCallback((ms: number) => {
+    // Cancel any active chapter break transition
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
+    isTransitioningRef.current = false;
+    setShowChapterCard(null);
+
     console.log('[CinematicPlayer] scrubTo', Math.round(ms), 'ms | currentIdxRef:', currentIdxRef.current);
     const clamped = Math.max(0, Math.min(ms, totalMsRef.current));
     currentMsRef.current  = clamped;
@@ -738,6 +854,24 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             className="absolute inset-0 w-full h-full block"
             style={{ imageRendering: 'auto' }}
           />
+
+          {/* Chapter card */}
+          <AnimatePresence>
+            {showChapterCard && (
+              <motion.div
+                key="chapter"
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.35 }}
+                className="absolute inset-0 z-30 flex flex-col items-center justify-center text-center p-10"
+                style={{ background: `linear-gradient(135deg, ${primaryColor}e6, ${primaryColor})` }}
+              >
+                <p className="text-white/70 text-sm uppercase tracking-widest mb-3">Chapter</p>
+                <h2 className="text-3xl font-bold text-white leading-tight">{showChapterCard}</h2>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Pause overlay */}
           {!isPlaying && !isEnded && (

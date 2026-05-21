@@ -82,6 +82,7 @@ interface StudioState {
   setSopStatus: (status: 'draft' | 'review' | 'published' | null) => void;
   saveStep: (stepId: string, updates: { textOverride?: string; annotations?: any[] }) => Promise<void>;
   saveAnimationTarget: (stepId: string, animationTarget: any) => Promise<void>;
+  saveChapterBreaks: (chapterBreaks: { afterStepId: string; chapterTitle: string }[]) => Promise<void>;
   publishSOP: (sopId: string, status: 'review' | 'published') => Promise<void>;
   forkSOP: (sopId: string) => Promise<string>; // returns new sopId
   shareSession: () => Promise<{ shareUrl: string; shareToken: string }>;
@@ -643,6 +644,30 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
     // Always apply optimistically so preview reflects the change immediately
     updateStep(stepId, { animationTarget });
+  },
+
+  saveChapterBreaks: async (chapterBreaks) => {
+    const { session } = get();
+    if (!session) return;
+    const sessionId = (session as any).id || (session as any).sessionId;
+    const workspaceId = (session as any).workspaceId;
+    if (!sessionId || !workspaceId) return;
+
+    const existing = (session as any).metadata || {};
+    const updatedMetadata = { ...existing, chapterBreaks };
+
+    // Update in local store optimistically
+    const updatedSession = {
+      ...session,
+      metadata: updatedMetadata
+    };
+    set({ session: updatedSession });
+
+    await apiClient.request(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ metadata: updatedMetadata }),
+    }).catch(err => console.warn('[saveChapterBreaks] PATCH failed:', err));
   },
 
   publishSOP: async (sopId, status) => {
