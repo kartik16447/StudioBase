@@ -128,47 +128,19 @@ const RawVideoPlayer: React.FC<{ url: string }> = ({ url }) => {
   );
 };
 
-// ─── CinematicLocked ─────────────────────────────────────────────────────────
-
-const CinematicLocked: React.FC = () => (
-  <div
-    className="w-full rounded-2xl overflow-hidden flex flex-col items-center justify-center text-center p-10 sm:p-16 gap-5"
-    style={{
-      background: 'linear-gradient(135deg, #12121a 0%, #1a1a2e 100%)',
-      border: '1px solid rgba(94,92,230,0.2)',
-      boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
-      aspectRatio: '16/9',
-    }}
-  >
-    <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-      <I.Lock size={22} className="text-indigo-400" />
-    </div>
-    <div>
-      <h3 className="text-[18px] sm:text-[20px] font-bold text-white mb-2">Cinematic player not enabled</h3>
-      <p className="text-[13px] text-white/50 max-w-xs mx-auto leading-relaxed">
-        The creator hasn't unlocked cinematic sharing for this walkthrough yet.
-      </p>
-    </div>
-    <a
-      href="https://studiobase-umber.vercel.app"
-      className="mt-2 flex items-center gap-2 px-5 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[13px] font-semibold transition-colors"
-    >
-      Create your own →
-    </a>
-  </div>
-);
-
 // ─── SharePage ────────────────────────────────────────────────────────────────
 
 export const SharePage: React.FC = () => {
   const [session, setSession] = useState<PublicSession | null>(null);
   const [cinematicEnabled, setCinematicEnabled] = useState(false);
+  const [sopEnabled, setSopEnabled] = useState(true);
+  const [rawEnabled, setRawEnabled] = useState(true);
   const [ownerName, setOwnerName] = useState<string>('');
   const [capturedAt, setCapturedAt] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>('guide');
+  const [activeTab, setActiveTab] = useState<Tab | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -188,6 +160,8 @@ export const SharePage: React.FC = () => {
         setOwnerName(meta.owner?.name || 'Anonymous');
         setCapturedAt(meta.capturedAt);
         setCinematicEnabled(!!meta.cinematicEnabled);
+        setSopEnabled(meta.sopEnabled !== false);
+        setRawEnabled(meta.rawEnabled !== false);
 
         if (!meta.sessionJsonUrl) throw new Error('Session not ready.');
 
@@ -258,12 +232,19 @@ export const SharePage: React.FC = () => {
     ? session.assets[session.videoKey]
     : null;
 
-  // Tabs to show — recording tab only if video exists
+  // Tabs — only show formats the owner has enabled
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'guide',     label: 'Step Guide',  icon: <I.List size={13} /> },
-    ...(videoUrl ? [{ id: 'recording' as Tab, label: 'Recording', icon: <I.Video size={13} /> }] : []),
-    { id: 'cinematic', label: 'Cinematic',   icon: <I.Play size={13} /> },
+    ...(sopEnabled ? [{ id: 'guide' as Tab,     label: 'Step Guide', icon: <I.List size={13} /> }] : []),
+    ...(rawEnabled && videoUrl ? [{ id: 'recording' as Tab, label: 'Recording', icon: <I.Video size={13} /> }] : []),
+    ...(cinematicEnabled ? [{ id: 'cinematic' as Tab, label: 'Cinematic', icon: <I.Play size={13} /> }] : []),
   ];
+
+  // Auto-select first available tab (or keep current if still valid)
+  const resolvedTab: Tab | null = (() => {
+    if (tabs.length === 0) return null;
+    if (activeTab && tabs.some(t => t.id === activeTab)) return activeTab;
+    return tabs[0].id;
+  })();
 
   return (
     <div className="min-h-screen bg-[#fafafa]">
@@ -347,33 +328,42 @@ export const SharePage: React.FC = () => {
         <div className="h-px bg-gray-200 my-6 sm:my-8" />
 
         {/* ── Tabs ── */}
-        <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl mb-6 sm:mb-8 w-full sm:w-fit">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-[12px] sm:text-[13px] font-semibold transition-all relative',
-                activeTab === tab.id
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              )}
-            >
-              {tab.icon}
-              {tab.label}
-              {/* Lock badge on cinematic if not enabled */}
-              {tab.id === 'cinematic' && !cinematicEnabled && (
-                <span className="ml-0.5 w-3.5 h-3.5 bg-amber-100 rounded-full flex items-center justify-center">
-                  <I.Lock size={8} className="text-amber-600" />
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+        {tabs.length > 1 && (
+          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-xl mb-6 sm:mb-8 w-full sm:w-fit">
+            {tabs.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  'flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-[12px] sm:text-[13px] font-semibold transition-all',
+                  resolvedTab === tab.id
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* ── Nothing shared ── */}
+      {tabs.length === 0 && (
+        <div className="max-w-[760px] mx-auto px-4 sm:px-6 pb-20 flex flex-col items-center justify-center py-20 text-center">
+          <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+            <I.EyeOff size={20} className="text-gray-400" />
+          </div>
+          <h3 className="text-[16px] font-semibold text-gray-700 mb-2">Nothing shared yet</h3>
+          <p className="text-[13px] text-gray-400 max-w-xs">
+            The creator hasn't enabled any content for this link.
+          </p>
+        </div>
+      )}
+
       {/* ── Guide Tab ── (narrow column) */}
-      {activeTab === 'guide' && (
+      {resolvedTab === 'guide' && (
         <div className="max-w-[760px] mx-auto px-4 sm:px-6 pb-20 sm:pb-24">
           <div className="space-y-3 sm:space-y-4">
             {steps.map((step, i) => (
@@ -392,36 +382,30 @@ export const SharePage: React.FC = () => {
       )}
 
       {/* ── Recording Tab ── (wide) */}
-      {activeTab === 'recording' && videoUrl && (
+      {resolvedTab === 'recording' && videoUrl && (
         <div className="w-full px-3 sm:px-6 lg:px-10 pb-12 sm:pb-20 max-w-[1200px] mx-auto">
           <RawVideoPlayer url={videoUrl} />
           <div className="mt-4 p-4 bg-green-50 border border-green-100 rounded-xl flex items-start gap-3">
             <I.CheckCircle size={16} className="text-green-600 mt-0.5 flex-shrink-0" />
             <p className="text-[13px] text-green-700">
-              <strong>Free</strong> — raw screen recording is always available to anyone with this link. No credits required.
+              <strong>Free</strong> — raw screen recording is shared directly. No credits required.
             </p>
           </div>
         </div>
       )}
 
       {/* ── Cinematic Tab ── (wide) */}
-      {activeTab === 'cinematic' && (
+      {resolvedTab === 'cinematic' && (
         <div className="w-full px-3 sm:px-6 lg:px-10 pb-12 sm:pb-20 max-w-[1200px] mx-auto">
-          {cinematicEnabled ? (
-            <>
-              <CinematicPlayer
-                steps={steps}
-                assets={session.assets ?? {}}
-                chapterBreaks={session.metadata?.chapterBreaks}
-                renderMode="slideshow"
-              />
-              <p className="mt-3 text-center text-[12px] text-gray-400 sm:hidden">
-                Tap the player to pause · swipe the timeline to scrub
-              </p>
-            </>
-          ) : (
-            <CinematicLocked />
-          )}
+          <CinematicPlayer
+            steps={steps}
+            assets={session.assets ?? {}}
+            chapterBreaks={session.metadata?.chapterBreaks}
+            renderMode="slideshow"
+          />
+          <p className="mt-3 text-center text-[12px] text-gray-400 sm:hidden">
+            Tap the player to pause · swipe the timeline to scrub
+          </p>
         </div>
       )}
 

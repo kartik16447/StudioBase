@@ -158,6 +158,49 @@ sessions.patch('/:id/share', requirePermission('sop:edit'), async (c) => {
   return c.json({ isPublic, shareToken, shareUrl });
 });
 
+// PATCH /v1/sessions/:id/share-formats — toggle SOP and Raw Recording visibility
+sessions.patch('/:id/share-formats', requirePermission('sop:edit'), async (c) => {
+  const ws   = c.get('workspace');
+  const id   = c.req.param('id') as string;
+  const body = await c.req.json<{ sopEnabled?: boolean; rawEnabled?: boolean }>();
+
+  const row = await c.env.DB
+    .prepare('SELECT id FROM sessions WHERE id = ? AND workspaceId = ? AND deletedAt IS NULL')
+    .bind(id, ws.id)
+    .first<{ id: string }>();
+
+  if (!row) return c.json({ error: 'Not found' }, 404);
+
+  // Build a minimal UPDATE — only touch the fields that were sent
+  const updates: string[] = [];
+  const values: (number | string)[] = [];
+
+  if (typeof body.sopEnabled === 'boolean') {
+    updates.push('sopEnabled = ?');
+    values.push(body.sopEnabled ? 1 : 0);
+  }
+  if (typeof body.rawEnabled === 'boolean') {
+    updates.push('rawEnabled = ?');
+    values.push(body.rawEnabled ? 1 : 0);
+  }
+
+  if (updates.length === 0) return c.json({ error: 'Nothing to update' }, 400);
+
+  updates.push('updatedAt = ?');
+  values.push(Date.now());
+  values.push(id);
+
+  await c.env.DB
+    .prepare(`UPDATE sessions SET ${updates.join(', ')} WHERE id = ?`)
+    .bind(...values)
+    .run();
+
+  return c.json({
+    sopEnabled: typeof body.sopEnabled === 'boolean' ? body.sopEnabled : undefined,
+    rawEnabled: typeof body.rawEnabled === 'boolean' ? body.rawEnabled : undefined,
+  });
+});
+
 // PATCH /v1/sessions/:id/enable-cinematic — deduct 1 credit and unlock cinematic sharing
 // Idempotent: calling again when already enabled is free (no double charge).
 sessions.patch('/:id/enable-cinematic', requirePermission('sop:edit'), async (c) => {
