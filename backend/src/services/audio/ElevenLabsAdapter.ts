@@ -4,8 +4,43 @@ import { IAudioService, AudioResult } from './IAudioService';
 export class ElevenLabsAdapter implements IAudioService {
   constructor(private env: Env) {}
 
-  async generateFromText(text: string): Promise<AudioResult> {
-    throw new Error('ElevenLabsAdapter does not support text-to-speech in our design; use WorkersAIAdapter.');
+  async generateFromText(text: string, options?: { voiceId?: string; language?: string }): Promise<AudioResult> {
+    const apiKey = this.env.ELEVENLABS_API_KEY;
+    if (!apiKey || apiKey === '' || apiKey === 'DUMMY_KEY') {
+       console.log('[ElevenLabsAdapter] No API key for TTS, falling back to WorkersAIAdapter');
+       const fallback = new (require('./WorkersAIAdapter').WorkersAIAdapter)(this.env);
+       return fallback.generateFromText(text, options);
+    }
+    
+    // Default to Rachel if no voiceId is provided
+    const voiceId = options?.voiceId || '21m00Tcm4TlvDq8ikWAM';
+    console.log(`[ElevenLabsAdapter] Calling ElevenLabs Text-to-Speech API for voice: ${voiceId}`);
+    
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_multilingual_v2',
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`ElevenLabs TTS API failed: ${response.status} - ${errText}`);
+    }
+
+    const outputBuffer = await response.arrayBuffer();
+    const durationMs = Math.round((outputBuffer.byteLength / (44100 * 2)) * 1000); 
+
+    return {
+      buffer: outputBuffer,
+      mimeType: 'audio/mpeg',
+      durationMs,
+    };
   }
 
   async swapVoice(audioBuffer: ArrayBuffer, voiceId: string): Promise<AudioResult> {

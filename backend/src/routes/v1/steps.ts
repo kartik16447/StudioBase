@@ -146,7 +146,14 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
 
     let generatedText = '';
     try {
-      const parsed = JSON.parse(aiResponse.response);
+      let rawResponse = aiResponse?.response || '';
+      rawResponse = rawResponse.trim();
+      if (rawResponse.startsWith('```json')) {
+        rawResponse = rawResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (rawResponse.startsWith('```')) {
+        rawResponse = rawResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      const parsed = JSON.parse(rawResponse);
       generatedText = parsed.generatedText;
       console.log(`[generate-script] Parsed generatedText: "${generatedText}"`);
     } catch (e) {
@@ -154,13 +161,13 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
       throw new HTTPException(500, { message: 'Failed to parse AI response' });
     }
 
-    // Update the step in the DB
+    // Update the step in the R2 session JSON envelope
     stepData.generatedText = generatedText;
     
-    console.log(`[generate-script] Updating database record for stepId=${stepId}`);
-    await c.env.DB.prepare(
-      'UPDATE steps SET content = ?, updatedAt = ? WHERE id = ?'
-    ).bind(JSON.stringify(stepData), Date.now(), stepId).run();
+    console.log(`[generate-script] Updating R2 session.json record for stepId=${stepId}`);
+    await c.env.R2.put(assetKey, JSON.stringify(envelope), {
+      httpMetadata: { contentType: 'application/json' },
+    });
 
     console.log(`[generate-script] Successfully updated stepId=${stepId}. Returning text.`);
     return c.json({ generatedText, budgetSeconds });
