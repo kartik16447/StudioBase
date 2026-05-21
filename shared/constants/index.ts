@@ -17,7 +17,7 @@ export const KEEPALIVE_PING_INTERVAL_MS = 20000;
 
 // Pipeline
 export const PIPELINE_TIMEOUT_MS = 120000; // 2 min max pipeline run
-export const DEFAULT_ZOOM_SCALE = 2.5;
+export const DEFAULT_ZOOM_SCALE = 1.18; // Clamped to CinematicMath.CAMERA_SCALE_LIMITS.mid
 export const DEFAULT_TRANSITION_MS = 400;
 export const DEFAULT_ZOOM_IN_MS = 600;
 export const DEFAULT_ZOOM_OUT_MS = 300;

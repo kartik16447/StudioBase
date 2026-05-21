@@ -51,11 +51,17 @@ export const EmbedSlidesView: React.FC = () => {
   useEffect(() => {
     const step = steps[idx];
     const at = step?.animationTarget;
-    if (at && at.zoomScale > 1) {
-      // centerX/Y are 0–1 normalised; translate to CSS % offset from center
-      const tx = (0.5 - at.centerX) * 100;
-      const ty = (0.5 - at.centerY) * 100;
-      springScale.set(at.zoomScale);
+    if (at && (at.zoomScale ?? 1) > 1) {
+      // Pipeline emits pctX/pctY (0–100). Legacy field was centerX/Y (0–1).
+      // Normalise both to 0–1 so the translate formula is uniform.
+      const cx = at.pctX != null ? at.pctX / 100 : (at.centerX ?? 0.5);
+      const cy = at.pctY != null ? at.pctY / 100 : (at.centerY ?? 0.5);
+      // Shift the image so the focal point lands at the visual center.
+      const tx = (0.5 - cx) * 100;
+      const ty = (0.5 - cy) * 100;
+      // Clamp zoomScale to our allowed range (mirrors CinematicMath limits)
+      const clampedScale = Math.min(1.40, Math.max(1.00, at.zoomScale ?? 1.0));
+      springScale.set(clampedScale);
       springX.set(tx);
       springY.set(ty);
     } else {

@@ -215,7 +215,31 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         console.log('[fetchSession] Fetching full JSON from R2:', data.sessionJsonUrl);
         const jsonContent = await apiClient.get<any>(data.sessionJsonUrl);
         if (jsonContent) {
+          // ── Preserve D1 stepOverrides before R2 spread ───────────────────
+          // D1 metadata arrives as a JSON string here — parse it first so we
+          // can rescue the user's saved stepOverrides before the R2 snapshot
+          // (which may carry its own stale `metadata` key) overwrites them.
+          let d1StepOverrides: Record<string, any> | undefined;
+          try {
+            const raw = sessionData.metadata;
+            const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            if (parsed?.stepOverrides && typeof parsed.stepOverrides === 'object') {
+              d1StepOverrides = parsed.stepOverrides;
+            }
+          } catch {}
+
           sessionData = { ...sessionData, ...jsonContent, sessionId: data.id || data.sessionId };
+
+          // Restore D1 stepOverrides — they are authoritative for user edits
+          if (d1StepOverrides) {
+            if (typeof sessionData.metadata === 'string') {
+              try { (sessionData as any).metadata = JSON.parse(sessionData.metadata as any); } catch {}
+            }
+            if (!sessionData.metadata || typeof sessionData.metadata !== 'object') {
+              (sessionData as any).metadata = {};
+            }
+            (sessionData.metadata as any).stepOverrides = d1StepOverrides;
+          }
         }
       }
 
@@ -372,14 +396,24 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             ? Math.max(0, rawTimestamp - sessionStartTime) 
             : rawTimestamp;
 
+          // Promote animationTarget: D1 stepOverride wins, then R2 root, then legacy locations
+          const rawTarget =
+            ((sessionData.metadata as any)?.stepOverrides?.[s.id || `step-${i}`]?.animationTarget)
+            || s.animationTarget || content?.animationTarget || s.data?.animationTarget || null;
+
+          // Always clamp zoomScale to [1.0, 1.40] — old pipeline/R2 values can be 2.5
+          const ZOOM_MAX = 1.40;
+          const ZOOM_MIN = 1.00;
+          const animationTarget = rawTarget
+            ? { ...rawTarget, zoomScale: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, rawTarget.zoomScale ?? ZOOM_MIN)) }
+            : null;
+
           return {
             ...s,
             ...content, // Flatten the nested JSON blob to root level properties
             timestamp: normalizedTimestamp,
             screenshotKey: s.screenshotKey || content?.screenshotKey || screenshotByIndex.get(i) || null,
-            // Promote animationTarget: manual override from stepOverrides wins, then root, then legacy locations
-            animationTarget: ((sessionData.metadata as any)?.stepOverrides?.[s.id || `step-${i}`]?.animationTarget)
-              || s.animationTarget || content?.animationTarget || s.data?.animationTarget || null,
+            animationTarget,
             id: s.id || `step-${i}`,
             sequence: s.sequence || i + 1,
           };
