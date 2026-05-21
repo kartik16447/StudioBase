@@ -211,18 +211,25 @@ export const SOPCanvas: React.FC = () => {
             isProcessing={isProcessing}
             icon={I.Sparkles}
             onClick={async () => {
-              if (!session || isProcessing) return;
-              console.log('[SOPCanvas] Generate AI Content clicked — sessionId:', session.sessionId);
+              console.log('[SOPCanvas][Generate AI Content] Button clicked.');
+              if (!session || isProcessing) {
+                console.log('[SOPCanvas][Generate AI Content] Bailing out. Session:', !!session, 'isProcessing:', isProcessing);
+                return;
+              }
+              console.log(`[SOPCanvas][Generate AI Content] Starting processing for sessionId: ${session.sessionId}`);
               setIsProcessing(true);
               try {
-                const res = await apiClient.post('/pipeline/trigger', {
+                const payload = {
                   sessionId: session.sessionId,
                   requestedOutputs: { sop: true, demo: true },
-                });
-                console.log('[SOPCanvas] /pipeline/trigger response:', res);
+                };
+                console.log('[SOPCanvas][Generate AI Content] Sending POST to /pipeline/trigger with payload:', payload);
+                const res = await apiClient.post('/pipeline/trigger', payload);
+                console.log('[SOPCanvas][Generate AI Content] Server accepted trigger request. Response:', res);
+                console.log('[SOPCanvas][Generate AI Content] Starting client-side polling to wait for backend processing to finish...');
                 startPolling(session.sessionId);
               } catch (err) {
-                console.error('[SOPCanvas] /pipeline/trigger failed:', err);
+                console.error('[SOPCanvas][Generate AI Content] /pipeline/trigger request failed!', err);
                 setIsProcessing(false);
               }
             }}

@@ -57,30 +57,45 @@ const StepAudioRow: React.FC<{
   }
 
   async function handleSwap() {
-    if (generating) return;
+    console.log(`[AudioPanel][Swap Voice] Clicked Swap Voice for step ${step.id}. Selected voice: ${selectedVoice}`);
+    if (generating) {
+      console.log(`[AudioPanel][Swap Voice] Bailing out because step is currently generating.`);
+      return;
+    }
     setIsSwapping(true);
     setSwapError(null);
     try {
-      await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/swap-voice`, {
+      console.log(`[AudioPanel][Swap Voice] Sending POST to /sessions/${sessionId}/steps/${step.id}/swap-voice with payload:`, { voiceId: selectedVoice });
+      const res = await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/swap-voice`, {
         voiceId: selectedVoice,
       });
+      console.log(`[AudioPanel][Swap Voice] Successfully swapped voice. Server responded with:`, res);
+      console.log(`[AudioPanel][Swap Voice] Calling onRefresh() to poll for updated audio URL.`);
       onRefresh();
     } catch (e: any) {
+      console.error(`[AudioPanel][Swap Voice] Failed to swap voice. Error details:`, e);
       setSwapError(e.message || 'Failed to swap voice');
       setIsSwapping(false);
     }
   }
 
   async function handleRevert() {
-    if (generating) return;
+    console.log(`[AudioPanel][Revert Voice] Clicked Revert for step ${step.id}`);
+    if (generating) {
+      console.log(`[AudioPanel][Revert Voice] Bailing out because step is currently generating.`);
+      return;
+    }
     setIsSwapping(true);
     setSwapError(null);
     try {
-      await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/revert-audio`, {});
+      console.log(`[AudioPanel][Revert Voice] Sending POST to /sessions/${sessionId}/steps/${step.id}/revert-audio`);
+      const res = await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/revert-audio`, {});
+      console.log(`[AudioPanel][Revert Voice] Successfully reverted. Response:`, res);
       onRefresh();
       setIsSwapping(false);
       setIsExpanded(false);
     } catch (e: any) {
+      console.error(`[AudioPanel][Revert Voice] Failed to revert. Error details:`, e);
       setSwapError(e.message || 'Failed to revert');
       setIsSwapping(false);
     }
@@ -305,14 +320,20 @@ export const AudioPanel: React.FC = () => {
 
   // ── Generate all ──
   async function handleGenerateAll() {
-    if (!sessionId || stepsWithText.length === 0) return;
+    console.log(`[AudioPanel][Regenerate AI Voice] Clicked Generate All. sessionId=${sessionId}, valid steps=${stepsWithText.length}`);
+    if (!sessionId || stepsWithText.length === 0) {
+      console.log(`[AudioPanel][Regenerate AI Voice] Bailing out because no session or no valid steps with text.`);
+      return;
+    }
     setError(null);
     setIsGenerating(true);
     try {
+      console.log(`[AudioPanel][Regenerate AI Voice] Sending POST to /sessions/${sessionId}/generate-narration with empty payload (triggers all missing)`);
       const result = await apiClient.post<{ queued: string[]; totalCost: number }>(
         `/sessions/${sessionId}/generate-narration`,
         {}
       );
+      console.log(`[AudioPanel][Regenerate AI Voice] Server accepted request. Response data (queued steps to update UI):`, result);
       // Mark queued steps as generating locally for immediate feedback
       setStepStatuses(prev => {
         const map = new Map(prev.map(s => [s.stepId, s]));

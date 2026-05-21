@@ -137,7 +137,11 @@ const ScriptStepRow: React.FC<{
 
   const handleRegenerate = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!session || isGenerating) return;
+    console.log(`[Panels][AI Regenerate] Button clicked for step ${step.id}`);
+    if (!session || isGenerating) {
+      console.log(`[Panels][AI Regenerate] Bailing out. Session: ${!!session}, isGenerating: ${isGenerating}`);
+      return;
+    }
     
     const stepIndex = session.steps.findIndex(s => s.id === step.id);
     let visualDurationSeconds = 3.0;
@@ -149,7 +153,9 @@ const ScriptStepRow: React.FC<{
       }
     }
     
-    console.log(`[ScriptRegeneration] Starting script regeneration for step ${step.id}. session: ${session.sessionId}, visualDurationSeconds: ${visualDurationSeconds}s`);
+    console.log(`[Panels][AI Regenerate] Calculated visual duration constraint: ${visualDurationSeconds}s based on next step timestamp`);
+    console.log(`[Panels][AI Regenerate] Setting UI state to isGenerating=true and sending POST request to /sessions/${session.sessionId}/steps/${step.id}/generate-script with payload:`, { visualDurationSeconds });
+    
     setIsGenerating(true);
     try {
       const res = await apiClient.post<{ generatedText: string, budgetSeconds: number }>(
@@ -157,16 +163,17 @@ const ScriptStepRow: React.FC<{
         { visualDurationSeconds }
       );
       
-      console.log(`[ScriptRegeneration] Successfully regenerated script for step ${step.id}:`, res);
+      console.log(`[Panels][AI Regenerate] Successfully received AI response! Data:`, res);
+      console.log(`[Panels][AI Regenerate] Will write text back to frontend store and clear textOverride.`);
       
       if (res.generatedText) {
         setText(res.generatedText);
         updateStep(step.id, { generatedText: res.generatedText, textOverride: undefined });
       } else {
-        console.warn(`[ScriptRegeneration] API returned empty or missing generatedText:`, res);
+        console.warn(`[Panels][AI Regenerate] API returned empty or missing generatedText (maybe parsing failed silently?):`, res);
       }
     } catch (err) {
-      console.error(`[ScriptRegeneration] Failed to regenerate script for step ${step.id}:`, err);
+      console.error(`[Panels][AI Regenerate] Exception during script generation for step ${step.id}:`, err);
     } finally {
       setIsGenerating(false);
     }
