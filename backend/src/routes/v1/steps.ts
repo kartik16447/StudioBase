@@ -108,10 +108,10 @@ You are writing for an automated video engine. You will be given a specific UI a
    - BAD: "Click on 'Support' to discover available resources for troubleshooting and assistance."
    - GOOD: "Click Support."
 2. **Be Direct:** Start with the verb. Never use filler phrases like "Next you will want to," "Now," or "Proceed to."
-3. **The Silence Rule:** If the action is a simple UI toggle, a browser back-button, turning off a pointer tool, or a repetitive navigation click that requires no explanation, you MUST output exactly the word: \`[SILENCE]\`. Do not narrate obvious visual movements. 
+3. **Keep it ultra-short for fast steps:** Even if the step is only 1 second long, provide a 1-to-2 word narration (e.g. "Click Save", "Toggle setting"). Try to always provide text rather than remaining silent, but keep it extremely brief to fit the time budget.
 
 **YOUR TASK:**
-Given the UI Action and Time Budget, generate the final spoken script. Output valid JSON with a single "generatedText" field containing ONLY the spoken text or the word [SILENCE]. Do not include conversational filler in the generated text.`;
+Given the UI Action and Time Budget, generate the final spoken script. Output valid JSON with a single "generatedText" field containing ONLY the spoken text. Do not include conversational filler in the generated text.`;
 
     const userMessage = JSON.stringify({
       action: stepData.action,
