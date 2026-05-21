@@ -6,7 +6,7 @@ export async function handleQueue(batch: MessageBatch, env: Env, ctx: ExecutionC
   const pipelineProcessor = new PipelineProcessor(env);
   const audioProcessor = new AudioProcessor(env);
 
-  for (const message of batch.messages) {
+  const promises = batch.messages.map(async (message) => {
     const body: any = message.body;
     const jobType: string = body.type ?? 'pipeline';
 
@@ -59,5 +59,7 @@ export async function handleQueue(batch: MessageBatch, env: Env, ctx: ExecutionC
         message.retry();
       }
     }
-  }
+  });
+
+  await Promise.allSettled(promises);
 }

@@ -41,14 +41,18 @@
 				"binding": "PIPELINE_QUEUE",
 				"queue": "studiobase-pipeline",
 			},
+			{
+				"binding": "AUDIO_QUEUE",
+				"queue": "studiobase-audio-tts",
+			},
 		],
 		"consumers": [
 			{
-				"queue": "studiobase-pipeline",
+				"queue": "studiobase-audio-tts",
 				"max_batch_size": 10,
 				"max_batch_timeout": 5,
 				"max_retries": 3,
-				"dead_letter_queue": "studiobase-pipeline-dlq",
+				"dead_letter_queue": "studiobase-audio-tts-dlq",
 			},
 		],
 	},

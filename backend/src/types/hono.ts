@@ -6,6 +6,7 @@ export interface Env {
   TOKEN_CACHE: KVNamespace;
   R2: R2Bucket;
   PIPELINE_QUEUE: Queue;
+  AUDIO_QUEUE: Queue;
   AI: Ai;
   MEDIA: any; // CloudflareMediaTransformations — no official type yet
   ANALYTICS: AnalyticsEngineDataset;

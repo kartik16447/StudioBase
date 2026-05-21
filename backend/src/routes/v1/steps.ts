@@ -107,7 +107,7 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
     }
 
     try {
-      await c.env.PIPELINE_QUEUE.send({
+      await c.env.AUDIO_QUEUE.send({
         type: 'audio_tts',
         sessionId,
         stepId,
@@ -314,7 +314,7 @@ steps.post('/:sessionId/generate-narration', async (c) => {
   const failed: string[] = [];
   for (const { stepId, jobId, text } of jobs) {
     try {
-      await c.env.PIPELINE_QUEUE.send({
+      await c.env.AUDIO_QUEUE.send({
         type: 'audio_tts',
         sessionId,
         stepId,

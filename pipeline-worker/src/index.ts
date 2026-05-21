@@ -109,6 +109,14 @@ export default {
 
     for (const msg of batch.messages) {
       const job = msg.body;
+      const jobType = (job as any).type ?? 'pipeline';
+
+      if (jobType !== 'pipeline') {
+        console.log(`[PIPELINE] Ignoring message of non-pipeline type:${jobType} messageId:${msg.id}`);
+        msg.ack();
+        continue;
+      }
+
       const startTime = Date.now();
 
       console.log(`[PIPELINE] Starting — sessionId:${job.sessionId} r2Key:${job.r2JsonKey}`);
