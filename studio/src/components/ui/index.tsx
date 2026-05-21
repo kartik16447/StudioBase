@@ -71,14 +71,12 @@ export const Button: React.FC<ButtonProps> = ({
 };
 
 // ─── IconButton ───────────────────────────────────────────────────────
-interface IconButtonProps {
+interface IconButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   icon: LucideIcon;
   label: string;
   active?: boolean;
   dark?: boolean;
   size?: number;
-  onClick?: (e: React.MouseEvent) => void;
-  className?: string;
 }
 
 export const IconButton: React.FC<IconButtonProps> = ({ 
@@ -88,7 +86,9 @@ export const IconButton: React.FC<IconButtonProps> = ({
   dark = false, 
   size = 36, 
   onClick, 
-  className = '' 
+  className = '',
+  disabled,
+  ...rest
 }) => {
   return (
     <button
@@ -96,14 +96,17 @@ export const IconButton: React.FC<IconButtonProps> = ({
       onClick={onClick}
       title={label}
       aria-label={label}
+      disabled={disabled}
       className={cn(
         'inline-flex items-center justify-center rounded-full transition-all duration-150 ease-out',
         dark
           ? (active ? 'bg-white/10 text-white' : 'text-white/60 hover:text-white hover:bg-white/8')
           : (active ? 'bg-primary-light text-primary' : 'text-text-2 hover:text-text hover:bg-surface-2'),
+        disabled && 'opacity-45 cursor-not-allowed pointer-events-none',
         className,
       )}
       style={{ width: size, height: size }}
+      {...rest}
     >
       <Icon size={size === 36 ? 18 : 16} strokeWidth={1.9} />
     </button>

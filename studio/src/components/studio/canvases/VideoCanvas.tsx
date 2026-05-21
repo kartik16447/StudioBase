@@ -3,16 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../../components/icons';
 import { cn, Button } from '../../../components/ui';
-import { RenderConstants } from '../../../modules/render-engine/RenderConstants';
 import { apiClient } from '../../../lib/apiClient';
-import { WorkerExtractor } from '../../../services/WorkerExtractor';
-import { CanvasRenderer } from '../../../modules/render-engine/CanvasRenderer';
-import { CinematicMath } from '../../../modules/render-engine/CinematicMath';
-import { TelemetryService } from '../../../services/TelemetryService';
 import { CinematicPlayer, type CinematicPlayerHandle } from '../../player/CinematicPlayer';
 import { analyticsClient } from '../../../lib/analyticsClient';
 import { EmbedModal } from '../panels/EmbedModal';
 import { handleSOPVideoExport } from '../../../modules/render-engine/ExportOrchestrator';
+import { exportScreenshotsToVideo } from '../../../modules/render-engine/VideoExporter';
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -448,6 +444,3 @@ export const VideoCanvas: React.FC = () => {
 };
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
-
-const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const rnd   = (n: number)  => Math.floor(Math.random() * n);

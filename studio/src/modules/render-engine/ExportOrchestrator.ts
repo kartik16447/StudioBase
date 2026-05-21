@@ -3,7 +3,7 @@ import { RenderConstants } from './RenderConstants';
 import { WorkerExtractor } from '../../services/WorkerExtractor';
 import { CanvasRenderer } from './CanvasRenderer';
 import { CinematicMath } from './CinematicMath';
-import { buildTimeline, getSegmentAt, buildChapterMarkers } from './PlayerTimeline';
+import { buildTimeline, getSegmentAt } from './PlayerTimeline';
 import { apiClient } from '../../lib/apiClient';
 import { TelemetryService } from '../../services/TelemetryService';
 import { analyticsClient } from '../../lib/analyticsClient';
@@ -122,12 +122,6 @@ export async function handleSOPVideoExport(config: {
 
     const maxDuration = extractor.getDuration();
     console.log('[Export] WorkerExtractor initialized. Video duration:', maxDuration, 'ms. sessionStartTime:', sessionStartTime);
-    
-    const toRelativeMs = (absMs: number) => {
-      const rel = absMs - sessionStartTime;
-      if (isNaN(rel)) return 0;
-      return Math.max(0, Math.min(rel, maxDuration));
-    };
 
     const getFrameSafe = async (targetMs: number, retries = 2) => {
       for (let i = 0; i < retries; i++) {

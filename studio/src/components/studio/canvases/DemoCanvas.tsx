@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../../components/icons';
 import { ScreenshotPlaceholder } from '../../../components/ui';
-import { handleSOPVideoExport } from './VideoCanvas';
+import { handleSOPVideoExport } from '../../../modules/render-engine/ExportOrchestrator';
 
 export const DemoCanvas: React.FC = () => {
   const session = useStudioStore(state => state.session);

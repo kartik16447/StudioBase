@@ -149,11 +149,11 @@ const ScriptStepRow: React.FC<{
       }
     }
     
-    console.log(`[ScriptRegeneration] Starting script regeneration for step ${step.id}. session: ${session.id}, visualDurationSeconds: ${visualDurationSeconds}s`);
+    console.log(`[ScriptRegeneration] Starting script regeneration for step ${step.id}. session: ${session.sessionId}, visualDurationSeconds: ${visualDurationSeconds}s`);
     setIsGenerating(true);
     try {
       const res = await apiClient.post<{ generatedText: string, budgetSeconds: number }>(
-        `/sessions/${session.id}/steps/${step.id}/generate-script`,
+        `/sessions/${session.sessionId}/steps/${step.id}/generate-script`,
         { visualDurationSeconds }
       );
       
