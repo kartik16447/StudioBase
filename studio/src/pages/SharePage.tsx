@@ -144,7 +144,7 @@ export const SharePage: React.FC = () => {
   const [session, setSession] = useState<PublicSession | null>(null);
   const [cinematicEnabled, setCinematicEnabled] = useState(false);
   const [sopEnabled, setSopEnabled] = useState(true);
-  const [rawEnabled, setRawEnabled] = useState(true);
+  const [_rawEnabled, setRawEnabled] = useState(true);
   const [ownerName, setOwnerName] = useState<string>('');
   const [capturedAt, setCapturedAt] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -242,10 +242,13 @@ export const SharePage: React.FC = () => {
     ? session.assets[session.videoKey]
     : null;
 
-  // Tabs — only show formats the owner has enabled
+  // Tabs: show all three whenever each format is available.
+  // Raw Video tab appears if there is a video asset (rawEnabled flag does NOT hide it —
+  // the cinematic player already handles the AI experience; raw is always the original).
+  // Cinematic tab appears only when credits have been spent to unlock it.
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    ...(sopEnabled ? [{ id: 'guide' as Tab, label: 'Step Guide', icon: <I.List size={13} /> }] : []),
-    ...(rawEnabled && videoUrl ? [{ id: 'recording' as Tab, label: 'Raw Video', icon: <I.Video size={13} /> }] : []),
+    ...(sopEnabled !== false ? [{ id: 'guide' as Tab, label: 'Step Guide', icon: <I.List size={13} /> }] : []),
+    ...(videoUrl ? [{ id: 'recording' as Tab, label: 'Raw Video', icon: <I.Video size={13} /> }] : []),
     ...(cinematicEnabled ? [{ id: 'cinematic' as Tab, label: 'Cinematic AI', icon: <I.Play size={13} /> }] : []),
   ];
 
