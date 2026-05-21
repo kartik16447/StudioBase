@@ -3,6 +3,7 @@ import { apiClient, type PendingInvite } from '../lib/apiClient';
 import { sessionManager } from '../lib/auth/sessionManager';
 import { I } from '../components/icons';
 import { cn } from '../components/ui';
+import { usePlan, PLAN_FEATURES } from '../hooks/usePlan';
 
 interface WorkspaceSettings {
   workspaceId: string;
@@ -39,6 +40,7 @@ const ROLE_BADGES: Record<string, string> = {
 };
 
 export const WorkspaceSettingsPage: React.FC = () => {
+  const plan = usePlan();
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
@@ -120,23 +122,38 @@ export const WorkspaceSettingsPage: React.FC = () => {
         <p className="text-[14px] text-text-2 mt-1">Governance, SSO, and data configuration for your workspace.</p>
       </div>
 
-      {/* SSO & Security */}
-      <section className="mb-8 bg-surface border border-white/5 rounded-lg p-6">
-        <div className="flex items-center gap-2 mb-5">
-          <I.Shield size={16} className="text-primary" />
-          <h2 className="text-[15px] font-semibold text-text">SSO & Identity</h2>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <ReadOnlyField label="SSO Enabled" value={settings?.ssoEnabled ? 'Yes' : 'No'} />
-          <ReadOnlyField label="SSO Provider" value={settings?.ssoProvider} />
-          <ReadOnlyField label="Allowed Domains" value={settings?.allowedDomains} />
-          <ReadOnlyField label="Data Region" value={settings?.dataRegion} />
-          <ReadOnlyField label="Retention (days)" value={settings?.retentionDays} />
-        </div>
-        <p className="mt-4 text-[12px] text-text-3">
-          SSO configuration is managed by your workspace admin. Contact support to enable SAML or OIDC federation.
-        </p>
-      </section>
+      {/* SSO & Security — enterprise only */}
+      {PLAN_FEATURES.sso(plan) ? (
+        <section className="mb-8 bg-surface border border-white/5 rounded-lg p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <I.Shield size={16} className="text-primary" />
+            <h2 className="text-[15px] font-semibold text-text">SSO & Identity</h2>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <ReadOnlyField label="SSO Enabled" value={settings?.ssoEnabled ? 'Yes' : 'No'} />
+            <ReadOnlyField label="SSO Provider" value={settings?.ssoProvider} />
+            <ReadOnlyField label="Allowed Domains" value={settings?.allowedDomains} />
+            <ReadOnlyField label="Data Region" value={settings?.dataRegion} />
+            <ReadOnlyField label="Retention (days)" value={settings?.retentionDays} />
+          </div>
+          <p className="mt-4 text-[12px] text-text-3">
+            SSO configuration is managed by your workspace admin. Contact support to enable SAML or OIDC federation.
+          </p>
+        </section>
+      ) : (
+        <section className="mb-8 bg-surface border border-white/5 rounded-lg p-6 opacity-70">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <I.Shield size={16} className="text-text-3" />
+              <h2 className="text-[15px] font-semibold text-text">SSO & Identity</h2>
+            </div>
+            <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border border-white/10 text-text-3">Enterprise</span>
+          </div>
+          <p className="text-[13px] text-text-3">
+            SAML / OIDC single sign-on, domain allow-listing, and custom data retention are available on the Enterprise plan.
+          </p>
+        </section>
+      )}
 
       {/* Invite New Member */}
       <section className="mb-6 bg-surface border border-white/5 rounded-lg p-6">

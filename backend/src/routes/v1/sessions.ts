@@ -158,4 +158,51 @@ sessions.patch('/:id/share', requirePermission('sop:edit'), async (c) => {
   return c.json({ isPublic, shareToken, shareUrl });
 });
 
+// PATCH /v1/sessions/:id/enable-cinematic — deduct 1 credit and unlock cinematic sharing
+// Idempotent: calling again when already enabled is free (no double charge).
+sessions.patch('/:id/enable-cinematic', requirePermission('sop:edit'), async (c) => {
+  const user = c.get('user');
+  const ws   = c.get('workspace');
+  const id   = c.req.param('id');
+
+  const row = await c.env.DB
+    .prepare('SELECT id, cinematicEnabled FROM sessions WHERE id = ? AND workspaceId = ?')
+    .bind(id, ws.id)
+    .first<{ id: string; cinematicEnabled: number }>();
+
+  if (!row) return c.json({ error: 'Not found' }, 404);
+
+  // Already enabled — no charge
+  if (row.cinematicEnabled === 1) {
+    return c.json({ cinematicEnabled: true, charged: false });
+  }
+
+  // Credit check
+  const CINEMATIC_CREDIT_COST = 1;
+  const userRecord = await c.env.DB
+    .prepare('SELECT creditsBalance FROM users WHERE id = ?')
+    .bind(user.id).first<{ creditsBalance: number }>();
+
+  if ((userRecord?.creditsBalance ?? 0) < CINEMATIC_CREDIT_COST) {
+    return c.json({
+      error: 'INSUFFICIENT_CREDITS',
+      need: CINEMATIC_CREDIT_COST,
+      have: userRecord?.creditsBalance ?? 0,
+    }, 402);
+  }
+
+  const now = Date.now();
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE sessions SET cinematicEnabled = 1, updatedAt = ? WHERE id = ?')
+      .bind(now, id),
+    c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance - ? WHERE id = ?')
+      .bind(CINEMATIC_CREDIT_COST, user.id),
+    c.env.DB.prepare(
+      'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(crypto.randomUUID(), user.id, -CINEMATIC_CREDIT_COST, 'cinematic_share', id, now),
+  ]);
+
+  return c.json({ cinematicEnabled: true, charged: true });
+});
+
 export default sessions;

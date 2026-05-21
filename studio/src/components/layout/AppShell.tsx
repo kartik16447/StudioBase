@@ -6,6 +6,7 @@ import { I } from '../icons';
 import { cn, Avatar, Kbd, Tooltip } from '../ui';
 import type { LucideIcon } from 'lucide-react';
 import { sessionManager } from '../../lib/auth/sessionManager';
+import { usePlan, PLAN_FEATURES } from '../../hooks/usePlan';
 
 const SIDEBAR_EXPANDED = 240;
 const SIDEBAR_COLLAPSED = 56;
@@ -67,6 +68,7 @@ export const Sidebar: React.FC = () => {
   const route = useStudioStore(state => state.route);
   const navigate = useStudioStore(state => state.navigate);
   const active = route.name;
+  const plan = usePlan();
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('sb_sidebar_collapsed') === 'true'; } catch { return false; }
   });
@@ -139,7 +141,10 @@ export const Sidebar: React.FC = () => {
             <SidebarItem collapsed={collapsed} id="knowledge" icon={I.Bookmark} label="Knowledge Base" active={active === 'knowledge'} onClick={() => navigate('home')} />
             <SidebarItem collapsed={collapsed} id="team" icon={I.Settings} label="Workspace Settings" active={active === 'team'} onClick={() => navigate('team')} />
             <SidebarItem collapsed={collapsed} id="analytics" icon={I.BarChart2} label="Analytics" active={active === 'analytics'} onClick={() => navigate('analytics')} />
-            <SidebarItem collapsed={collapsed} id={'audit-logs' as any} icon={I.Shield} label="Audit Logs" active={active === ('audit-logs' as any)} onClick={() => navigate('audit-logs' as any)} />
+            {/* Audit Logs — enterprise only */}
+            {PLAN_FEATURES.auditLogs(plan) && (
+              <SidebarItem collapsed={collapsed} id={'audit-logs' as any} icon={I.Shield} label="Audit Logs" active={active === ('audit-logs' as any)} onClick={() => navigate('audit-logs' as any)} />
+            )}
             {import.meta.env.VITE_DEV_MODE === 'true' && (
               <SidebarItem collapsed={collapsed} id={'admin' as any} icon={I.Activity} label="Diagnostics" active={active === ('admin' as any)} onClick={() => navigate('admin' as any)} />
             )}

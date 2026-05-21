@@ -13,8 +13,14 @@ export class WorkspaceService {
 
   async listByUser(userId: string) {
     const { results } = await this.env.DB.prepare(
-      `SELECT w.id, w.name, w.slug, m.role, w.ownerId FROM workspaces w
-       JOIN workspace_members m ON w.id = m.workspaceId WHERE m.userId = ? ORDER BY m.joinedAt ASC`
+      `SELECT w.id, w.name, w.slug, m.role, w.ownerId,
+              COALESCE(wp.plan, 'free') as plan,
+              COALESCE(wp.seatLimit, 3) as seatLimit,
+              COALESCE(wp.exportLimit, 10) as exportLimit
+       FROM workspaces w
+       JOIN workspace_members m ON w.id = m.workspaceId
+       LEFT JOIN workspace_plans wp ON wp.workspaceId = w.id
+       WHERE m.userId = ? ORDER BY m.joinedAt ASC`
     ).bind(userId).all();
     return results;
   }

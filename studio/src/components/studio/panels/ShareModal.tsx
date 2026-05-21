@@ -8,7 +8,10 @@ interface ShareState {
   isPublic: boolean;
   shareUrl: string | null;
   shareToken: string | null;
+  cinematicEnabled: boolean;
 }
+
+const CINEMATIC_CREDIT_COST = 1;
 
 export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
   const session = useStudioStore((s) => s.session);
@@ -19,11 +22,14 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     isPublic: !!(session as any)?.isPublic,
     shareUrl: null,
     shareToken: (session as any)?.shareToken ?? null,
+    cinematicEnabled: !!(session as any)?.cinematicEnabled,
   });
   const [loading, setLoading] = useState(false);
+  const [cinematicLoading, setCinematicLoading] = useState(false);
+  const [cinematicError, setCinematicError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  // Derive share URL from token — always use /s/:token format
+  // Derive share URL from token
   useEffect(() => {
     if (shareState.shareToken) {
       setShareState((s) => ({
@@ -38,11 +44,12 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     setLoading(true);
     try {
       const res = await apiClient.sessions.setShare(sessionId, !shareState.isPublic);
-      setShareState({
+      setShareState(s => ({
+        ...s,
         isPublic: res.isPublic,
         shareToken: res.shareToken,
         shareUrl: res.shareUrl,
-      });
+      }));
     } catch (e) {
       console.error(e);
     } finally {
@@ -50,9 +57,31 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     }
   };
 
-  const copyLink = () => {
-    if (!shareState.shareUrl) return;
-    navigator.clipboard.writeText(shareState.shareUrl);
+  const enableCinematic = async () => {
+    if (!sessionId || shareState.cinematicEnabled) return;
+    setCinematicLoading(true);
+    setCinematicError(null);
+    try {
+      const res = await apiClient.patch<{ cinematicEnabled: boolean; charged: boolean; error?: string; have?: number }>(
+        `/sessions/${sessionId}/enable-cinematic`,
+        {}
+      );
+      if ((res as any).error === 'INSUFFICIENT_CREDITS') {
+        setCinematicError(`Not enough credits. You need ${CINEMATIC_CREDIT_COST} credit.`);
+        return;
+      }
+      setShareState(s => ({ ...s, cinematicEnabled: true }));
+    } catch (e: any) {
+      setCinematicError(e?.message || 'Failed to enable cinematic sharing.');
+    } finally {
+      setCinematicLoading(false);
+    }
+  };
+
+  const copyLink = (suffix?: string) => {
+    const base = shareState.shareUrl || '';
+    const url = suffix ? `${base}?view=${suffix}` : base;
+    navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -76,37 +105,34 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 8 }}
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            className="fixed inset-0 flex items-center justify-center z-[201] pointer-events-none"
+            className="fixed inset-0 flex items-center justify-center z-[201] pointer-events-none p-4"
           >
-            <div className="pointer-events-auto w-[420px] bg-[#111118] border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden">
+            <div className="pointer-events-auto w-full max-w-[440px] bg-[#111118] border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden">
               {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.07]">
                 <div className="flex items-center gap-2">
                   <I.Share2 className="w-4 h-4 text-primary" />
-                  <span className="text-[14px] font-semibold text-text">Share</span>
+                  <span className="text-[14px] font-semibold text-text">Share walkthrough</span>
                 </div>
-                <button
-                  onClick={onClose}
-                  className="text-text-3 hover:text-text transition-colors p-1 rounded"
-                >
+                <button onClick={onClose} className="text-text-3 hover:text-text transition-colors p-1 rounded">
                   <I.X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="p-5 space-y-4">
+              <div className="p-5 space-y-3">
                 {/* Session title */}
                 <p className="text-[12px] text-text-3 truncate">{title}</p>
 
-                {/* Public toggle */}
+                {/* ── Public link toggle ── */}
                 <div className="flex items-center justify-between p-3.5 rounded-xl bg-white/[0.04] border border-white/[0.06]">
                   <div>
                     <p className="text-[13px] font-medium text-text">Public link</p>
-                    <p className="text-[11px] text-text-3 mt-0.5">Anyone with the link can view this session</p>
+                    <p className="text-[11px] text-text-3 mt-0.5">Anyone with the link can view</p>
                   </div>
                   <button
                     onClick={togglePublic}
                     disabled={loading}
-                    className={`relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0 overflow-hidden ${
+                    className={`relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0 ${
                       shareState.isPublic ? 'bg-primary' : 'bg-white/[0.12]'
                     } ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                   >
@@ -118,35 +144,96 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
                   </button>
                 </div>
 
-                {/* Share URL */}
+                {/* ── Share URL + per-format links ── */}
                 {shareState.isPublic && shareState.shareUrl && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
-                    className="space-y-2"
+                    className="space-y-3"
                   >
-                    <p className="text-[11px] font-semibold text-text-3 uppercase tracking-wider">Share link</p>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-[12px] text-text-2 truncate font-mono">
-                        {shareState.shareUrl}
+                    {/* Base link */}
+                    <div>
+                      <p className="text-[11px] font-semibold text-text-3 uppercase tracking-wider mb-1.5">Share link</p>
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-[12px] text-text-2 truncate font-mono">
+                          {shareState.shareUrl}
+                        </div>
+                        <button
+                          onClick={() => copyLink()}
+                          className="flex-shrink-0 flex items-center gap-1.5 text-[12px] px-3 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white font-semibold transition-colors"
+                        >
+                          {copied ? <I.Check className="w-3.5 h-3.5" /> : <I.Copy className="w-3.5 h-3.5" />}
+                          {copied ? 'Copied!' : 'Copy'}
+                        </button>
                       </div>
-                      <button
-                        onClick={copyLink}
-                        className="flex-shrink-0 flex items-center gap-1.5 text-[12px] px-3 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white font-semibold transition-colors"
-                      >
-                        {copied ? <I.Check className="w-3.5 h-3.5" /> : <I.Copy className="w-3.5 h-3.5" />}
-                        {copied ? 'Copied!' : 'Copy'}
-                      </button>
+                    </div>
+
+                    {/* ── What viewers can see ── */}
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-semibold text-text-3 uppercase tracking-wider">Viewer access</p>
+
+                      {/* SOP Guide — always free */}
+                      <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-white/[0.03] border border-white/[0.05]">
+                        <I.List className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-medium text-text">Step Guide</p>
+                          <p className="text-[11px] text-text-3">Always included · free</p>
+                        </div>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">FREE</span>
+                      </div>
+
+                      {/* Raw Recording — always free */}
+                      <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-white/[0.03] border border-white/[0.05]">
+                        <I.Video className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-medium text-text">Raw Recording</p>
+                          <p className="text-[11px] text-text-3">Screen capture · free</p>
+                        </div>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">FREE</span>
+                      </div>
+
+                      {/* Cinematic — credit gated */}
+                      <div className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                        shareState.cinematicEnabled
+                          ? 'bg-indigo-500/10 border-indigo-500/20'
+                          : 'bg-white/[0.03] border-white/[0.05]'
+                      }`}>
+                        <I.Play className={`w-3.5 h-3.5 flex-shrink-0 ${shareState.cinematicEnabled ? 'text-indigo-400' : 'text-text-3'}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[12px] font-medium text-text">Cinematic Player</p>
+                          <p className="text-[11px] text-text-3">
+                            {shareState.cinematicEnabled
+                              ? 'Enabled · AI-powered player'
+                              : `Costs ${CINEMATIC_CREDIT_COST} credit to unlock`}
+                          </p>
+                        </div>
+                        {shareState.cinematicEnabled ? (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400">ON</span>
+                        ) : (
+                          <button
+                            onClick={enableCinematic}
+                            disabled={cinematicLoading}
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-colors disabled:opacity-50 whitespace-nowrap"
+                          >
+                            {cinematicLoading ? 'Unlocking…' : `Unlock · ${CINEMATIC_CREDIT_COST}cr`}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Error */}
+                      {cinematicError && (
+                        <p className="text-[11px] text-red-400 px-1">{cinematicError}</p>
+                      )}
                     </div>
                   </motion.div>
                 )}
 
-                {/* Workspace-only note */}
+                {/* Private state note */}
                 {!shareState.isPublic && (
                   <div className="flex items-start gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/[0.05]">
                     <I.Lock className="w-3.5 h-3.5 text-text-3 mt-0.5 flex-shrink-0" />
                     <p className="text-[12px] text-text-3">
-                      Only workspace members can access this session. Enable public link to share externally.
+                      Only workspace members can access this session. Enable the public link to share externally.
                     </p>
                   </div>
                 )}

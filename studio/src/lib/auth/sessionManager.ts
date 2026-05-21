@@ -188,6 +188,15 @@ class SessionManager {
       if (workspaces.length === 0) return;
       const isValid = this.workspaceId && workspaces.some(w => w.id === this.workspaceId);
       if (!isValid) this.setWorkspaceId(workspaces[0].id);
+
+      // Persist the plan for the active workspace so usePlan() can read it
+      // synchronously anywhere in the app without an extra API call.
+      const activeId = this.workspaceId ?? workspaces[0]?.id;
+      const activeWs = workspaces.find(w => w.id === activeId) ?? workspaces[0];
+      if (activeWs?.plan) {
+        try { localStorage.setItem('sb_workspace_plan', activeWs.plan); } catch {}
+      }
+
       return workspaces;
     } catch (err) {
       console.error('❌ [Auth] Workspace sync failed:', err);
