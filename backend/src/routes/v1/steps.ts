@@ -65,33 +65,59 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
     const now = Date.now();
     const jobId = crypto.randomUUID();
 
-    await c.env.DB.batch([
-      c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance - ? WHERE id = ?')
-        .bind(AUDIO_TTS_CREDIT_COST, user.id),
-      c.env.DB.prepare(
-        'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(crypto.randomUUID(), user.id, -AUDIO_TTS_CREDIT_COST, 'audio_tts', sessionId, now),
-      c.env.DB.prepare(`
-        INSERT INTO step_audio (stepId, sessionId, userId, voiceoverSource, jobId, jobStartedAt, createdAt, updatedAt)
-        VALUES (?, ?, ?, 'generating', ?, ?, ?, ?)
-        ON CONFLICT(stepId, sessionId) DO UPDATE SET
-          voiceoverSource = 'generating',
-          jobId           = excluded.jobId,
-          jobStartedAt    = excluded.jobStartedAt,
-          updatedAt       = excluded.updatedAt
-      `).bind(stepId, sessionId, user.id, jobId, now, now, now),
-    ]);
+    try {
+      await c.env.DB.batch([
+        c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance - ? WHERE id = ?')
+          .bind(AUDIO_TTS_CREDIT_COST, user.id),
+        c.env.DB.prepare(
+          'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind(crypto.randomUUID(), user.id, -AUDIO_TTS_CREDIT_COST, 'audio_tts', sessionId, now),
+        c.env.DB.prepare(`
+          INSERT INTO step_audio (stepId, sessionId, userId, voiceoverSource, jobId, jobStartedAt, createdAt, updatedAt)
+          VALUES (?, ?, ?, 'generating', ?, ?, ?, ?)
+          ON CONFLICT(stepId, sessionId) DO UPDATE SET
+            voiceoverSource = 'generating',
+            jobId           = excluded.jobId,
+            jobStartedAt    = excluded.jobStartedAt,
+            updatedAt       = excluded.updatedAt
+        `).bind(stepId, sessionId, user.id, jobId, now, now, now),
+      ]);
+    } catch (dbErr: any) {
+      // Surface DB errors as 500 instead of crashing the worker (ERR_CONNECTION_CLOSED)
+      console.error('[generate-audio] DB batch failed:', dbErr?.message ?? dbErr);
+      throw new HTTPException(500, {
+        message: `DB error: ${dbErr?.message ?? 'unknown'}. Ensure migration 0011_step_audio has been applied.`,
+      });
+    }
 
-    await c.env.PIPELINE_QUEUE.send({
-      type: 'audio_tts',
-      sessionId,
-      stepId,
-      text,
-      userId: user.id,
-      workspaceId: ws.id,
-      jobId,
-      language,
-    });
+    try {
+      await c.env.PIPELINE_QUEUE.send({
+        type: 'audio_tts',
+        sessionId,
+        stepId,
+        text,
+        userId: user.id,
+        workspaceId: ws.id,
+        jobId,
+        language,
+      });
+    } catch (qErr: any) {
+      // Queue send failed — refund the credit and surface the error
+      console.error('[generate-audio] Queue send failed:', qErr?.message ?? qErr);
+      await c.env.DB.batch([
+        c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + ? WHERE id = ?')
+          .bind(AUDIO_TTS_CREDIT_COST, user.id),
+        c.env.DB.prepare(
+          'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
+        ).bind(crypto.randomUUID(), user.id, AUDIO_TTS_CREDIT_COST, 'audio_tts_refund_queue_err', sessionId, now),
+        c.env.DB.prepare(
+          'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
+        ).bind(now, stepId, sessionId),
+      ]).catch(() => {}); // best-effort refund
+      throw new HTTPException(503, {
+        message: `Queue unavailable: ${qErr?.message ?? 'unknown'}. Credit refunded.`,
+      });
+    }
 
     return c.json({ jobId }, 202);
   }

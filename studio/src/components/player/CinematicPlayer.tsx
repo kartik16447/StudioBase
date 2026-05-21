@@ -698,7 +698,13 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       ref={containerRef}
       className="w-full select-none"
       onMouseMove={showControlsTemporarily}
-      style={{ cursor: isPlaying && !showControls ? 'none' : 'default' }}
+      onTouchStart={showControlsTemporarily}
+      style={{
+        cursor: isPlaying && !showControls ? 'none' : 'default',
+        // Prevent the page from scrolling while the user is touching the player
+        touchAction: 'none',
+        overscrollBehavior: 'contain',
+      }}
     >
       {/* Hidden video element — hybrid mode only */}
       {videoUrl && renderMode === 'hybrid' && (
