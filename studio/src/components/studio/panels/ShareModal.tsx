@@ -10,7 +10,7 @@ import { cn } from '../../ui';
 interface ShareFormats {
   sopEnabled: boolean;
   rawEnabled: boolean;
-  cinematicEnabled: boolean; // true = unlocked (paid)
+  cinematicEnabled: boolean;
 }
 
 const CINEMATIC_CREDIT_COST = 1;
@@ -19,52 +19,53 @@ const CINEMATIC_CREDIT_COST = 1;
 
 interface FormatCardProps {
   icon: React.ReactNode;
-  gradient: string;
+  accentColor: string;        // e.g. '#22c55e'
   title: string;
   description: string;
   badge: 'free' | 'credit' | 'on';
   enabled: boolean;
-  disabled?: boolean; // greys out when public link is off
-  locked?: boolean;   // cinematic pre-unlock state
+  disabled?: boolean;
+  locked?: boolean;
   onToggle?: () => void;
   onUnlock?: () => void;
   unlockLoading?: boolean;
 }
 
 const FormatCard: React.FC<FormatCardProps> = ({
-  icon, gradient, title, description, badge,
+  icon, accentColor, title, description, badge,
   enabled, disabled, locked, onToggle, onUnlock, unlockLoading,
 }) => (
   <div
     className={cn(
-      'relative flex flex-col gap-3 rounded-xl p-4 border transition-all duration-200',
+      'relative flex flex-col gap-3 rounded-xl p-4 border transition-all duration-200 cursor-default',
       disabled
         ? 'opacity-40 pointer-events-none border-white/[0.06] bg-white/[0.02]'
         : locked
         ? 'border-white/[0.08] bg-white/[0.03]'
         : enabled
-        ? 'border-indigo-500/25 bg-indigo-500/[0.06]'
+        ? 'border-white/20 bg-white/[0.06]'
         : 'border-white/[0.06] bg-white/[0.03]',
     )}
+    style={enabled && !disabled ? { borderColor: `${accentColor}40` } : undefined}
   >
-    {/* Icon + gradient bubble */}
+    {/* Icon bubble */}
     <div
       className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-      style={{ background: gradient }}
+      style={{ background: `${accentColor}22` }}
     >
       {icon}
     </div>
 
     {/* Text */}
     <div className="flex-1 min-w-0">
-      <p className="text-[13px] font-semibold text-text leading-tight">{title}</p>
-      <p className="text-[11px] text-text-3 mt-0.5 leading-snug">{description}</p>
+      <p className="text-[13px] font-semibold text-white leading-tight">{title}</p>
+      <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'rgba(255,255,255,0.50)' }}>{description}</p>
     </div>
 
-    {/* Badge */}
-    <div className="flex items-center justify-between">
+    {/* Badge + action row */}
+    <div className="flex items-center justify-between gap-2">
       {badge === 'free' && (
-        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
           FREE
         </span>
       )}
@@ -74,7 +75,7 @@ const FormatCard: React.FC<FormatCardProps> = ({
         </span>
       )}
       {badge === 'on' && (
-        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
           UNLOCKED
         </span>
       )}
@@ -84,7 +85,7 @@ const FormatCard: React.FC<FormatCardProps> = ({
         <button
           onClick={onToggle}
           className={cn(
-            'relative w-9 h-5 rounded-full transition-colors duration-200',
+            'relative w-9 h-5 rounded-full transition-colors duration-200 flex-shrink-0',
             enabled ? 'bg-indigo-500' : 'bg-white/[0.12]',
           )}
         >
@@ -125,8 +126,8 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   const hasVideo   = !!((session as any)?.videoKey);
 
   // Public link
-  const [isPublic,   setIsPublic]   = useState(!!(session as any)?.isPublic);
-  const [shareToken, setShareToken] = useState<string | null>((session as any)?.shareToken ?? null);
+  const [isPublic,     setIsPublic]     = useState(!!(session as any)?.isPublic);
+  const [shareToken,   setShareToken]   = useState<string | null>((session as any)?.shareToken ?? null);
   const [publicLoading, setPublicLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -142,12 +143,11 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   const [cinematicLoading, setCinematicLoading] = useState(false);
   const [cinematicError,   setCinematicError]   = useState<string | null>(null);
 
-  // Derive share URL
   const shareUrl = shareToken
     ? `${window.location.origin}/s/${shareToken}`
     : null;
 
-  // Sync when session changes (e.g. after publish)
+  // Sync when session changes
   useEffect(() => {
     setIsPublic(!!(session as any)?.isPublic);
     setShareToken((session as any)?.shareToken ?? null);
@@ -174,7 +174,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     }
   };
 
-  // ── Format toggle (SOP / Raw) ───────────────────────────────────────────────
+  // ── Format toggle ───────────────────────────────────────────────────────────
   const toggleFormat = async (field: 'sopEnabled' | 'rawEnabled') => {
     if (!sessionId) return;
     const next = !formats[field];
@@ -182,10 +182,8 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     setFormatSaving(true);
     try {
       await apiClient.patch(`/sessions/${sessionId}/share-formats`, { [field]: next });
-    } catch (e) {
-      // Revert on error
+    } catch {
       setFormats(f => ({ ...f, [field]: !next }));
-      console.error(e);
     } finally {
       setFormatSaving(false);
     }
@@ -231,7 +229,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 z-[200]"
+            className="fixed inset-0 bg-black/60 z-[200]"
             onClick={onClose}
           />
 
@@ -243,15 +241,28 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             className="fixed inset-0 flex items-center justify-center z-[201] pointer-events-none p-4"
           >
-            <div className="pointer-events-auto w-full max-w-[480px] bg-[#111118] border border-white/[0.08] rounded-2xl shadow-2xl overflow-hidden">
+            <div
+              className="pointer-events-auto w-full max-w-[480px] rounded-2xl shadow-2xl overflow-hidden"
+              style={{
+                background: '#16161e',
+                border: '1px solid rgba(255,255,255,0.09)',
+                boxShadow: '0 24px 64px rgba(0,0,0,0.60), 0 0 0 1px rgba(94,92,230,0.12)',
+              }}
+            >
 
               {/* Header */}
-              <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.07]">
-                <div className="flex items-center gap-2">
-                  <I.Share2 className="w-4 h-4 text-primary" />
-                  <span className="text-[14px] font-semibold text-text">Share walkthrough</span>
+              <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'rgba(94,92,230,0.18)' }}>
+                    <I.Share2 className="w-3.5 h-3.5" style={{ color: '#818cf8' }} />
+                  </div>
+                  <span className="text-[14px] font-semibold text-white">Share walkthrough</span>
                 </div>
-                <button onClick={onClose} className="text-text-3 hover:text-text transition-colors p-1 rounded">
+                <button
+                  onClick={onClose}
+                  className="p-1.5 rounded-lg transition-colors hover:bg-white/[0.08]"
+                  style={{ color: 'rgba(255,255,255,0.40)' }}
+                >
                   <I.X className="w-4 h-4" />
                 </button>
               </div>
@@ -259,20 +270,30 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
               <div className="p-5 space-y-4">
 
                 {/* Session title */}
-                <p className="text-[12px] text-text-3 truncate">{title}</p>
+                <p
+                  className="text-[12px] truncate font-medium"
+                  style={{ color: 'rgba(255,255,255,0.45)' }}
+                >
+                  {title}
+                </p>
 
                 {/* Public link toggle */}
-                <div className="flex items-center justify-between p-3.5 rounded-xl bg-white/[0.04] border border-white/[0.06]">
+                <div
+                  className="flex items-center justify-between p-3.5 rounded-xl"
+                  style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+                >
                   <div>
-                    <p className="text-[13px] font-medium text-text">Public link</p>
-                    <p className="text-[11px] text-text-3 mt-0.5">Anyone with the link can view</p>
+                    <p className="text-[13px] font-semibold text-white">Public link</p>
+                    <p className="text-[11.5px] mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                      Anyone with the link can view
+                    </p>
                   </div>
                   <button
                     onClick={togglePublic}
                     disabled={publicLoading}
                     className={cn(
                       'relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0',
-                      isPublic ? 'bg-primary' : 'bg-white/[0.12]',
+                      isPublic ? 'bg-indigo-500' : 'bg-white/[0.12]',
                       publicLoading && 'opacity-50 cursor-not-allowed',
                     )}
                   >
@@ -287,15 +308,19 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
 
                 {/* ── Format Cards ── */}
                 <div>
-                  <p className="text-[11px] font-semibold text-text-3 uppercase tracking-wider mb-3">
+                  <p
+                    className="text-[10.5px] font-bold uppercase tracking-wider mb-3"
+                    style={{ color: 'rgba(255,255,255,0.35)' }}
+                  >
                     What viewers can access
                   </p>
 
                   <div className="grid grid-cols-3 gap-2">
-                    {/* SOP */}
+
+                    {/* SOP Guide */}
                     <FormatCard
-                      icon={<I.List size={16} className="text-white" />}
-                      gradient="linear-gradient(135deg, #22c55e88, #16a34a88)"
+                      icon={<I.List size={16} color="#4ade80" />}
+                      accentColor="#22c55e"
                       title="Step Guide"
                       description="Full SOP walkthrough"
                       badge="free"
@@ -306,10 +331,10 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
 
                     {/* Raw Recording */}
                     <FormatCard
-                      icon={<I.Video size={16} className="text-white" />}
-                      gradient="linear-gradient(135deg, #3b82f688, #2563eb88)"
+                      icon={<I.Video size={16} color="#60a5fa" />}
+                      accentColor="#3b82f6"
                       title="Recording"
-                      description={hasVideo ? 'Screen capture' : 'No recording'}
+                      description={hasVideo ? 'Original, unedited screen capture' : 'No recording'}
                       badge="free"
                       enabled={formats.rawEnabled && hasVideo}
                       disabled={!isPublic || !hasVideo}
@@ -318,14 +343,10 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
 
                     {/* Cinematic */}
                     <FormatCard
-                      icon={<I.Play size={16} className="text-white" />}
-                      gradient={
-                        formats.cinematicEnabled
-                          ? 'linear-gradient(135deg, #6366f188, #4f46e588)'
-                          : 'linear-gradient(135deg, #ffffff18, #ffffff08)'
-                      }
+                      icon={<I.Play size={16} color={formats.cinematicEnabled ? '#a78bfa' : 'rgba(255,255,255,0.35)'} />}
+                      accentColor={formats.cinematicEnabled ? '#8b5cf6' : '#666'}
                       title="Cinematic"
-                      description={formats.cinematicEnabled ? 'AI-powered player' : 'Unlock to share'}
+                      description={formats.cinematicEnabled ? 'AI camera · math transitions' : 'Unlock to share'}
                       badge={formats.cinematicEnabled ? 'on' : 'credit'}
                       enabled={formats.cinematicEnabled}
                       disabled={!isPublic}
@@ -342,7 +363,10 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
 
                   {/* All-disabled warning */}
                   {isPublic && allDisabled && (
-                    <div className="mt-3 flex items-center gap-2 px-3 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                    <div
+                      className="mt-3 flex items-center gap-2 px-3 py-2.5 rounded-lg"
+                      style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.18)' }}
+                    >
                       <I.AlertTriangle size={13} className="text-amber-400 flex-shrink-0" />
                       <p className="text-[11px] text-amber-300">
                         All formats hidden — viewers will see an empty page.
@@ -357,14 +381,26 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                   >
-                    <p className="text-[11px] font-semibold text-text-3 uppercase tracking-wider mb-2">Share link</p>
+                    <p
+                      className="text-[10.5px] font-bold uppercase tracking-wider mb-2"
+                      style={{ color: 'rgba(255,255,255,0.35)' }}
+                    >
+                      Share link
+                    </p>
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-[11px] text-text-2 truncate font-mono">
+                      <div
+                        className="flex-1 rounded-lg px-3 py-2 text-[11px] truncate font-mono"
+                        style={{
+                          background: 'rgba(255,255,255,0.04)',
+                          border: '1px solid rgba(255,255,255,0.08)',
+                          color: 'rgba(255,255,255,0.65)',
+                        }}
+                      >
                         {shareUrl}
                       </div>
                       <button
                         onClick={copyLink}
-                        className="flex-shrink-0 flex items-center gap-1.5 text-[12px] px-3 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white font-semibold transition-colors"
+                        className="flex-shrink-0 flex items-center gap-1.5 text-[12px] px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-colors"
                       >
                         {copied ? <I.Check className="w-3.5 h-3.5" /> : <I.Copy className="w-3.5 h-3.5" />}
                         {copied ? 'Copied!' : 'Copy'}
@@ -375,9 +411,12 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
 
                 {/* Private note */}
                 {!isPublic && (
-                  <div className="flex items-start gap-2 p-3 rounded-xl bg-white/[0.03] border border-white/[0.05]">
-                    <I.Lock className="w-3.5 h-3.5 text-text-3 mt-0.5 flex-shrink-0" />
-                    <p className="text-[12px] text-text-3">
+                  <div
+                    className="flex items-start gap-2 p-3 rounded-xl"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
+                  >
+                    <I.Lock className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.35)' }} />
+                    <p className="text-[12px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
                       Only workspace members can access this session. Enable the public link to share externally.
                     </p>
                   </div>

@@ -104,6 +104,22 @@ const RawVideoPlayer: React.FC<{ url: string }> = ({ url }) => {
   return (
     <div className="w-full rounded-2xl overflow-hidden bg-black shadow-2xl"
       style={{ boxShadow: '0 24px 64px rgba(0,0,0,0.40)' }}>
+
+      {/* Header bar */}
+      <div className="px-4 py-3 bg-gray-900 border-b border-white/[0.06] flex items-center gap-2">
+        <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+        <span className="text-[12px] font-semibold text-white/80">Original recording</span>
+        <span className="text-[11px] text-white/35 ml-1">Unedited · no AI processing</span>
+        <a
+          href={url}
+          download
+          className="ml-auto flex items-center gap-1.5 text-[12px] text-white/40 hover:text-white/80 transition-colors"
+        >
+          <I.Download size={12} />
+          Download
+        </a>
+      </div>
+
       <video
         ref={videoRef}
         src={url}
@@ -112,17 +128,11 @@ const RawVideoPlayer: React.FC<{ url: string }> = ({ url }) => {
         className="w-full"
         style={{ aspectRatio: '16/9', background: '#000' }}
       />
-      <div className="px-4 py-3 bg-gray-950 flex items-center gap-2">
-        <I.Video size={13} className="text-gray-400" />
-        <span className="text-[12px] text-gray-400">Raw screen recording</span>
-        <a
-          href={url}
-          download
-          className="ml-auto flex items-center gap-1.5 text-[12px] text-gray-300 hover:text-white transition-colors"
-        >
-          <I.Download size={12} />
-          Download
-        </a>
+
+      {/* Footer info */}
+      <div className="px-4 py-2.5 bg-gray-950 flex items-center gap-2">
+        <I.Video size={12} className="text-gray-500" />
+        <span className="text-[11.5px] text-gray-500">Raw screen capture — exactly as recorded, frame for frame</span>
       </div>
     </div>
   );
@@ -234,9 +244,9 @@ export const SharePage: React.FC = () => {
 
   // Tabs — only show formats the owner has enabled
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    ...(sopEnabled ? [{ id: 'guide' as Tab,     label: 'Step Guide', icon: <I.List size={13} /> }] : []),
-    ...(rawEnabled && videoUrl ? [{ id: 'recording' as Tab, label: 'Recording', icon: <I.Video size={13} /> }] : []),
-    ...(cinematicEnabled ? [{ id: 'cinematic' as Tab, label: 'Cinematic', icon: <I.Play size={13} /> }] : []),
+    ...(sopEnabled ? [{ id: 'guide' as Tab, label: 'Step Guide', icon: <I.List size={13} /> }] : []),
+    ...(rawEnabled && videoUrl ? [{ id: 'recording' as Tab, label: 'Raw Video', icon: <I.Video size={13} /> }] : []),
+    ...(cinematicEnabled ? [{ id: 'cinematic' as Tab, label: 'Cinematic AI', icon: <I.Play size={13} /> }] : []),
   ];
 
   // Auto-select first available tab (or keep current if still valid)
@@ -385,10 +395,10 @@ export const SharePage: React.FC = () => {
       {resolvedTab === 'recording' && videoUrl && (
         <div className="w-full px-3 sm:px-6 lg:px-10 pb-12 sm:pb-20 max-w-[1200px] mx-auto">
           <RawVideoPlayer url={videoUrl} />
-          <div className="mt-4 p-4 bg-green-50 border border-green-100 rounded-xl flex items-start gap-3">
-            <I.CheckCircle size={16} className="text-green-600 mt-0.5 flex-shrink-0" />
-            <p className="text-[13px] text-green-700">
-              <strong>Free</strong> — raw screen recording is shared directly. No credits required.
+          <div className="mt-4 p-4 bg-blue-50 border border-blue-100 rounded-xl flex items-start gap-3">
+            <I.Video size={16} className="text-blue-500 mt-0.5 flex-shrink-0" />
+            <p className="text-[13px] text-blue-700">
+              <strong>Original, unedited recording</strong> — this is the raw screen capture exactly as it happened. No AI processing, no edits, no filters.
             </p>
           </div>
         </div>
@@ -397,15 +407,36 @@ export const SharePage: React.FC = () => {
       {/* ── Cinematic Tab ── (wide) */}
       {resolvedTab === 'cinematic' && (
         <div className="w-full px-3 sm:px-6 lg:px-10 pb-12 sm:pb-20 max-w-[1200px] mx-auto">
+          {/* Cinematic label */}
+          <div className="flex items-center gap-2 mb-3">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100">
+              <I.Play size={10} />
+              AI Cinematic
+            </span>
+            <span className="text-[12px] text-gray-400">
+              Spring-physics camera · smooth zoom transitions · step-by-step focus
+            </span>
+          </div>
+
           <CinematicPlayer
             steps={steps}
             assets={session.assets ?? {}}
+            videoUrl={videoUrl}
             chapterBreaks={session.metadata?.chapterBreaks}
-            renderMode="slideshow"
+            renderMode={videoUrl ? 'hybrid' : 'slideshow'}
           />
-          <p className="mt-3 text-center text-[12px] text-gray-400 sm:hidden">
-            Tap the player to pause · swipe the timeline to scrub
+
+          <p className="mt-3 text-center text-[12px] text-gray-400">
+            <span className="hidden sm:inline">Click to play · space to pause · ← → to step · drag timeline to scrub</span>
+            <span className="sm:hidden">Tap to play · swipe timeline to scrub</span>
           </p>
+
+          <div className="mt-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex items-start gap-3">
+            <I.Play size={16} className="text-indigo-500 mt-0.5 flex-shrink-0" />
+            <p className="text-[13px] text-indigo-700">
+              <strong>AI-powered transitions</strong> — Ken Burns zoom, spring-physics camera pan, and cross-dissolve blends are computed mathematically for each step's click target.
+            </p>
+          </div>
         </div>
       )}
 
