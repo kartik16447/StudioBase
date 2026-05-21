@@ -15,8 +15,8 @@ const shared = {
   treeShaking: true,
   define: {
     'process.env.NODE_ENV': '"production"',
-    'import.meta.env.DEV': isProd ? 'false' : 'false',
-    'import.meta.env.VITE_DEV_MODE': '"false"',
+    'import.meta.env.DEV': isProd ? 'false' : 'true',
+    'import.meta.env.VITE_DEV_MODE': isProd ? '"false"' : '"true"',
     'import.meta.env.VITE_BACKEND_URL': 'undefined',
   },
   sourcemap: false,

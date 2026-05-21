@@ -55,6 +55,10 @@ async function init() {
     const stored = result as StorageSchema;
     if (stored.sb_state) state = stored.sb_state;
 
+    if (state.status === 'recording') {
+      startRecordingTimer();
+    }
+
     sbLog("STATE_REHYDRATED", { status: state.status });
   } catch (err) {
     console.warn("Extension initialization warning:", err);
@@ -64,6 +68,40 @@ async function init() {
 }
 
 void init();
+
+let timerInterval: any = null;
+
+function updateBadgeTimer() {
+  if (state.status === 'recording' && state.startedAt) {
+    const elapsed = Math.floor((Date.now() - state.startedAt) / 1000);
+    const m = Math.floor(elapsed / 60);
+    const s = elapsed % 60;
+    chrome.action.setBadgeText({ text: `${m}:${s.toString().padStart(2, '0')}` });
+    chrome.action.setBadgeBackgroundColor({ color: '#ef4444' });
+  } else {
+    chrome.action.setBadgeText({ text: '' });
+  }
+}
+
+function startRecordingTimer() {
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(updateBadgeTimer, 1000);
+  updateBadgeTimer();
+}
+
+function stopRecordingTimer() {
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = null;
+  chrome.action.setBadgeText({ text: '' });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (state.status === "recording" && state.target?.tabId === tabId) {
+    if (changeInfo.status === "complete") {
+      chrome.tabs.sendMessage(tabId, { type: 'START_CAPTURE' }).catch(() => {});
+    }
+  }
+});
 
 // ─── Focus Sensor ────────────────────────────────────────────
 
@@ -374,6 +412,7 @@ async function startRecording(target: CaptureTarget) {
       chrome.runtime.sendMessage({ type: 'START_VIDEO_RECORDING', sessionId }).catch(() => {});
     }
 
+    startRecordingTimer();
     sbLog("RECORDING_STARTED", { sessionId, target });
 
     chrome.storage.local.get(["sb_user", "workspaceId"]).then((stored: any) => {
@@ -414,6 +453,7 @@ async function abortRecording() {
     startedAt: null,
     target: null,
   });
+  stopRecordingTimer();
   sbLog("RECORDING_ABORTED", { sessionId });
 }
 
@@ -446,6 +486,7 @@ async function stopRecording() {
     const { activeSessionId, ...auth } = await initSession(session);
 
     await updateState({ status: "ready", sessionId: activeSessionId, uploadProgress: 100 });
+    stopRecordingTimer();
     sbLog("RECORDING_FINISHED", { sessionId: activeSessionId });
 
     // ── Upload everything in the background ───────────────────────
