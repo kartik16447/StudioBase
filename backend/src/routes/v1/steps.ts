@@ -69,23 +69,29 @@ steps.post('/:sessionId/steps/:stepId/generate-script',
 
     await requireSession(c.env, sessionId, user.id);
 
-    // Get the step content
-    const stepRow = await c.env.DB.prepare(
-      `SELECT content FROM steps WHERE id = ? AND sopId IN (SELECT id FROM sops WHERE sessionId = ?)`
-    ).bind(stepId, sessionId).first<{ content: string }>();
+    // Get the step content from R2 session.json
+    const assetKey = `sessions/${sessionId}/session.json`;
+    const assetObj = await c.env.R2.get(assetKey);
+    if (!assetObj) {
+      console.warn(`[generate-script] Session asset not found in R2: ${assetKey}`);
+      throw new HTTPException(404, { message: 'Session asset not found' });
+    }
 
-    if (!stepRow) {
-      console.warn(`[generate-script] Step not found in DB: stepId=${stepId}, sessionId=${sessionId}`);
+    let envelope: any;
+    try {
+      envelope = JSON.parse(await assetObj.text());
+    } catch (parseErr) {
+      console.error(`[generate-script] Failed to parse session JSON:`, parseErr);
+      throw new HTTPException(500, { message: 'Invalid session data' });
+    }
+
+    const stepData = envelope.steps?.find((s: any) => s.id === stepId);
+    if (!stepData) {
+      console.warn(`[generate-script] Step not found in session JSON: stepId=${stepId}`);
       throw new HTTPException(404, { message: 'Step not found' });
     }
 
-    let stepData: any;
-    try {
-      stepData = JSON.parse(stepRow.content);
-    } catch (parseErr) {
-      console.error(`[generate-script] Failed to parse step content JSON:`, parseErr);
-      throw new HTTPException(500, { message: 'Invalid step data' });
-    }
+
 
     const budgetSeconds = Math.max(visualDurationSeconds, 3.0);
     console.log(`[generate-script] Step action details: action=${stepData.action}, pageTitle=${stepData.pageTitle}. Adjusted budget: ${budgetSeconds}s (visual duration was ${visualDurationSeconds}s)`);
@@ -459,27 +465,27 @@ steps.post('/:sessionId/generate-narration', async (c) => {
   const session = await requireSession(c.env, sessionId, user.id);
   const workspaceId = session.workspaceId;
 
-  // Load steps that have text to narrate
-  const sop = await c.env.DB.prepare(
-    `SELECT id FROM sops WHERE sessionId = ? LIMIT 1`
-  ).bind(sessionId).first<{ id: string }>();
-
-  if (!sop) {
-    throw new HTTPException(404, { message: 'No SOP found for this session' });
+  // Load steps from session.json in R2
+  const assetKey = `sessions/${sessionId}/session.json`;
+  const assetObj = await c.env.R2.get(assetKey);
+  if (!assetObj) {
+    throw new HTTPException(404, { message: 'Session asset not found' });
   }
 
-  const { results: stepRows } = await c.env.DB.prepare(
-    `SELECT id, content FROM steps WHERE sopId = ? ORDER BY stepIndex ASC`
-  ).bind(sop.id).all<{ id: string; content: string }>();
+  let envelope: any;
+  try {
+    envelope = JSON.parse(await assetObj.text());
+  } catch (e) {
+    throw new HTTPException(500, { message: 'Failed to parse session data' });
+  }
 
   // Build (stepId → text) map — prefer textOverride, fall back to generatedText / elementText
   const stepsWithText: { id: string; text: string }[] = [];
-  for (const row of stepRows) {
-    try {
-      const c2 = JSON.parse(row.content) as any;
-      const text: string = c2.textOverride || c2.generatedText || c2.elementText || '';
-      if (text.trim()) stepsWithText.push({ id: row.id, text });
-    } catch { /* skip malformed */ }
+  for (const step of (envelope.steps || [])) {
+    const text: string = step.textOverride || step.generatedText || step.elementText || '';
+    if (text.trim() && text.trim().toLowerCase() !== '[silence]') {
+      stepsWithText.push({ id: step.id, text: text.trim() });
+    }
   }
 
   if (stepsWithText.length === 0) {
