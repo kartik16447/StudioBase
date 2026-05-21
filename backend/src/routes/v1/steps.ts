@@ -1,14 +1,16 @@
 import { Hono } from 'hono';
 import { Env, Variables } from '../../types/hono';
 import { authMiddleware } from '../../middlewares/auth';
-import { workspaceMiddleware } from '../../middlewares/workspace';
 import { HTTPException } from 'hono/http-exception';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 
 const steps = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-steps.use('*', authMiddleware(), workspaceMiddleware());
+// Audio routes only need authentication — workspace lookup is done inside
+// requireSession via the session's own workspaceId column, so the client
+// doesn't need to pass a workspaceId (avoids mismatch 404s).
+steps.use('*', authMiddleware());
 
 const GenerateAudioSchema = z.object({
   text: z.string().min(1).max(5000),
@@ -22,11 +24,25 @@ const PatchDurationSchema = z.object({
 const AUDIO_TTS_CREDIT_COST = 1;
 const STUCK_JOB_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-async function requireSession(env: Env, sessionId: string, workspaceId: string) {
+/**
+ * Verify the session exists and the requesting user owns it (or is a workspace member).
+ * Returns the session row including its workspaceId — callers use that for credits/ledger.
+ */
+async function requireSession(env: Env, sessionId: string, userId: string) {
   const session = await env.DB.prepare(
-    'SELECT id, ownerId FROM sessions WHERE id = ? AND workspaceId = ?'
-  ).bind(sessionId, workspaceId).first() as { id: string; ownerId: string } | null;
-  if (!session) throw new HTTPException(404, { message: 'Session not found' });
+    `SELECT s.id, s.ownerId, s.workspaceId
+     FROM sessions s
+     WHERE s.id = ?
+       AND s.deletedAt IS NULL
+       AND (
+         s.ownerId = ?
+         OR EXISTS (
+           SELECT 1 FROM workspace_members wm
+           WHERE wm.workspaceId = s.workspaceId AND wm.userId = ?
+         )
+       )`
+  ).bind(sessionId, userId, userId).first() as { id: string; ownerId: string; workspaceId: string } | null;
+  if (!session) throw new HTTPException(404, { message: 'Session not found or access denied' });
   return session;
 }
 
@@ -36,11 +52,11 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
   zValidator('json', GenerateAudioSchema),
   async (c) => {
     const user = c.get('user');
-    const ws = c.get('workspace');
     const { sessionId, stepId } = c.req.param();
     const { text, language } = c.req.valid('json');
 
-    await requireSession(c.env, sessionId, ws.id);
+    const session = await requireSession(c.env, sessionId, user.id);
+    const workspaceId = session.workspaceId;
 
     // Reject if already generating (avoid duplicate charges)
     const existing = await c.env.DB.prepare(
@@ -97,7 +113,7 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
         stepId,
         text,
         userId: user.id,
-        workspaceId: ws.id,
+        workspaceId,
         jobId,
         language,
       });
@@ -126,10 +142,10 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
 // ─── POST revert-audio ───────────────────────────────────────────────────────
 
 steps.post('/:sessionId/steps/:stepId/revert-audio', async (c) => {
-  const ws = c.get('workspace');
+  const user = c.get('user');
   const { sessionId, stepId } = c.req.param();
 
-  await requireSession(c.env, sessionId, ws.id);
+  await requireSession(c.env, sessionId, user.id);
 
   const row = await c.env.DB.prepare(
     'SELECT originalVoiceoverKey FROM step_audio WHERE stepId = ? AND sessionId = ?'
@@ -150,10 +166,10 @@ steps.post('/:sessionId/steps/:stepId/revert-audio', async (c) => {
 // ─── GET audio-status ────────────────────────────────────────────────────────
 
 steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
-  const ws = c.get('workspace');
+  const user = c.get('user');
   const { sessionId, stepId } = c.req.param();
 
-  await requireSession(c.env, sessionId, ws.id);
+  await requireSession(c.env, sessionId, user.id);
 
   const row = await c.env.DB.prepare(
     'SELECT voiceoverSource, voiceoverKey, voiceoverDurationMs, jobId, jobStartedAt, userId FROM step_audio WHERE stepId = ? AND sessionId = ?'
@@ -191,11 +207,11 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
 steps.patch('/:sessionId/steps/:stepId/audio-duration',
   zValidator('json', PatchDurationSchema),
   async (c) => {
-    const ws = c.get('workspace');
+    const user = c.get('user');
     const { sessionId, stepId } = c.req.param();
     const { durationMs } = c.req.valid('json');
 
-    await requireSession(c.env, sessionId, ws.id);
+    await requireSession(c.env, sessionId, user.id);
 
     await c.env.DB.prepare(
       'UPDATE step_audio SET voiceoverDurationMs = ?, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
