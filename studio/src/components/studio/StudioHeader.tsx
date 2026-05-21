@@ -11,6 +11,7 @@ export interface StudioHeaderProps {
   setRenderMode: (mode: 'hybrid' | 'slideshow') => void;
   onNavigateHome: () => void;
   onShareClick?: () => void;
+  onSandboxExport?: () => void;
 }
 
 export const StudioHeader: React.FC<StudioHeaderProps> = ({
@@ -20,6 +21,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
   setRenderMode,
   onNavigateHome,
   onShareClick,
+  onSandboxExport,
 }) => {
   return (
     <header className="h-14 bg-surface border-b border-border flex items-center px-4 gap-3 z-40 relative min-w-0">
@@ -112,6 +114,12 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
         </button>
 
         <NotificationBell />
+
+        {onSandboxExport && (
+          <Button variant="ghost" size="sm" icon={I.Download} onClick={onSandboxExport}>
+            <span className="hidden sm:inline text-primary">Sandbox Export</span>
+          </Button>
+        )}
 
         <Button variant="primary" size="sm" icon={I.Share2} onClick={onShareClick}>
           <span className="hidden sm:inline">Share</span>

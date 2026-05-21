@@ -6,6 +6,7 @@ import {
   cn, Badge, IconButton, StepNumber, SectionLabel, FieldShell, AIShimmer, Toggle, Button, ScreenshotPlaceholder, Tooltip
 } from '../ui';
 import type { Step } from '../../../../shared/types/session';
+import { apiClient } from '../../lib/apiClient';
 
 
 // ─── Script panel ──────────────────────────────────────────────────────
@@ -129,7 +130,47 @@ const ScriptStepRow: React.FC<{
 }> = ({ step, active, isPlaying, onClick, onUpdate, innerRef }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(step.textOverride || step.generatedText || '');
+  const [isGenerating, setIsGenerating] = useState(false);
   const deleteStep = useStudioStore(state => state.deleteStep);
+  const session = useStudioStore(state => state.session);
+  const updateStep = useStudioStore(state => state.updateStep);
+
+  const handleRegenerate = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!session || isGenerating) return;
+    
+    const stepIndex = session.steps.findIndex(s => s.id === step.id);
+    let visualDurationSeconds = 3.0;
+    
+    if (stepIndex !== -1 && stepIndex < session.steps.length - 1) {
+      const nextStep = session.steps[stepIndex + 1];
+      if (nextStep.timestamp && step.timestamp) {
+        visualDurationSeconds = (nextStep.timestamp - step.timestamp) / 1000;
+      }
+    }
+    
+    console.log(`[ScriptRegeneration] Starting script regeneration for step ${step.id}. session: ${session.id}, visualDurationSeconds: ${visualDurationSeconds}s`);
+    setIsGenerating(true);
+    try {
+      const res = await apiClient.post<{ generatedText: string, budgetSeconds: number }>(
+        `/sessions/${session.id}/steps/${step.id}/generate-script`,
+        { visualDurationSeconds }
+      );
+      
+      console.log(`[ScriptRegeneration] Successfully regenerated script for step ${step.id}:`, res);
+      
+      if (res.generatedText) {
+        setText(res.generatedText);
+        updateStep(step.id, { generatedText: res.generatedText, textOverride: undefined });
+      } else {
+        console.warn(`[ScriptRegeneration] API returned empty or missing generatedText:`, res);
+      }
+    } catch (err) {
+      console.error(`[ScriptRegeneration] Failed to regenerate script for step ${step.id}:`, err);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
     <div
@@ -221,10 +262,12 @@ const ScriptStepRow: React.FC<{
           </Tooltip>
           <Tooltip content="AI Regenerate">
             <IconButton 
-              icon={I.Sparkles} 
+              icon={isGenerating ? I.Loader : I.Sparkles} 
               label="AI" 
               size={28} 
-              className="text-primary hover:text-primary-700" 
+              className={cn("text-primary hover:text-primary-700", isGenerating && "[&_svg]:animate-spin")} 
+              onClick={handleRegenerate}
+              disabled={isGenerating}
             />
           </Tooltip>
           <Tooltip content="Delete Step">

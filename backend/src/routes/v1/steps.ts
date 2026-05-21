@@ -65,6 +65,8 @@ steps.post('/:sessionId/steps/:stepId/generate-script',
     const { sessionId, stepId } = c.req.param();
     const { visualDurationSeconds, customInstruction } = c.req.valid('json');
 
+    console.log(`[generate-script] Request received: sessionId=${sessionId}, stepId=${stepId}, visualDurationSeconds=${visualDurationSeconds}, userId=${user.id}`);
+
     await requireSession(c.env, sessionId, user.id);
 
     // Get the step content
@@ -72,16 +74,21 @@ steps.post('/:sessionId/steps/:stepId/generate-script',
       `SELECT content FROM steps WHERE id = ? AND sopId IN (SELECT id FROM sops WHERE sessionId = ?)`
     ).bind(stepId, sessionId).first<{ content: string }>();
 
-    if (!stepRow) throw new HTTPException(404, { message: 'Step not found' });
+    if (!stepRow) {
+      console.warn(`[generate-script] Step not found in DB: stepId=${stepId}, sessionId=${sessionId}`);
+      throw new HTTPException(404, { message: 'Step not found' });
+    }
 
     let stepData: any;
     try {
       stepData = JSON.parse(stepRow.content);
-    } catch {
+    } catch (parseErr) {
+      console.error(`[generate-script] Failed to parse step content JSON:`, parseErr);
       throw new HTTPException(500, { message: 'Invalid step data' });
     }
 
     const budgetSeconds = Math.max(visualDurationSeconds, 3.0);
+    console.log(`[generate-script] Step action details: action=${stepData.action}, pageTitle=${stepData.pageTitle}. Adjusted budget: ${budgetSeconds}s (visual duration was ${visualDurationSeconds}s)`);
 
     const SYSTEM_PROMPT = `You are an expert SOP (Standard Operating Procedure) writer. Given a single raw user action from a screen recording session, write a short, punchy narration script.
 Write in second person imperative (e.g. "Click the Billing tab"). Do not use filler words. 
@@ -102,6 +109,7 @@ Output valid JSON with a single "generatedText" field.`;
       customInstruction: customInstruction || undefined
     });
 
+    console.log(`[generate-script] Invoking LLM @cf/meta/llama-4-scout-17b-16e-instruct`);
     const aiResponse = await (c.env.AI.run as any)(
       '@cf/meta/llama-4-scout-17b-16e-instruct',
       {
@@ -120,21 +128,27 @@ Output valid JSON with a single "generatedText" field.`;
       }
     ) as { response: string };
 
+    console.log(`[generate-script] LLM raw response length: ${aiResponse?.response?.length ?? 0}`);
+
     let generatedText = '';
     try {
       const parsed = JSON.parse(aiResponse.response);
       generatedText = parsed.generatedText;
+      console.log(`[generate-script] Parsed generatedText: "${generatedText}"`);
     } catch (e) {
+      console.error(`[generate-script] Failed to parse LLM response JSON: "${aiResponse?.response}"`, e);
       throw new HTTPException(500, { message: 'Failed to parse AI response' });
     }
 
     // Update the step in the DB
     stepData.generatedText = generatedText;
     
+    console.log(`[generate-script] Updating database record for stepId=${stepId}`);
     await c.env.DB.prepare(
       'UPDATE steps SET content = ?, updatedAt = ? WHERE id = ?'
     ).bind(JSON.stringify(stepData), Date.now(), stepId).run();
 
+    console.log(`[generate-script] Successfully updated stepId=${stepId}. Returning text.`);
     return c.json({ generatedText, budgetSeconds });
   }
 );

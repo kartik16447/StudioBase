@@ -23,6 +23,8 @@ export async function handleSOPVideoExport(config: {
   const workspaceId = (session as any)?.workspaceId || 'default';
   const sessionId   = session?.sessionId || 'unknown';
 
+  console.log('[Export] handleSOPVideoExport invoked:', { sessionId, workspaceId, renderMode, hasIntro: brand?.showIntro, hasOutro: brand?.showOutro });
+
   store.setIsExporting(true);
   store.setExportStatus('checking');
   store.setExportError(null);
@@ -34,12 +36,15 @@ export async function handleSOPVideoExport(config: {
   try {
     const videoKey = (session as any)?.videoKey || 'screen-recording';
     const videoUrl = session?.assets?.[videoKey] || session?.assets?.['video'] || '';
+    console.log('[Export] Performing health checks. Video URL:', videoUrl);
     if (!videoUrl) throw new Error('Video asset URL missing. Cannot export.');
     const check = await fetch(videoUrl, { method: 'HEAD' });
     if (!check.ok) throw new Error(`Video asset unavailable (${check.status})`);
     if (!(window as any).VideoDecoder)
       throw new Error('WebCodecs (VideoDecoder) not supported in this browser.');
+    console.log('[Export] Health checks passed successfully.');
   } catch (err: any) {
+    console.error('[Export] Health check failed:', err);
     store.setExportStatus('failed');
     store.setExportError(err.message);
     store.setIsExporting(false);
@@ -99,9 +104,11 @@ export async function handleSOPVideoExport(config: {
       mimeType,
       videoBitsPerSecond: RenderConstants.EXPORT_VIDEO_BITRATE,
     });
+    console.log('[Export] Starting MediaRecorder with mimeType:', mimeType);
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
     recorder.start(500);
 
+    console.log('[Export] Initializing WorkerExtractor...');
     extractor = new WorkerExtractor();
     await extractor.init(videoUrl);
 
@@ -114,6 +121,8 @@ export async function handleSOPVideoExport(config: {
       : (steps[0]?.timestamp || 0);
 
     const maxDuration = extractor.getDuration();
+    console.log('[Export] WorkerExtractor initialized. Video duration:', maxDuration, 'ms. sessionStartTime:', sessionStartTime);
+    
     const toRelativeMs = (absMs: number) => {
       const rel = absMs - sessionStartTime;
       if (isNaN(rel)) return 0;
@@ -157,7 +166,15 @@ export async function handleSOPVideoExport(config: {
 
     // ── Build Timeline (Compiler) ──────────────────────────────────────────
     const hasVideo = renderMode === 'hybrid' && !!videoUrl;
+    console.log('[Export] Building timeline with hasVideo:', hasVideo);
     const timeline = buildTimeline(steps, hasVideo, sessionStartTime);
+    console.log('[Export] Compiled Timeline:', {
+      totalMs: timeline.totalMs,
+      segmentsCount: timeline.segments.length,
+      videoClipsCount: timeline.videoTrack?.clips.length,
+      audioClipsCount: timeline.audioTrack?.clips.length
+    });
+    
     const chapterBreaks = session?.metadata?.chapterBreaks || [];
     const chapterMap = new Map<string, any>(
       chapterBreaks.map((c: any) => [c.afterStepId, c])
@@ -303,6 +320,7 @@ export async function handleSOPVideoExport(config: {
       // Progress reporting
       if (f % 30 === 0) {
         const pct = Math.round((f / totalFrames) * 100);
+        console.log(`[Export] Rendering frame ${f}/${totalFrames} (${pct}%). Logical currentMs: ${logicalCurrentMs.toFixed(1)}ms. StepIndex: ${stepIndex}`);
         store.setExportProgress(pct);
         overlay.innerText = `🎬 Exporting… ${pct}%`;
       }
@@ -311,6 +329,7 @@ export async function handleSOPVideoExport(config: {
 
     // ── Outro slide (3 s) ──────────────────────────────────────────────────
     if (brand.showOutro) {
+      console.log('[Export] Rendering outro slide...');
       const watermarkText = brand.watermark || 'StudioBase';
       const outroFrames = Math.round(fps * 3);
       for (let f = 0; f < outroFrames; f++) {
@@ -337,18 +356,22 @@ export async function handleSOPVideoExport(config: {
     }
 
     // ── Finalise ───────────────────────────────────────────────────────────
+    console.log('[Export] Finalizing export. Stopping MediaRecorder...');
     await new Promise<void>((res) => {
       recorder.onstop = () => res();
       recorder.stop();
     });
 
     const blob = new Blob(chunks, { type: 'video/webm' });
+    console.log(`[Export] Blob generated successfully. Size: ${blob.size} bytes (${(blob.size / (1024 * 1024)).toFixed(2)} MB). Type: ${blob.type}`);
     if (blob.size < 1000) throw new Error('Export output is empty or corrupted');
 
     const url = URL.createObjectURL(blob);
+    const filename = `${session?.aiOutputs?.title || 'studiobase-cinematic'}.webm`;
+    console.log('[Export] Initiating local download of filename:', filename);
     const a   = Object.assign(document.createElement('a'), {
       href: url,
-      download: `${session?.aiOutputs?.title || 'studiobase-cinematic'}.webm`,
+      download: filename,
     });
     document.body.appendChild(a);
     a.click();
@@ -360,22 +383,26 @@ export async function handleSOPVideoExport(config: {
     overlay.innerText = '☁️ Uploading to Cloud…';
     try {
       const exportKey = `videos/${sessionId}/export_${Date.now()}.webm`;
+      console.log('[Export] Starting upload to cloud storage. Key:', exportKey);
       await apiClient.request(`/assets/file?key=${encodeURIComponent(exportKey)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'video/webm' },
         body: blob,
       });
+      console.log('[Export] Asset upload successful. Updating session record...');
       await apiClient.request(`/sessions/${sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ r2VideoKey: exportKey, r2ExportKey: exportKey }),
       });
+      console.log('[Export] Session record updated successfully.');
     } catch (e) {
       console.error('[Export] Cloud sync failed:', e);
       store.setExportError('Cloud sync failed. File saved locally.');
     }
 
     store.setExportStatus('completed');
+    console.log('[Export] Export workflow fully completed.');
     TelemetryService.record({
       eventName: 'export.completed', sessionId, workspaceId,
       properties: { size: blob.size },
@@ -387,11 +414,12 @@ export async function handleSOPVideoExport(config: {
     });
 
   } catch (err: any) {
-    console.error('[Export] Fatal:', err);
+    console.error('[Export] Fatal error during export:', err);
     store.setExportStatus('failed');
     store.setExportError(err.message);
   } finally {
-    if (extractor) await extractor.destroy().catch(() => {});
+    console.log('[Export] Cleaning up compositor elements and tracks.');
+    if (extractor) await extractor.destroy().catch((e) => console.error('[Export] Failed to destroy extractor:', e));
     if (videoTrack) videoTrack.stop();
     canvas.remove();
     overlay.remove();

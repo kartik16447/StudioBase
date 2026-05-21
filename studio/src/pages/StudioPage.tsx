@@ -16,6 +16,7 @@ import {
   ScriptPanel, BrandPanel, ChaptersPanel, AIVoicePanel, MusicPanel, VisualsPanel, ZoomsPanel, ElementsPanel 
 } from '../components/studio/Panels';
 import { RenderConstants } from '../modules/render-engine/RenderConstants';
+import { handleSOPVideoExport } from '../modules/render-engine/ExportOrchestrator';
 import { useSessionManager } from '../hooks/useSessionManager';
 import { useIsEmbed } from '../hooks/useIsEmbed';
 import { EmbedSOPView } from '../components/studio/canvases/EmbedSOPView';
@@ -125,6 +126,7 @@ export const StudioPage: React.FC = () => {
         setRenderMode={setRenderMode}
         onNavigateHome={() => navigate('home')}
         onShareClick={() => setShareOpen(true)}
+        onSandboxExport={() => handleSOPVideoExport({ session, theme: useStudioStore.getState().brand, renderMode })}
       />
       <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
       <div className="flex-1 flex min-h-0">
