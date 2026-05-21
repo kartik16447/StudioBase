@@ -177,10 +177,17 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
         const parsed = JSON.parse(jsonMatch[0]);
         generatedText = parsed.generatedText;
         
-        if (!generatedText) {
+        if (!generatedText && generatedText !== '') {
            throw new Error('generatedText key missing from JSON');
         }
       }
+
+      // If the model explicitly decided on silence, convert it to an empty string 
+      // so the UI correctly shows the empty state placeholder instead of literal text.
+      if (generatedText.trim().toUpperCase() === '[SILENCE]') {
+        generatedText = '';
+      }
+
       console.log(`[generate-script] Parsed generatedText: "${generatedText}"`);
     } catch (e: any) {
       const rawString = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
