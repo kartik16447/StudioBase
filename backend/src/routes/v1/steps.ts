@@ -145,20 +145,33 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
     console.log(`[generate-script] LLM raw response length: ${aiResponse?.response?.length ?? 0}`);
 
     let generatedText = '';
+    let rawResponse = '';
     try {
-      let rawResponse = aiResponse?.response || '';
-      rawResponse = rawResponse.trim();
-      if (rawResponse.startsWith('```json')) {
-        rawResponse = rawResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-      } else if (rawResponse.startsWith('```')) {
-        rawResponse = rawResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      if (typeof aiResponse === 'string') {
+        rawResponse = aiResponse;
+      } else if (aiResponse?.response) {
+        rawResponse = aiResponse.response;
+      } else if ((aiResponse as any)?.choices?.[0]?.message?.content) {
+        rawResponse = (aiResponse as any).choices[0].message.content;
+      } else {
+        rawResponse = JSON.stringify(aiResponse);
       }
-      const parsed = JSON.parse(rawResponse);
+      
+      const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON object found in response string');
+      }
+      
+      const parsed = JSON.parse(jsonMatch[0]);
       generatedText = parsed.generatedText;
+      
+      if (!generatedText) {
+         throw new Error('generatedText key missing from JSON');
+      }
       console.log(`[generate-script] Parsed generatedText: "${generatedText}"`);
-    } catch (e) {
-      console.error(`[generate-script] Failed to parse LLM response JSON: "${aiResponse?.response}"`, e);
-      throw new HTTPException(500, { message: 'Failed to parse AI response' });
+    } catch (e: any) {
+      console.error(`[generate-script] Failed to parse LLM response JSON: "${rawResponse}"`, e);
+      throw new HTTPException(500, { message: `Failed to parse AI response: ${e.message}. Raw: ${rawResponse.substring(0, 50)}...` });
     }
 
     // Update the step in the R2 session JSON envelope
