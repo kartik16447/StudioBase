@@ -25,6 +25,11 @@ const SwapVoiceSchema = z.object({
   voiceId: z.string().min(1).max(255),
 });
 
+const GenerateScriptSchema = z.object({
+  visualDurationSeconds: z.number().positive(),
+  customInstruction: z.string().optional(),
+});
+
 const AUDIO_TTS_CREDIT_COST = 1;
 const AUDIO_SWAP_CREDIT_COST = 1;
 const STUCK_JOB_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -50,6 +55,89 @@ async function requireSession(env: Env, sessionId: string, userId: string) {
   if (!session) throw new HTTPException(404, { message: 'Session not found or access denied' });
   return session;
 }
+
+// ─── POST generate-script ────────────────────────────────────────────────────
+
+steps.post('/:sessionId/steps/:stepId/generate-script',
+  zValidator('json', GenerateScriptSchema),
+  async (c) => {
+    const user = c.get('user');
+    const { sessionId, stepId } = c.req.param();
+    const { visualDurationSeconds, customInstruction } = c.req.valid('json');
+
+    await requireSession(c.env, sessionId, user.id);
+
+    // Get the step content
+    const stepRow = await c.env.DB.prepare(
+      `SELECT content FROM steps WHERE id = ? AND sopId IN (SELECT id FROM sops WHERE sessionId = ?)`
+    ).bind(stepId, sessionId).first<{ content: string }>();
+
+    if (!stepRow) throw new HTTPException(404, { message: 'Step not found' });
+
+    let stepData: any;
+    try {
+      stepData = JSON.parse(stepRow.content);
+    } catch {
+      throw new HTTPException(500, { message: 'Invalid step data' });
+    }
+
+    const budgetSeconds = Math.max(visualDurationSeconds, 3.0);
+
+    const SYSTEM_PROMPT = `You are an expert SOP (Standard Operating Procedure) writer. Given a single raw user action from a screen recording session, write a short, punchy narration script.
+Write in second person imperative (e.g. "Click the Billing tab"). Do not use filler words. 
+Do NOT mention raw technical details like CSS selectors or DOM roles.
+
+STRICT TEMPORAL BUDGETING:
+You must constrain the length of the script so it can be spoken aloud within the provided \`visualDurationSeconds\` (assume a maximum of 2 words per second). Keep the word count strictly under (visualDurationSeconds * 2).
+
+Output valid JSON with a single "generatedText" field.`;
+
+    const userMessage = JSON.stringify({
+      action: stepData.action,
+      elementText: stepData.elementText,
+      elementRole: stepData.elementRole,
+      inputValue: stepData.inputValue,
+      pageTitle: stepData.pageTitle,
+      visualDurationSeconds: budgetSeconds,
+      customInstruction: customInstruction || undefined
+    });
+
+    const aiResponse = await (c.env.AI.run as any)(
+      '@cf/meta/llama-4-scout-17b-16e-instruct',
+      {
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userMessage },
+        ],
+        response_format: { 
+          type: 'json_schema', 
+          json_schema: {
+            type: 'object',
+            properties: { generatedText: { type: 'string' } },
+            required: ['generatedText']
+          }
+        },
+      }
+    ) as { response: string };
+
+    let generatedText = '';
+    try {
+      const parsed = JSON.parse(aiResponse.response);
+      generatedText = parsed.generatedText;
+    } catch (e) {
+      throw new HTTPException(500, { message: 'Failed to parse AI response' });
+    }
+
+    // Update the step in the DB
+    stepData.generatedText = generatedText;
+    
+    await c.env.DB.prepare(
+      'UPDATE steps SET content = ?, updatedAt = ? WHERE id = ?'
+    ).bind(JSON.stringify(stepData), Date.now(), stepId).run();
+
+    return c.json({ generatedText, budgetSeconds });
+  }
+);
 
 // ─── POST generate-audio ─────────────────────────────────────────────────────
 

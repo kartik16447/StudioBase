@@ -310,6 +310,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const isPlayingRef   = useRef(false);
   const speedRef       = useRef(1);
   const segmentsRef    = useRef(segments);
+  const timelineRef    = useRef(timeline);
   const totalMsRef     = useRef(totalMs);
   const stepsRef       = useRef(steps);
   const assetsRef      = useRef(assets);
@@ -320,6 +321,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   useEffect(() => { onPlayStateChange?.(isPlaying);        }, [isPlaying, onPlayStateChange]);
   useEffect(() => { speedRef.current       = speed;        }, [speed]);
   useEffect(() => { segmentsRef.current    = segments;     }, [segments]);
+  useEffect(() => { timelineRef.current    = timeline;     }, [timeline]);
   useEffect(() => { totalMsRef.current     = totalMs;      }, [totalMs]);
   useEffect(() => { stepsRef.current       = steps;        }, [steps]);
   useEffect(() => { assetsRef.current      = assets;       }, [assets]);
@@ -424,25 +426,15 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
       // ── Advance playhead ─────────────────────────────────────────────────
       if (isPlayingRef.current) {
-        if (hasVideo && video) {
-          // Hybrid: video is source of truth — read currentTime
-          const relMs = Math.max(0, video.currentTime * 1000);
-          currentMsRef.current = relMs;
-          if (video.ended) {
+        // Deterministic wall-clock accumulator for ALL modes
+        if (!showChapterCardRef.current) {
+          const next = currentMsRef.current + dt * speedRef.current;
+          if (next >= totMs) {
+            currentMsRef.current = totMs;
             setIsPlaying(false);
             setIsEnded(true);
-          }
-        } else {
-          // Slideshow: wall-clock accumulator
-          if (!showChapterCardRef.current) {
-            const next = currentMsRef.current + dt * speedRef.current;
-            if (next >= totMs) {
-              currentMsRef.current = totMs;
-              setIsPlaying(false);
-              setIsEnded(true);
-            } else {
-              currentMsRef.current = next;
-            }
+          } else {
+            currentMsRef.current = next;
           }
         }
 
@@ -450,6 +442,38 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         if (progressBarRef.current && totMs > 0) {
           progressBarRef.current.style.width =
             `${Math.min(100, (currentMsRef.current / totMs) * 100)}%`;
+        }
+
+        // Media Latching & Sync (The Magic)
+        if (hasVideo && video && timelineRef.current.videoTrack) {
+          const ms = currentMsRef.current;
+          const clips = timelineRef.current.videoTrack.clips;
+          let vClip = clips[0];
+          // Find the active clip (linear search is extremely fast for <100 items)
+          for (let i = 0; i < clips.length; i++) {
+            if (ms >= clips[i].logicalStartMs) vClip = clips[i];
+            else break;
+          }
+
+          if (vClip) {
+            if (vClip.type === 'hold') {
+              // Pause the video exactly at the hold frame
+              if (!video.paused) video.pause();
+              const targetSec = vClip.sourceStartMs / 1000;
+              if (Math.abs(video.currentTime - targetSec) > 0.05) {
+                video.currentTime = targetSec;
+              }
+            } else {
+              // Action clip: ensure playing and soft-sync
+              if (video.paused && !showChapterCardRef.current) {
+                video.play().catch(() => {});
+              }
+              const targetSec = (vClip.sourceStartMs + (ms - vClip.logicalStartMs)) / 1000;
+              if (Math.abs(video.currentTime - targetSec) > 0.25) {
+                video.currentTime = targetSec; // soft sync
+              }
+            }
+          }
         }
       }
 
@@ -598,11 +622,23 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     const v = videoRef.current;
     if (!v || !videoUrl) return;
     if (isPlaying && !isTransitioningRef.current) {
-      v.play().catch(() => {});
+      // Don't play if we are inside a hold clip!
+      const ms = currentMsRef.current;
+      const clips = timeline.videoTrack?.clips || [];
+      let vClip = clips[0];
+      for (let i = 0; i < clips.length; i++) {
+        if (ms >= clips[i].logicalStartMs) vClip = clips[i];
+        else break;
+      }
+      if (vClip?.type === 'hold') {
+        v.pause();
+      } else {
+        v.play().catch(() => {});
+      }
     } else {
       v.pause();
     }
-  }, [isPlaying, videoUrl, showChapterCard]);
+  }, [isPlaying, videoUrl, showChapterCard, timeline]);
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = speed;

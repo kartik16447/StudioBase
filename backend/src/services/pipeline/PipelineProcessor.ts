@@ -57,28 +57,45 @@ Output fields:
 - tags: 2–5 lowercase keywords relevant to the workflow domain.
 - steps: For each input step produce:
     - stepTitle: A short noun phrase naming the goal of this step (e.g. "Open the Main Application Screen", "Locate the Primary Navigation Area"). Capitalize each word. Do not include a step number.
-    - generatedText: 1–3 sentences describing what the user does and WHY — focus on the user's intent and what they are accomplishing, not the raw mechanics. Write in second person imperative (e.g. "Begin by navigating to the main application screen where your work area and options are displayed."). If the action involves a form field or input, mention what value was entered and why.
+    - generatedText: The narration script for this step. Write in second person imperative (e.g. "Click the Billing tab"). If the action involves a form field or input, mention what value was entered and why.
 - chapterBreaks: Group steps into 2–5 logical workflow phases. afterStepId must be an id from the input. Place breaks at natural transitions between distinct stages of the workflow.
 
 Critical rules:
 - Every step id must be preserved exactly as given — do not add, remove, or rename any.
 - Do NOT mention raw technical details like CSS selectors, DOM roles, or coordinates.
 - Write as if explaining to a non-technical new hire. Avoid jargon.
+- STRICT TEMPORAL BUDGETING: The input JSON provides a \`visualDurationSeconds\` for each step. The video for this step will last EXACTLY this long. You must constrain the length of \`generatedText\` so it can be spoken aloud within this time limit (assume a maximum of 2 words per second).
+- STYLISTIC CONSTRAINT: Write in punchy, direct fragments. Do not use filler words. Say "Click the Billing tab" instead of "Now you will want to go ahead and click the Billing tab". Keep the word count strictly under (visualDurationSeconds * 2).
 - Output valid JSON only — no markdown fences, no commentary.`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function buildStepPayload(steps: Step[]) {
-  return steps.map(s => ({
-    id: s.id,
-    action: s.action,
-    elementText: s.elementText,
-    elementRole: s.elementRole,
-    inputValue: s.inputValue,
-    pageTitle: s.pageTitle,
-    url: s.url,
-    selector: s.selector,
-  }));
+  return steps.map((s, i) => {
+    let durationSeconds = 3.0; // fallback default
+    
+    if (s.timestamp !== undefined && s.timestamp !== null) {
+      const nextStep = steps[i + 1];
+      if (nextStep && nextStep.timestamp !== undefined && nextStep.timestamp !== null) {
+        durationSeconds = (nextStep.timestamp - s.timestamp) / 1000;
+      }
+    }
+    
+    // Enforce minimum budget floor for micro-actions (e.g. fast clicks)
+    const budgetSeconds = Math.max(durationSeconds, 3.0);
+
+    return {
+      id: s.id,
+      action: s.action,
+      elementText: s.elementText,
+      elementRole: s.elementRole,
+      inputValue: s.inputValue,
+      pageTitle: s.pageTitle,
+      url: s.url,
+      selector: s.selector,
+      visualDurationSeconds: Math.round(budgetSeconds * 10) / 10,
+    };
+  });
 }
 
 // ─── Processor ───────────────────────────────────────────────────────────────

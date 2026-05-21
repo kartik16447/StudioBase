@@ -1,10 +1,9 @@
 /**
  * PlayerTimeline — time-space timeline utilities
  *
- * Converts a step array into a flat, cumulative time-space representation
- * so the player operates on a continuous `currentMs` (0 → totalMs) rather
- * than a discrete step index.  This is the prerequisite for per-step audio
- * durations to work correctly.
+ * Implements the Semantic Timeline Compiler with the Boundary Lock Rule.
+ * Outputs a CompiledTimeline with independent Video and Audio tracks,
+ * ensuring logical synchronization between procedural animations and raw media.
  */
 
 export const DEFAULT_STEP_MS = 5000; // fallback when voiceoverDurationMs absent
@@ -18,83 +17,125 @@ export interface TimelineStep {
 
 export interface StepSegment {
   stepIndex: number;
-  startMs:   number;   // cumulative start of this step
-  durationMs: number;  // actual duration for this step
+  startMs:   number;   // cumulative logical start of this step
+  durationMs: number;  // resolved logical duration of this step
   endMs:     number;   // startMs + durationMs
+}
+
+export interface TrackClip {
+  stepIndex: number;
+  logicalStartMs: number;
+  logicalDurationMs: number;
+  sourceStartMs: number; // Raw video timestamp (for video track) or 0
+  type: 'action' | 'hold';
 }
 
 export interface Timeline {
   segments: StepSegment[];
   totalMs:  number;
+  videoTrack: { clips: TrackClip[] };
+  audioTrack: { clips: TrackClip[] };
 }
 
-/** Build a Timeline from an array of steps.  Pure function — no side-effects. */
+/** Build a Timeline from an array of steps using the Boundary Lock Rule. */
 export function buildTimeline(
   steps: TimelineStep[],
   useVideoTimestamps = false,
   sessionStartMs = 0,
 ): Timeline {
   const segments: StepSegment[] = [];
+  const videoTrack = { clips: [] as TrackClip[] };
+  const audioTrack = { clips: [] as TrackClip[] };
   let cursor = 0;
 
-  if (useVideoTimestamps) {
-    const getRelativeMs = (step: TimelineStep) => {
-      const raw = step.timestamp || 0;
-      const EPOCH_FLOOR = 1_000_000_000_000;
-      return raw > EPOCH_FLOOR ? Math.max(0, raw - sessionStartMs) : raw;
-    };
+  const getRelativeMs = (step: TimelineStep) => {
+    const raw = step.timestamp || 0;
+    const EPOCH_FLOOR = 1_000_000_000_000;
+    return raw > EPOCH_FLOOR ? Math.max(0, raw - sessionStartMs) : raw;
+  };
 
-    for (let i = 0; i < steps.length; i++) {
-      const startMs = i === 0 ? 0 : getRelativeMs(steps[i]);
-      let durationMs = 0;
+  for (let i = 0; i < steps.length; i++) {
+    const rawAudio = steps[i].voiceoverDurationMs;
+    // For slideshow mode, we must enforce a duration even if no audio exists.
+    // For hybrid mode, if there's no audio, audioDuration is 0.
+    const audioDuration = rawAudio != null && rawAudio > 0
+      ? Math.max(MIN_STEP_MS, rawAudio)
+      : (useVideoTimestamps ? 0 : DEFAULT_STEP_MS); 
 
+    let visualDuration = 0;
+    const startSourceMs = useVideoTimestamps ? (i === 0 ? 0 : getRelativeMs(steps[i])) : 0;
+
+    if (useVideoTimestamps) {
       if (i < steps.length - 1) {
-        const nextStartMs = getRelativeMs(steps[i + 1]);
-        durationMs = Math.max(MIN_STEP_MS, nextStartMs - startMs);
+        const nextSourceMs = getRelativeMs(steps[i + 1]);
+        visualDuration = Math.max(MIN_STEP_MS, nextSourceMs - startSourceMs);
       } else {
-        const raw = steps[i].voiceoverDurationMs;
-        durationMs = raw != null && raw > 0
-          ? Math.max(MIN_STEP_MS, raw)
-          : DEFAULT_STEP_MS;
+        // Last step: typically extends to match audio or default
+        visualDuration = audioDuration > 0 ? audioDuration : DEFAULT_STEP_MS;
       }
+    } else {
+      // In slideshow mode, visual purely follows audio
+      visualDuration = audioDuration;
+    }
 
-      segments.push({
-        stepIndex:  i,
-        startMs,
-        durationMs,
-        endMs:      startMs + durationMs,
+    // Boundary Lock Rule
+    const resolvedDuration = Math.max(visualDuration, audioDuration);
+
+    // 1. Audio Track
+    if (audioDuration > 0) {
+      audioTrack.clips.push({
+        stepIndex: i,
+        logicalStartMs: cursor,
+        logicalDurationMs: audioDuration,
+        sourceStartMs: 0,
+        type: 'action',
       });
     }
 
-    const totalMs = segments.length > 0 ? segments[segments.length - 1].endMs : 0;
-    return { segments, totalMs };
-  } else {
-    for (let i = 0; i < steps.length; i++) {
-      const raw = steps[i].voiceoverDurationMs;
-      const durationMs = raw != null && raw > 0
-        ? Math.max(MIN_STEP_MS, raw)
-        : DEFAULT_STEP_MS;
-
-      segments.push({
-        stepIndex:  i,
-        startMs:    cursor,
-        durationMs,
-        endMs:      cursor + durationMs,
+    // 2. Video Track (The Magic)
+    if (visualDuration >= audioDuration) {
+      videoTrack.clips.push({
+        stepIndex: i,
+        logicalStartMs: cursor,
+        logicalDurationMs: visualDuration, // == resolvedDuration
+        sourceStartMs: startSourceMs,
+        type: 'action',
       });
-
-      cursor += durationMs;
+    } else {
+      // Audio > Visual: Inject Action + Hold
+      videoTrack.clips.push({
+        stepIndex: i,
+        logicalStartMs: cursor,
+        logicalDurationMs: visualDuration,
+        sourceStartMs: startSourceMs,
+        type: 'action',
+      });
+      videoTrack.clips.push({
+        stepIndex: i,
+        logicalStartMs: cursor + visualDuration,
+        logicalDurationMs: audioDuration - visualDuration,
+        sourceStartMs: startSourceMs + visualDuration, // Hold at the end of the visual clip
+        type: 'hold',
+      });
     }
 
-    return { segments, totalMs: cursor };
+    // 3. Update logical segments
+    segments.push({
+      stepIndex:  i,
+      startMs:    cursor,
+      durationMs: resolvedDuration,
+      endMs:      cursor + resolvedDuration,
+    });
+
+    cursor += resolvedDuration;
   }
+
+  return { segments, totalMs: cursor, videoTrack, audioTrack };
 }
 
 /**
- * Map a continuous playhead position (ms) to the corresponding step index
+ * Map a continuous logical playhead position (ms) to the corresponding step index
  * and normalised progress within that step (0–1).
- *
- * Clamped: before first step → { stepIndex: 0, progress: 0 }
- *          after last step   → { stepIndex: last, progress: 1 }
  */
 export function getSegmentAt(
   currentMs: number,
@@ -102,10 +143,8 @@ export function getSegmentAt(
 ): { stepIndex: number; progress: number } {
   if (!segments.length) return { stepIndex: 0, progress: 0 };
 
-  // Clamp to valid range
   const clamped = Math.max(0, Math.min(currentMs, segments[segments.length - 1].endMs));
 
-  // Binary search for the segment that contains `clamped`
   let lo = 0, hi = segments.length - 1;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
@@ -123,7 +162,7 @@ export function getSegmentAt(
 
 /** Chapter break positions as fractions (0–1) of total duration — for timeline UI. */
 export interface ChapterMarker {
-  fraction: number;   // 0–1 position on timeline
+  fraction: number;   
   label:    string;
   stepIndex: number;
 }
@@ -142,7 +181,6 @@ export function buildChapterMarkers(
     const stepIdx = steps.findIndex(s => s.id === brk.afterStepId);
     if (stepIdx < 0 || stepIdx >= segments.length) continue;
 
-    // Chapter marker sits at the END of the named step (start of next)
     const nextSeg = segments[stepIdx + 1];
     if (!nextSeg) continue;
 
