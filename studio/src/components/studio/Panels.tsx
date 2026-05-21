@@ -596,7 +596,7 @@ export const ZoomsPanel: React.FC = () => {
             <ScreenshotPlaceholder step={currentStep} session={session} showChrome={false} className="w-full h-full opacity-60" />
             <div 
               className="absolute w-8 h-8 -ml-4 -mt-4 border-2 border-primary rounded-full bg-primary/20 flex items-center justify-center shadow-card-lifted"
-              style={{ left: `${target.centerX}%`, top: `${target.centerY}%` }}
+              style={{ left: `${target.centerX ?? 50}%`, top: `${target.centerY ?? 50}%` }}
             >
               <div className="w-1 h-1 bg-primary rounded-full" />
             </div>

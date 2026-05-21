@@ -19,7 +19,7 @@ interface PStep {
   timestamp?: number | null;
   voiceoverDurationMs?: number | null;
   coordinates?: { x: number; y: number; viewportWidth: number; viewportHeight: number } | null;
-  animationTarget?: { centerX: number; centerY: number; zoomScale: number } | null;
+  animationTarget?: { pctX?: number; pctY?: number; centerX?: number; centerY?: number; zoomScale: number } | null;
 }
 
 interface PSession {

@@ -12,8 +12,12 @@ export const AnnotationSchema = z.object({
 });
 
 export const AnimationTargetSchema = z.object({
-  centerX: z.number(),
-  centerY: z.number(),
+  // Pipeline v2 format: 0–100 percent of image dimensions
+  pctX: z.number().optional(),
+  pctY: z.number().optional(),
+  // Legacy format: 0–1 normalised (kept for backwards compatibility)
+  centerX: z.number().optional(),
+  centerY: z.number().optional(),
   zoomScale: z.number(),
   transitionType: z.enum(['slide', 'fade', 'zoom', 'instant']).optional(),
   transitionDurationMs: z.number().optional(),

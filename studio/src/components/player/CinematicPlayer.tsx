@@ -55,7 +55,7 @@ export interface PlayerStep {
     x: number; y: number;
     viewportWidth: number; viewportHeight: number;
   } | null;
-  animationTarget?: { centerX: number; centerY: number; zoomScale: number } | null;
+  animationTarget?: { pctX?: number; pctY?: number; centerX?: number; centerY?: number; zoomScale: number } | null;
 }
 
 /** Imperative handle — lets parent seek to a specific step (e.g. transcript click) */
