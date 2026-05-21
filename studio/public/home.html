@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Primary meta -->
+  <title>StudioBase — One capture. Three pixel-perfect formats. Zero per-seat fees.</title>
+  <meta name="description" content="StudioBase collapses your documentation stack. Generate a cinematic HD walkthrough, a formatted SOP document, and a raw screen recording simultaneously — from a single browser capture." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://studiobase.app/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type"        content="website" />
+  <meta property="og:url"         content="https://studiobase.app/" />
+  <meta property="og:title"       content="StudioBase — One capture. Three pixel-perfect formats." />
+  <meta property="og:description" content="Generate a cinematic HD walkthrough, a formatted SOP document, and a raw screen recording simultaneously — from a single browser capture. SOP + recording sharing always free." />
+  <meta property="og:image"       content="https://studiobase.app/og-image.png" />
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card"        content="summary_large_image" />
+  <meta name="twitter:title"       content="StudioBase — Zero per-seat fees." />
+  <meta name="twitter:description" content="Capture once. Ship a cinematic video, SOP doc, and raw recording. SOP + recording sharing always free." />
+  <meta name="twitter:image"       content="https://studiobase.app/og-image.png" />
+
+  <!-- Favicon -->
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+  <!-- Preconnect -->
+  <link rel="preconnect" href="https://unpkg.com" />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="/landing-styles.css" />
+
+  <!-- React + Babel (CDN — appropriate for a static landing page) -->
+  <script
+    src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
+    crossorigin="anonymous"
+    defer
+  ></script>
+  <script
+    src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
+    crossorigin="anonymous"
+    defer
+  ></script>
+  <script
+    src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"
+    crossorigin="anonymous"
+    defer
+  ></script>
+
+  <!-- Theme colour for mobile browser chrome -->
+  <meta name="theme-color" content="#0a0a0a" />
+</head>
+<body>
+  <!-- Ambient background texture (fixed, z-index 0) -->
+  <div class="ambient" aria-hidden="true"></div>
+
+  <!-- React root -->
+  <div id="root"></div>
+
+  <!-- Icons must load before app.jsx -->
+  <script type="text/babel" src="/landing-icons.jsx" defer></script>
+  <script type="text/babel" src="/landing-app.jsx" defer></script>
+</body>
+</html>

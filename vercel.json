@@ -3,6 +3,11 @@
   "outputDirectory": "studio/dist",
   "framework": null,
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/",                         "destination": "/home.html" },
+    { "source": "/s/:token",                 "destination": "/index.html" },
+    { "source": "/sessions/:path*",          "destination": "/index.html" },
+    { "source": "/app:path*",                "destination": "/index.html" },
+    { "source": "/(landing-styles.css|landing-app.jsx|landing-icons.jsx|home.html|favicon.svg|og-image.png)", "destination": "/$1" },
+    { "source": "/(.*)",                     "destination": "/index.html" }
   ]
 }
