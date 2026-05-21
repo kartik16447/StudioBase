@@ -27,8 +27,8 @@ auditLogs.get('/export', async (c) => {
   // Fetch logs for the date range
   const { results } = await c.env.DB.prepare(
     `SELECT * FROM audit_logs
-     WHERE workspaceId = ? AND createdAt >= ? AND createdAt <= ?
-     ORDER BY createdAt ASC`
+     WHERE workspaceId = ? AND timestamp >= ? AND timestamp <= ?
+     ORDER BY timestamp ASC`
   ).bind(ws.id, from, to).all<any>();
 
   // Serialize as JSONL
