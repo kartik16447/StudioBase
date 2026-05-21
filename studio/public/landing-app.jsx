@@ -52,14 +52,36 @@ function Nav({ onWaitlist }) {
 function CTARow({ id = "cta", label = "Join Batch 1 Waitlist" }) {
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    if (!email) return;
-    // TODO: wire to /v1/waitlist endpoint
-    setSubmitted(true);
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/v1/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed, source: id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Something went wrong — please try again.");
+        return;
+      }
+      setSubmitted(true);
+    } catch {
+      setError("Network error — please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -76,8 +98,8 @@ function CTARow({ id = "cta", label = "Join Batch 1 Waitlist" }) {
             onChange={(e) => setEmail(e.target.value)}
             aria-label="Work email address"
           />
-          <button className="btn btn-primary btn-lg" type="submit">
-            {label} <ArrowRight size={16} />
+          <button className="btn btn-primary btn-lg" type="submit" disabled={loading} aria-busy={loading}>
+            {loading ? "Joining…" : <>{label} <ArrowRight size={16} /></>}
           </button>
         </>
       ) : (

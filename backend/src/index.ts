@@ -24,6 +24,7 @@ import analyticsRoutes from './routes/v1/analytics';
 import billingRoutes from './routes/v1/billing';
 import { publicRoutes } from './routes/v1/public';
 import stepRoutes from './routes/v1/steps';
+import waitlistRoutes from './routes/v1/waitlist';
 
 import { handleScheduled } from './handlers/scheduled';
 import { handleQueue } from './handlers/queue';
@@ -54,6 +55,7 @@ v1.route('/notifications', notifications);
 v1.route('/analytics', analyticsRoutes);
 v1.route('/billing', billingRoutes);
 v1.route('/public', publicRoutes);
+v1.route('/waitlist', waitlistRoutes);
 
 // Maintenance & Recovery (Governance hardened)
 v1.get('/maintenance/recovery', authMiddleware(), async (c) => {
