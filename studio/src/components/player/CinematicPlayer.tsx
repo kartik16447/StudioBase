@@ -890,19 +890,37 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // Binds the audio element's source to the master compiled track.
   // This ONLY runs when masterAudioUrl changes, preventing thrashing.
   useEffect(() => {
-    if (audioRef.current) {
-      if (masterAudioUrl) {
-        audioRef.current.src = masterAudioUrl;
-        audioRef.current.load(); // Force the browser to decode the new Blob
-      } else {
-        audioRef.current.pause();
-        audioRef.current.removeAttribute('src'); // Cleanly reset without triggering MediaError
-        try {
-          audioRef.current.load(); // Re-initialize the media element's empty state
-        } catch (_) {}
-      }
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (masterAudioUrl) {
+      console.log("[CinematicPlayer] Setting new master source:", masterAudioUrl);
+      audio.src = masterAudioUrl;
+      audio.load();
+    } else {
+      audio.pause();
+      audio.removeAttribute('src'); // Cleanly reset without triggering MediaError
+      try {
+        audio.load(); // Re-initialize the media element's empty state
+      } catch (_) {}
     }
+
+    // THE STABILITY FIX: 
+    // Do NOT revoke the object URL here in the cleanup. 
+    // We will revoke it in a separate effect that tracks 
+    // when the component ACTUALLY unmounts.
   }, [masterAudioUrl]);
+
+  // SEPARATE CLEANUP EFFECT
+  useEffect(() => {
+    return () => {
+      // Only revoke if the component is being removed from the DOM
+      if (masterAudioUrl && masterAudioUrl.startsWith('blob:')) {
+        console.log("[CinematicPlayer] Component unmounting, revoking blob.");
+        URL.revokeObjectURL(masterAudioUrl);
+      }
+    };
+  }, [masterAudioUrl]); // Keep this dependency to track the current URL
 
   // ── Voiceover — play/pause ──────────────────────────────────────────────────
   // Listens strictly to playback controls and masterAudioUrl, avoiding store updates.
