@@ -9,10 +9,19 @@
 export const DEFAULT_STEP_MS = 5000; // fallback when voiceoverDurationMs absent
 export const MIN_STEP_MS     = 1000; // never shorter than 1 s
 
+export const MIN_PLAYBACK_RATES: Record<string, number> = {
+  navigate: 0.6,
+  type: 0.75,
+  click: 0.85,
+  camera_pan: 0.5,
+  default: 0.7
+};
+
 export interface TimelineStep {
   id: string;
   voiceoverDurationMs?: number | null;
   timestamp?: number | null;
+  action?: string | null;
 }
 
 export interface StepSegment {
@@ -28,6 +37,7 @@ export interface TrackClip {
   logicalDurationMs: number;
   sourceStartMs: number; // Raw video timestamp (for video track) or 0
   type: 'action' | 'hold';
+  playbackRate?: number;
 }
 
 export interface Timeline {
@@ -37,7 +47,7 @@ export interface Timeline {
   audioTrack: { clips: TrackClip[] };
 }
 
-/** Build a Timeline from an array of steps using the Boundary Lock Rule. */
+/** Build a Timeline from an array of steps using the Adaptive Hybrid (Stretch + Hold) Compiler. */
 export function buildTimeline(
   steps: TimelineStep[],
   useVideoTimestamps = false,
@@ -56,19 +66,18 @@ export function buildTimeline(
 
   for (let i = 0; i < steps.length; i++) {
     const rawAudio = steps[i].voiceoverDurationMs;
-    // For slideshow mode, we must enforce a duration even if no audio exists.
-    // For hybrid mode, if there's no audio, audioDuration is 0.
+    // Remove MIN_STEP_MS clamp for audioDuration and visualDuration
     const audioDuration = rawAudio != null && rawAudio > 0
-      ? Math.max(MIN_STEP_MS, rawAudio)
-      : (useVideoTimestamps ? 0 : DEFAULT_STEP_MS); 
+      ? rawAudio
+      : (useVideoTimestamps ? 0 : DEFAULT_STEP_MS);
 
-    let visualDuration = 0;
+    let visualDuration: number;
     const startSourceMs = useVideoTimestamps ? (i === 0 ? 0 : getRelativeMs(steps[i])) : 0;
 
     if (useVideoTimestamps) {
       if (i < steps.length - 1) {
         const nextSourceMs = getRelativeMs(steps[i + 1]);
-        visualDuration = Math.max(MIN_STEP_MS, nextSourceMs - startSourceMs);
+        visualDuration = Math.max(0, nextSourceMs - startSourceMs);
       } else {
         // Last step: typically extends to match audio or default
         visualDuration = audioDuration > 0 ? audioDuration : DEFAULT_STEP_MS;
@@ -78,8 +87,34 @@ export function buildTimeline(
       visualDuration = audioDuration;
     }
 
-    // Boundary Lock Rule
-    const resolvedDuration = Math.max(visualDuration, audioDuration);
+    // Adaptive Hybrid Stretch + Hold Calculation
+    let resolvedDuration = Math.max(visualDuration, audioDuration);
+    let playbackRate = 1.0;
+    let actionClipDuration = visualDuration;
+    let holdClipDuration = 0;
+
+    if (useVideoTimestamps && visualDuration > 0 && audioDuration > visualDuration) {
+      const actionType = steps[i].action || 'default';
+      const minPlaybackRate = MIN_PLAYBACK_RATES[actionType] ?? MIN_PLAYBACK_RATES.default;
+      const maxStretchedVisualMs = visualDuration / minPlaybackRate;
+
+      if (audioDuration <= maxStretchedVisualMs) {
+        // Audio fits within the safe stretch limit
+        playbackRate = visualDuration / audioDuration;
+        actionClipDuration = audioDuration;
+        holdClipDuration = 0;
+        resolvedDuration = audioDuration;
+      } else {
+        // Audio overflows max stretch limit; stretch to max, hold the rest
+        playbackRate = minPlaybackRate;
+        actionClipDuration = maxStretchedVisualMs;
+        holdClipDuration = audioDuration - maxStretchedVisualMs;
+        resolvedDuration = audioDuration;
+      }
+    } else if (visualDuration <= 0) {
+      actionClipDuration = 0;
+      holdClipDuration = resolvedDuration;
+    }
 
     // 1. Audio Track
     if (audioDuration > 0) {
@@ -92,29 +127,24 @@ export function buildTimeline(
       });
     }
 
-    // 2. Video Track (The Magic)
-    if (visualDuration >= audioDuration) {
+    // 2. Video Track
+    if (actionClipDuration > 0) {
       videoTrack.clips.push({
         stepIndex: i,
         logicalStartMs: cursor,
-        logicalDurationMs: visualDuration, // == resolvedDuration
+        logicalDurationMs: actionClipDuration,
         sourceStartMs: startSourceMs,
         type: 'action',
+        playbackRate,
       });
-    } else {
-      // Audio > Visual: Inject Action + Hold
+    }
+
+    if (holdClipDuration > 0) {
       videoTrack.clips.push({
         stepIndex: i,
-        logicalStartMs: cursor,
-        logicalDurationMs: visualDuration,
-        sourceStartMs: startSourceMs,
-        type: 'action',
-      });
-      videoTrack.clips.push({
-        stepIndex: i,
-        logicalStartMs: cursor + visualDuration,
-        logicalDurationMs: audioDuration - visualDuration,
-        sourceStartMs: startSourceMs + visualDuration, // Hold at the end of the visual clip
+        logicalStartMs: cursor + actionClipDuration,
+        logicalDurationMs: holdClipDuration,
+        sourceStartMs: Math.max(0, startSourceMs + visualDuration - 1), // 1ms safety buffer to avoid bleed
         type: 'hold',
       });
     }

@@ -273,7 +273,7 @@ export async function handleSOPVideoExport(config: {
         if (vClip) {
           let targetSourceMs = vClip.sourceStartMs;
           if (vClip.type === 'action') {
-            targetSourceMs += (logicalCurrentMs - vClip.logicalStartMs);
+            targetSourceMs += (logicalCurrentMs - vClip.logicalStartMs) * (vClip.playbackRate ?? 1.0);
           }
           
           const safeMs = Math.max(absLastLoggedMs + 1, Math.floor(targetSourceMs));

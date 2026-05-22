@@ -23,7 +23,7 @@
 
 import React, {
   forwardRef, useCallback, useEffect, useImperativeHandle,
-  useMemo, useRef, useState,
+  useMemo, useRef, useState, useLayoutEffect,
 } from 'react';
 import { useSpring, motion, AnimatePresence } from 'framer-motion';
 import { I } from '../icons';
@@ -98,20 +98,21 @@ const fmtTime = (ms: number) => {
 // ─── TimelineScrubber ─────────────────────────────────────────────────────────
 
 interface ScrubberProps {
-  currentMs:       number;
+  currentMsRef:    React.RefObject<number>;
   totalMs:         number;
   segments:        StepSegment[];
   chapterMarkers:  ChapterMarker[];
   steps:           PlayerStep[];
   assets:          Record<string, string>;
   progressBarRef:  React.RefObject<HTMLDivElement | null>;
+  playheadThumbRef: React.RefObject<HTMLDivElement | null>;
   onScrub:         (ms: number) => void;
   onStepSelect?:   (stepIndex: number) => void;
 }
 
 const TimelineScrubber: React.FC<ScrubberProps> = ({
-  currentMs, totalMs, segments, chapterMarkers, steps, assets,
-  progressBarRef, onScrub, onStepSelect,
+  currentMsRef, totalMs, segments, chapterMarkers, steps, assets,
+  progressBarRef, playheadThumbRef, onScrub, onStepSelect,
 }) => {
   const barRef       = useRef<HTMLDivElement>(null);
   const isDragging   = useRef(false);
@@ -141,7 +142,16 @@ const TimelineScrubber: React.FC<ScrubberProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onScrub]);
 
-  const fillPct  = totalMs > 0 ? (currentMs / totalMs) * 100 : 0;
+  useLayoutEffect(() => {
+    const curMs = currentMsRef.current;
+    const fillPct = totalMs > 0 ? (curMs / totalMs) * 100 : 0;
+    if (progressBarRef.current) {
+      progressBarRef.current.style.width = `${fillPct}%`;
+    }
+    if (playheadThumbRef.current) {
+      playheadThumbRef.current.style.left = `${fillPct}%`;
+    }
+  });
 
   // Hover thumbnail
   const hoverStep = hoverMs != null ? getSegmentAt(hoverMs, segments) : null;
@@ -198,13 +208,14 @@ const TimelineScrubber: React.FC<ScrubberProps> = ({
         <div
           ref={progressBarRef}
           className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 pointer-events-none"
-          style={{ width: `${fillPct}%`, transition: 'none' }}
+          style={{ width: '0%', transition: 'none' }}
         />
 
         {/* Playhead thumb */}
         <div
+          ref={playheadThumbRef}
           className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-          style={{ left: `${fillPct}%`, transform: 'translateX(-50%) translateY(-50%)' }}
+          style={{ left: '0%', transform: 'translateX(-50%) translateY(-50%)' }}
         />
 
         {/* Step boundary ticks */}
@@ -290,6 +301,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const canvasRef          = useRef<HTMLCanvasElement>(null);
   const videoRef           = useRef<HTMLVideoElement>(null);
   const progressBarRef     = useRef<HTMLDivElement>(null);
+  const playheadThumbRef   = useRef<HTMLDivElement>(null);
+  const timeDisplayRef     = useRef<HTMLSpanElement>(null);
   // Audio — voiceover per step.  Single element, src-swapped on step change.
   const audioRef           = useRef<HTMLAudioElement>(new Audio());
 
@@ -331,6 +344,14 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // Ref-shadow for onStepSelect so we can call it from rAF without stale closure
   const onStepSelectRef = useRef(onStepSelect);
   useEffect(() => { onStepSelectRef.current = onStepSelect; }, [onStepSelect]);
+
+  useLayoutEffect(() => {
+    const totMs = totalMs;
+    const curMs = currentMsRef.current;
+    if (timeDisplayRef.current && totMs > 0) {
+      timeDisplayRef.current.textContent = `${fmtTime(curMs)} / ${fmtTime(totMs)}`;
+    }
+  }, [totalMs]);
 
   // Deletion/Rename self-healing effect
   useEffect(() => {
@@ -443,6 +464,13 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           progressBarRef.current.style.width =
             `${Math.min(100, (currentMsRef.current / totMs) * 100)}%`;
         }
+        if (playheadThumbRef.current && totMs > 0) {
+          playheadThumbRef.current.style.left =
+            `${Math.min(100, (currentMsRef.current / totMs) * 100)}%`;
+        }
+        if (timeDisplayRef.current && totMs > 0) {
+          timeDisplayRef.current.textContent = `${fmtTime(currentMsRef.current)} / ${fmtTime(totMs)}`;
+        }
 
         // Media Latching & Sync (The Magic)
         if (hasVideo && video && timelineRef.current.videoTrack) {
@@ -468,7 +496,12 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
               if (video.paused && !showChapterCardRef.current) {
                 video.play().catch(() => {});
               }
-              const targetSec = (vClip.sourceStartMs + (ms - vClip.logicalStartMs)) / 1000;
+              const clipRate = vClip.playbackRate ?? 1.0;
+              const expectedRate = clipRate * speedRef.current;
+              if (Math.abs(video.playbackRate - expectedRate) > 0.05) {
+                video.playbackRate = expectedRate;
+              }
+              const targetSec = (vClip.sourceStartMs + (ms - vClip.logicalStartMs) * clipRate) / 1000;
               if (Math.abs(video.currentTime - targetSec) > 0.25) {
                 video.currentTime = targetSec; // soft sync
               }
@@ -768,30 +801,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     return () => { if (controlsTimer.current) clearTimeout(controlsTimer.current); };
   }, [isPlaying, showControlsTemporarily]);
 
-  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Only respond when this player area is in focus context
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return;
-      if (e.key === ' ' || e.key === 'k') {
-        e.preventDefault();
-        handleTogglePlay();
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        scrubBy(-5000);
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        scrubBy(5000);
-      } else if (e.key === 'f' || e.key === 'F') {
-        toggleFullscreen();
-      } else if (e.key === 'm' || e.key === 'M') {
-        setIsMuted(m => !m);
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
 
   // ── Controls ───────────────────────────────────────────────────────────────
   const handleTogglePlay = useCallback(() => {
@@ -833,9 +843,22 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       setCurrentIndex(newIdx);
     }
 
-    // Seek video if hybrid
-    if (videoRef.current && videoUrlRef.current) {
-      videoRef.current.currentTime = clamped / 1000;
+    // Seek video if hybrid, using playbackRate mapping from compiled timeline
+    if (videoRef.current && videoUrlRef.current && timelineRef.current.videoTrack) {
+      const clips = timelineRef.current.videoTrack.clips;
+      let vClip = clips[0];
+      for (let i = 0; i < clips.length; i++) {
+        if (clamped >= clips[i].logicalStartMs) vClip = clips[i];
+        else break;
+      }
+      if (vClip) {
+        let targetSec = vClip.sourceStartMs / 1000;
+        if (vClip.type === 'action') {
+          const clipRate = vClip.playbackRate ?? 1.0;
+          targetSec = (vClip.sourceStartMs + (clamped - vClip.logicalStartMs) * clipRate) / 1000;
+        }
+        videoRef.current.currentTime = targetSec;
+      }
     }
 
     // Update progress bar immediately
@@ -843,11 +866,42 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       progressBarRef.current.style.width =
         `${Math.min(100, (clamped / totalMsRef.current) * 100)}%`;
     }
+    if (playheadThumbRef.current && totalMsRef.current > 0) {
+      playheadThumbRef.current.style.left =
+        `${Math.min(100, (clamped / totalMsRef.current) * 100)}%`;
+    }
+    if (timeDisplayRef.current && totalMsRef.current > 0) {
+      timeDisplayRef.current.textContent = `${fmtTime(clamped)} / ${fmtTime(totalMsRef.current)}`;
+    }
   }, []);
 
   const scrubBy = useCallback((deltaMs: number) => {
     scrubTo(currentMsRef.current + deltaMs);
   }, [scrubTo]);
+
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Only respond when this player area is in focus context
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (e.key === ' ' || e.key === 'k') {
+        e.preventDefault();
+        handleTogglePlay();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        scrubBy(-5000);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        scrubBy(5000);
+      } else if (e.key === 'f' || e.key === 'F') {
+        toggleFullscreen();
+      } else if (e.key === 'm' || e.key === 'M') {
+        setIsMuted(m => !m);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [handleTogglePlay, scrubBy, toggleFullscreen]);
 
   // Expose imperative handle so parents (TranscriptPanel, edit UI) can seek without prop drilling
   useImperativeHandle(ref, () => ({
@@ -1017,13 +1071,14 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             >
               {/* Timeline scrubber */}
               <TimelineScrubber
-                currentMs={currentMsRef.current}
+                currentMsRef={currentMsRef}
                 totalMs={totalMs}
                 segments={segments}
                 chapterMarkers={chapterMarkers}
                 steps={steps}
                 assets={assets}
                 progressBarRef={progressBarRef}
+                playheadThumbRef={playheadThumbRef}
                 onScrub={scrubTo}
                 onStepSelect={onStepSelect}
               />
@@ -1062,8 +1117,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 </button>
 
                 {/* Time display */}
-                <span className="text-[11px] text-white/35 tabular-nums ml-1 font-mono select-none">
-                  {fmtTime(currentMsRef.current)} / {fmtTime(totalMs)}
+                <span ref={timeDisplayRef} className="text-[11px] text-white/35 tabular-nums ml-1 font-mono select-none">
+                  {fmtTime(0)} / {fmtTime(totalMs)}
                 </span>
 
                 <div className="flex-1" />
