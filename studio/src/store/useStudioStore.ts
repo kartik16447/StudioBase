@@ -237,8 +237,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       };
 
       if (data.sessionJsonUrl) {
-        console.log('[fetchSession] Fetching full JSON from R2:', data.sessionJsonUrl);
-        const jsonContent = await apiClient.get<any>(data.sessionJsonUrl);
+        // Append a cache-buster so CDN/R2 always returns the latest JSON after
+        // pipeline processing writes a new version to the same key.
+        const cacheBust = `?t=${Date.now()}`;
+        const freshUrl = data.sessionJsonUrl.includes('?')
+          ? `${data.sessionJsonUrl}&_cb=${Date.now()}`
+          : `${data.sessionJsonUrl}${cacheBust}`;
+        console.log('[fetchSession] Fetching full JSON from R2 (cache-busted):', freshUrl);
+        const jsonContent = await apiClient.get<any>(freshUrl);
         if (jsonContent) {
           // ── Preserve D1 stepOverrides before R2 spread ───────────────────
           // D1 metadata arrives as a JSON string here — parse it first so we
@@ -502,6 +508,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       if (data.sopStatus) {
         set({ sopStatus: data.sopStatus as 'draft' | 'review' | 'published' });
       }
+
+
 
       if (status === 'processing') {
         set({ isAiProcessing: true });

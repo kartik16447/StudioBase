@@ -277,15 +277,17 @@ export const AudioPanel: React.FC = () => {
   const [globalVoice, setGlobalVoice] = useState(ELEVENLABS_VOICES[0].id);
   const [hasInitializedVoice, setHasInitializedVoice] = useState(false);
 
+  // Auto-initialize globalVoice from the first step that already has a swapVoiceId,
+  // but only once — never overwrite a voice the user explicitly selected.
+  const firstSwapVoiceId = stepStatuses.find(s => s.swapVoiceId)?.swapVoiceId ?? null;
   useEffect(() => {
-    if (stepStatuses.length > 0 && !hasInitializedVoice) {
-      const firstWithVoice = stepStatuses.find(s => s.swapVoiceId);
-      if (firstWithVoice?.swapVoiceId) {
-        setGlobalVoice(firstWithVoice.swapVoiceId);
-        setHasInitializedVoice(true);
-      }
+    if (firstSwapVoiceId && !hasInitializedVoice) {
+      setGlobalVoice(firstSwapVoiceId);
+      setHasInitializedVoice(true);
     }
-  }, [stepStatuses, hasInitializedVoice]);
+  // Depend on the stable string primitive, not the object-array reference
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstSwapVoiceId]);
 
   // ── Helpers ──
   const steps = session?.steps ?? [];
@@ -431,7 +433,7 @@ export const AudioPanel: React.FC = () => {
           </label>
           <select
             value={globalVoice}
-            onChange={(e) => setGlobalVoice(e.target.value)}
+            onChange={(e) => { setGlobalVoice(e.target.value); setHasInitializedVoice(true); }}
             disabled={activelyGenerating}
             className="w-full bg-surface-3 border border-border rounded-md px-2.5 py-1.5 text-[11px] text-text font-medium focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
           >
