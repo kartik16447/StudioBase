@@ -29,12 +29,15 @@ export class AudioProcessor {
 
   async process(job: AudioTTSJob) {
     const { sessionId, stepId, text, userId, workspaceId, language, voiceId, jobId } = job;
-    const r2Key = `audio/sessions/${sessionId}/steps/${stepId}/tts-v1.wav`;
+    // Include voiceId in the key so each voice generates a distinct file.
+    // This ensures the browser never serves a cached blob for the wrong voice.
+    const effectiveVoiceId = voiceId || '21m00Tcm4TlvDq8ikWAM'; // default = Rachel
+    const r2Key = `audio/sessions/${sessionId}/steps/${stepId}/tts-${effectiveVoiceId}.mp3`;
 
-    console.log(`[AUDIO] TTS start — session:${sessionId} step:${stepId} voiceId:${voiceId} jobId:${jobId}`);
+    console.log(`[AUDIO] TTS start — session:${sessionId} step:${stepId} voiceId:${effectiveVoiceId} jobId:${jobId}`);
 
     const audioService = getAudioService(this.env);
-    const result = await audioService.generateFromText(text, { language, voiceId });
+    const result = await audioService.generateFromText(text, { language, voiceId: effectiveVoiceId });
 
     await this.env.R2.put(r2Key, result.buffer, {
       httpMetadata: { contentType: result.mimeType },
@@ -53,7 +56,7 @@ export class AudioProcessor {
         jobId                 = NULL,
         jobStartedAt          = NULL,
         updatedAt             = excluded.updatedAt
-    `).bind(stepId, sessionId, userId, r2Key, r2Key, result.durationMs, voiceId || null, now, now).run();
+    `).bind(stepId, sessionId, userId, r2Key, r2Key, result.durationMs, effectiveVoiceId, now, now).run();
 
     await writeAuditLog(this.env, {
       actorId: userId,
