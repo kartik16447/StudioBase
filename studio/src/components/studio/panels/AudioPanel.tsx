@@ -336,11 +336,11 @@ export const AudioPanel: React.FC = () => {
           for (const step of updatedSteps) {
             if (step.voiceoverKey) {
               const t = (step as any).updatedAt || Date.now();
-              updatedAssets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`) + `?t=${t}`;
+              updatedAssets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}?t=${t}`);
             }
             if ((step as any).originalVoiceoverKey) {
               const t = (step as any).updatedAt || Date.now();
-              updatedAssets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}`) + `?t=${t}`;
+              updatedAssets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}?t=${t}`);
             }
           }
           useStudioStore.setState({

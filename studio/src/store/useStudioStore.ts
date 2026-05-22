@@ -456,15 +456,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         }
         if (step.voiceoverKey) {
           const t = (step as any).updatedAt || Date.now();
-          assets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`) + `?t=${t}`;
+          assets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}?t=${t}`);
         }
         if ((step as any).originalVoiceoverKey) {
           const t = (step as any).updatedAt || Date.now();
-          assets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}`) + `?t=${t}`;
+          assets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}?t=${t}`);
         }
         if ((step as any).syntheticVoiceoverKey) {
           const t = (step as any).updatedAt || Date.now();
-          assets[(step as any).syntheticVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).syntheticVoiceoverKey}`) + `?t=${t}`;
+          assets[(step as any).syntheticVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).syntheticVoiceoverKey}?t=${t}`);
         }
       }
       sessionData.assets = assets;
@@ -748,7 +748,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       set({ audioPollingStepId: null });
       if (result.voiceoverKey) {
         const t = result.updatedAt || Date.now();
-        const url = apiClient.getUrl(`/assets/${result.voiceoverKey}`) + `?t=${t}`;
+        const url = apiClient.getUrl(`/assets/${result.voiceoverKey}?t=${t}`);
         const sess = get().session;
         if (sess) {
           set({ session: { ...sess, assets: { ...sess.assets, [result.voiceoverKey]: url } } });
