@@ -65,9 +65,9 @@ export class ElevenLabsAdapter implements IAudioService {
       }
 
       console.log(`[ElevenLabsAdapter] Step 1: Transcribing input audio buffer using Whisper...`);
-      const audioBytes = new Uint8Array(audioBuffer);
+      const base64Audio = Buffer.from(audioBuffer).toString('base64');
       const transcription = await (this.env.AI.run as any)('@cf/openai/whisper-large-v3-turbo', {
-        audio: Array.from(audioBytes),
+        audio: base64Audio,
       }) as { text: string };
 
       const text = transcription?.text;
@@ -80,7 +80,12 @@ export class ElevenLabsAdapter implements IAudioService {
       try {
         const ttsResponse = await (this.env.AI.run as any)(
           '@cf/deepgram/aura-1',
-          { text, speaker },
+          { 
+            text, 
+            speaker,
+            encoding: 'mp3',
+            container: 'none'
+          },
           { returnRawResponse: true }
         ) as Response;
 

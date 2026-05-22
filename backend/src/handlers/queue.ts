@@ -44,8 +44,13 @@ export async function handleQueue(batch: MessageBatch, env: Env, ctx: ExecutionC
                 ).bind(now, body.stepId, body.sessionId)
               : env.DB.prepare(
                   `UPDATE step_audio SET
-                    voiceoverKey = originalVoiceoverKey,
-                    voiceoverSource = CASE WHEN originalVoiceoverKey LIKE '%tts%' THEN 'tts' ELSE 'original' END,
+                    voiceoverKey = COALESCE(originalVoiceoverKey, voiceoverKey),
+                    voiceoverSource = CASE 
+                      WHEN originalVoiceoverKey IS NOT NULL THEN (CASE WHEN originalVoiceoverKey LIKE '%tts%' THEN 'tts' ELSE 'original' END)
+                      ELSE 'original'
+                    END,
+                    originalVoiceoverKey = NULL,
+                    swapVoiceId = NULL,
                     jobId = NULL,
                     jobStartedAt = NULL,
                     updatedAt = ?

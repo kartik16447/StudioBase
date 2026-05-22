@@ -379,6 +379,7 @@ steps.post('/:sessionId/steps/:stepId/swap-voice',
         c.env.DB.prepare(`
           UPDATE step_audio SET
             voiceoverSource = 'generating',
+            originalVoiceoverKey = COALESCE(originalVoiceoverKey, voiceoverKey),
             jobId           = ?,
             jobStartedAt    = ?,
             updatedAt       = ?

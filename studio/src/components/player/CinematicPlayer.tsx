@@ -651,17 +651,19 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     if (videoRef.current) videoRef.current.muted = isMuted;
   }, [isMuted]);
 
-  // ── Voiceover — step change ────────────────────────────────────────────────
-  // Fires on every step change (natural advance or seek).
+  const activeVoiceoverKey = steps[currentIndex]?.voiceoverKey;
+  const activeAudioUrl = activeVoiceoverKey ? (assets[activeVoiceoverKey] ?? '') : '';
+
+  // ── Voiceover — step change or audio URL update ────────────────────────────
+  // Fires on step change or when the active step's audio URL is resolved/swapped.
   // assets map must contain resolved URLs for any voiceoverKey values.
   useEffect(() => {
-    const step  = steps[currentIndex];
     const audio = audioRef.current;
-    audio.pause();
-    if (step?.voiceoverKey) {
-      const url = assets[step.voiceoverKey] ?? '';
-      if (url) {
-        if (audio.src !== url) { audio.src = url; }
+    
+    if (activeAudioUrl) {
+      if (audio.src !== activeAudioUrl) {
+        audio.pause();
+        audio.src = activeAudioUrl;
         audio.currentTime = 0;
         audio.playbackRate = speed;
         if (isPlaying && !isTransitioningRef.current) {
@@ -669,10 +671,10 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         }
       }
     } else {
+      audio.pause();
       audio.src = '';
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex]); // step change drives audio; play/pause handled separately below
+  }, [currentIndex, activeAudioUrl]); // activeAudioUrl dependency catches voice swaps and generations
 
   // ── Voiceover — play/pause ────────────────────────────────────────────────
   useEffect(() => {
