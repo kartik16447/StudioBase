@@ -306,6 +306,36 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const timeDisplayRef     = useRef<HTMLSpanElement>(null);
   // Audio — voiceover per step.  Single element, src-swapped on step change.
   const audioRef           = useRef<HTMLAudioElement>(new Audio());
+  const isPlayPendingRef   = useRef(false);
+
+  const safePlayAudio = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio.src || audio.src === window.location.href) return;
+    if (isPlayPendingRef.current) return;
+    
+    if (audio.paused) {
+      isPlayPendingRef.current = true;
+      audio.play()
+        .then(() => {
+          isPlayPendingRef.current = false;
+        })
+        .catch((err) => {
+          isPlayPendingRef.current = false;
+          if (err.name !== 'AbortError') {
+            console.error('[CinematicPlayer] safePlayAudio failed:', err);
+          }
+        });
+    }
+  }, []);
+
+  const safePauseAudio = useCallback(() => {
+    const audio = audioRef.current;
+    isPlayPendingRef.current = false;
+    if (!audio.paused) {
+      audio.pause();
+    }
+  }, []);
+
 
   // Rendering state
   const slideImageRef     = useRef<HTMLImageElement | null>(null);
@@ -424,7 +454,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           if (step?.voiceoverKey) {
             const url = assetsRef.current[step.voiceoverKey] ?? '';
             if (url) {
-              audioRef.current.play().catch(() => {});
+              safePlayAudio();
             }
           }
         }
@@ -584,9 +614,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             }
             // Ensure audio play state matches player state
             if (isPlayingRef.current && audio.paused) {
-              audio.play().catch(() => {});
+              safePlayAudio();
             } else if (!isPlayingRef.current && !audio.paused) {
-              audio.pause();
+              safePauseAudio();
             }
           }
         }
@@ -604,7 +634,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
           // Pause backing media immediately during overlay
           if (videoRef.current) videoRef.current.pause();
-          audioRef.current.pause();
+          safePauseAudio();
 
           // Advance indices so the next step's visual screen loads behind the card immediately
           currentIdxRef.current = newIdx;
@@ -785,42 +815,36 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
       if (audio.src !== resolvedActiveUrl) {
         console.log(`[CinematicPlayer][AudioSyncEffect] URL changed. old src: ${audio.src} -> new src: ${resolvedActiveUrl}`);
+        isPlayPendingRef.current = false;
         audio.pause();
         audio.src = resolvedActiveUrl;
         audio.load(); // Explicitly trigger load to avoid browser cache issues or state latching
         audio.currentTime = 0;
         audio.playbackRate = speed;
         if (isPlaying && !isTransitioningRef.current) {
-          console.log(`[CinematicPlayer][AudioSyncEffect] Player is playing, calling audio.play()`);
-          audio.play().catch((err) => {
-            console.error(`[CinematicPlayer][AudioSyncEffect] Play failed:`, err);
-          });
+          console.log(`[CinematicPlayer][AudioSyncEffect] Player is playing, calling safePlayAudio()`);
+          safePlayAudio();
         }
       } else {
         console.log(`[CinematicPlayer][AudioSyncEffect] URL is identical (${resolvedActiveUrl}), not reloading.`);
       }
     } else {
       console.log(`[CinematicPlayer][AudioSyncEffect] No active audio URL. Pausing and clearing src.`);
-      audio.pause();
-      audio.src = '';
+      safePauseAudio();
+      audio.removeAttribute('src');
       audio.load();
     }
-  }, [currentIndex, activeAudioUrl]); // activeAudioUrl dependency catches voice swaps and generations
+  }, [currentIndex, activeAudioUrl, isPlaying, speed, safePlayAudio, safePauseAudio]); // activeAudioUrl dependency catches voice swaps and generations
 
   // ── Voiceover — play/pause ────────────────────────────────────────────────
   useEffect(() => {
-    const audio = audioRef.current;
-    console.log(`[CinematicPlayer][AudioPlayPauseEffect] isPlaying: ${isPlaying} | showChapterCard: ${showChapterCard} | audio.src: ${audio.src}`);
+    console.log(`[CinematicPlayer][AudioPlayPauseEffect] isPlaying: ${isPlaying} | showChapterCard: ${showChapterCard} | audio.src: ${audioRef.current.src}`);
     if (isPlaying && !isTransitioningRef.current) {
-      if (audio.src && audio.src !== window.location.href) {
-        audio.play().catch((err) => {
-          console.error(`[CinematicPlayer][AudioPlayPauseEffect] play() failed:`, err);
-        });
-      }
+      safePlayAudio();
     } else {
-      audio.pause();
+      safePauseAudio();
     }
-  }, [isPlaying, showChapterCard]);
+  }, [isPlaying, showChapterCard, safePlayAudio, safePauseAudio]);
 
   // ── Play/Pause handling during chapter transition ──────────────────────────
   useEffect(() => {
@@ -843,10 +867,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             videoRef.current.play().catch(() => {});
           }
           if (audioRef.current.src && audioRef.current.src !== window.location.href) {
-            console.log(`[CinematicPlayer][ResumedChapterTransition] Calling audio.play() for src: ${audioRef.current.src}`);
-            audioRef.current.play().catch((err) => {
-              console.error(`[CinematicPlayer][ResumedChapterTransition] play() failed:`, err);
-            });
+            console.log(`[CinematicPlayer][ResumedChapterTransition] Calling safePlayAudio() for src: ${audioRef.current.src}`);
+            safePlayAudio();
           }
         }, 1500);
       }
