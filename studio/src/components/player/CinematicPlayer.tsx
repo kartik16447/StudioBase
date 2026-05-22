@@ -820,13 +820,13 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     }
 
     // Map the steps with voiceover to AudioTrackItem
-    const items: AudioTrackItem[] = [];
+    const trackItems: AudioTrackItem[] = [];
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
       if (step.voiceoverKey && assets[step.voiceoverKey]) {
         const seg = segments[i];
         if (seg) {
-          items.push({
+          trackItems.push({
             url: assets[step.voiceoverKey],
             startMs: seg.startMs,
             durationMs: step.voiceoverDurationMs || seg.durationMs,
@@ -836,28 +836,28 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     }
 
     // Generate unique representation to detect meaningful changes
-    const currentKey = JSON.stringify({ items, totalMs });
+    const currentKey = JSON.stringify({ items: trackItems, totalMs });
     if (currentKey === lastCompiledKeyRef.current) {
       return;
     }
 
-    console.log(`[CinematicPlayer] All voiceover assets resolved. Triggering master WAV compilation for ${items.length} segments. totalMs: ${totalMs}`);
+    console.log(`[CinematicPlayer] All voiceover assets resolved. Triggering master WAV compilation for ${trackItems.length} segments. totalMs: ${totalMs}`);
     lastCompiledKeyRef.current = currentKey;
     setCompilingAudio(true);
 
     let active = true;
-    compileAudioTrack(items, totalMs)
-      .then((url) => {
+    compileAudioTrack(trackItems, totalMs)
+      .then((blobUrl) => {
         if (!active) {
-          URL.revokeObjectURL(url);
+          URL.revokeObjectURL(blobUrl);
           return;
         }
-        setMasterAudioUrl(url);
+        setMasterAudioUrl(blobUrl);
         setCompilingAudio(false);
       })
       .catch((err) => {
         if (!active) return;
-        console.error('[CinematicPlayer] Master audio compilation failed:', err);
+        console.error("Compilation failed", err);
         setCompilingAudio(false);
       });
 
@@ -870,29 +870,14 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // Binds the audio element's source to the master compiled track.
   // This ONLY runs when masterAudioUrl changes, preventing thrashing.
   useEffect(() => {
-    const audio = audioRef.current;
-    console.log(`[CinematicPlayer][AudioSyncEffect] masterAudioUrl changed. old src: ${audio.src} -> new: ${masterAudioUrl}`);
-
-    if (masterAudioUrl) {
-      isPlayPendingRef.current = false;
-      audio.pause();
-      audio.src = masterAudioUrl;
-      audio.load();
-
-      // Sync playback times and properties
-      const targetSec = currentMsRef.current / 1000;
-      audio.currentTime = targetSec;
-      audio.playbackRate = speed;
-
-      if (isPlaying && !isTransitioningRef.current) {
-        console.log(`[CinematicPlayer][AudioSyncEffect] Player is playing, starting master track`);
-        safePlayAudio();
+    if (audioRef.current) {
+      if (masterAudioUrl) {
+        audioRef.current.src = masterAudioUrl;
+        audioRef.current.load(); // Force the browser to decode the new Blob
+      } else {
+        audioRef.current.pause();
+        audioRef.current.src = '';
       }
-    } else {
-      console.log(`[CinematicPlayer][AudioSyncEffect] No master track available. Clearing.`);
-      safePauseAudio();
-      audio.removeAttribute('src');
-      audio.load();
     }
   }, [masterAudioUrl]);
 
