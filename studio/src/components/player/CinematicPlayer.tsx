@@ -794,15 +794,30 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   // ── Master Audio Compilation Trigger ──────────────────────────────────────────
   const lastCompiledKeyRef = useRef<string>('');
+  const compilationIdRef = useRef<number>(0);
+  const isMountedRef = useRef<boolean>(true);
 
   useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    // Guard against transient empty/loading steps state
+    if (steps.length === 0) {
+      return;
+    }
+
     const voiceoverSteps = steps.filter(s => s.voiceoverKey);
     
     // If no steps need voiceover, clear masterAudioUrl
     if (voiceoverSteps.length === 0) {
-      if (masterAudioUrl) {
-        console.log('[CinematicPlayer] No voiceover steps. Revoking master audio URL:', masterAudioUrl);
-        URL.revokeObjectURL(masterAudioUrl);
+      const currentMasterUrl = useStudioStore.getState().masterAudioUrl;
+      if (currentMasterUrl) {
+        console.log('[CinematicPlayer] No voiceover steps. Revoking master audio URL:', currentMasterUrl);
+        URL.revokeObjectURL(currentMasterUrl);
         setMasterAudioUrl(null);
       }
       lastCompiledKeyRef.current = '';
@@ -845,25 +860,30 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     lastCompiledKeyRef.current = currentKey;
     setCompilingAudio(true);
 
-    let active = true;
+    const compId = ++compilationIdRef.current;
+
     compileAudioTrack(trackItems, totalMs)
       .then((blobUrl) => {
-        if (!active) {
+        if (!isMountedRef.current || compId !== compilationIdRef.current) {
           URL.revokeObjectURL(blobUrl);
           return;
         }
+
+        // Revoke the old master audio URL before setting the new one to prevent memory leaks
+        const oldUrl = useStudioStore.getState().masterAudioUrl;
+        if (oldUrl) {
+          console.log('[CinematicPlayer] Revoking old master audio URL:', oldUrl);
+          URL.revokeObjectURL(oldUrl);
+        }
+
         setMasterAudioUrl(blobUrl);
         setCompilingAudio(false);
       })
       .catch((err) => {
-        if (!active) return;
+        if (!isMountedRef.current || compId !== compilationIdRef.current) return;
         console.error("Compilation failed", err);
         setCompilingAudio(false);
       });
-
-    return () => {
-      active = false;
-    };
   }, [steps, assets, segments, totalMs, setMasterAudioUrl, setCompilingAudio]);
 
   // ── Master Audio Sync Effect ────────────────────────────────────────────────
@@ -879,16 +899,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         audioRef.current.src = '';
       }
     }
-  }, [masterAudioUrl]);
-
-  // ── Memory Cleanup ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    return () => {
-      if (masterAudioUrl) {
-        console.log('[CinematicPlayer] Cleanup: Revoking master audio object URL:', masterAudioUrl);
-        URL.revokeObjectURL(masterAudioUrl);
-      }
-    };
   }, [masterAudioUrl]);
 
   // ── Voiceover — play/pause ──────────────────────────────────────────────────

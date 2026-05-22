@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../../components/icons';
@@ -60,8 +60,8 @@ export const VideoCanvas: React.FC = () => {
   // Enrich the assets map with resolved voiceover URLs so CinematicPlayer can
   // play audio without knowing about apiClient.  Falls back gracefully if a key
   // is already in session.assets (e.g. public share page with pre-signed URLs).
-  // This runs on every render but is O(steps) and cheap.
-  const enrichedAssets = (() => {
+  // Memoized to prevent reference thrashing and unnecessary compilation effects.
+  const enrichedAssets = useMemo(() => {
     const base: Record<string, string> = { ...(session?.assets ?? {}) };
     for (const step of steps) {
       const key = (step as any).voiceoverKey as string | null | undefined;
@@ -71,7 +71,7 @@ export const VideoCanvas: React.FC = () => {
     }
 
     return base;
-  })();
+  }, [session?.assets, steps]);
 
   // ── Export trigger ───────────────────────────────────────────────────────
   useEffect(() => {
