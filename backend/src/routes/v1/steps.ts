@@ -434,7 +434,7 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
   await requireSession(c.env, sessionId, user.id);
 
   const row = await c.env.DB.prepare(
-    'SELECT voiceoverSource, voiceoverKey, voiceoverDurationMs, swapVoiceId, originalVoiceoverKey, jobId, jobStartedAt, userId FROM step_audio WHERE stepId = ? AND sessionId = ?'
+    'SELECT voiceoverSource, voiceoverKey, voiceoverDurationMs, swapVoiceId, originalVoiceoverKey, jobId, jobStartedAt, userId, updatedAt FROM step_audio WHERE stepId = ? AND sessionId = ?'
   ).bind(stepId, sessionId).first() as any;
 
   if (!row) {
@@ -444,6 +444,7 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
       voiceoverDurationMs: null,
       swapVoiceId: null,
       originalVoiceoverKey: null,
+      updatedAt: null,
     });
   }
 
@@ -492,6 +493,7 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
       voiceoverDurationMs: row.voiceoverDurationMs,
       swapVoiceId: null,
       originalVoiceoverKey: null,
+      updatedAt: now,
     });
   }
 
@@ -501,6 +503,7 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
     voiceoverDurationMs: row.voiceoverDurationMs,
     swapVoiceId: row.swapVoiceId,
     originalVoiceoverKey: row.originalVoiceoverKey,
+    updatedAt: row.updatedAt,
   });
 });
 
@@ -670,7 +673,7 @@ steps.get('/:sessionId/narration-status', async (c) => {
   await requireSession(c.env, sessionId, user.id);
 
   const { results } = await c.env.DB.prepare(
-    `SELECT stepId, voiceoverSource, voiceoverKey, voiceoverDurationMs, swapVoiceId, originalVoiceoverKey
+    `SELECT stepId, voiceoverSource, voiceoverKey, voiceoverDurationMs, swapVoiceId, originalVoiceoverKey, updatedAt
      FROM step_audio WHERE sessionId = ?`
   ).bind(sessionId).all<{
     stepId: string;
@@ -679,6 +682,7 @@ steps.get('/:sessionId/narration-status', async (c) => {
     voiceoverDurationMs: number | null;
     swapVoiceId: string | null;
     originalVoiceoverKey: string | null;
+    updatedAt: number | null;
   }>();
 
   return c.json({ steps: results });

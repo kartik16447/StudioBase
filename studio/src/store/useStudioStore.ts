@@ -437,6 +437,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             voiceoverSource:       audio.voiceoverSource       ?? null,
             voiceoverDurationMs:   audio.voiceoverDurationMs   ?? s.voiceoverDurationMs,
             swapVoiceId:           audio.swapVoiceId           ?? null,
+            updatedAt:             audio.updatedAt             ?? null,
           };
         });
       }
@@ -453,14 +454,17 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         if (step.screenshotKey && !assets[step.screenshotKey]) {
           assets[step.screenshotKey] = apiClient.getUrl(`/assets/${step.screenshotKey}`);
         }
-        if (step.voiceoverKey && !assets[step.voiceoverKey]) {
-          assets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`);
+        if (step.voiceoverKey) {
+          const t = (step as any).updatedAt || Date.now();
+          assets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`) + `?t=${t}`;
         }
-        if ((step as any).originalVoiceoverKey && !assets[(step as any).originalVoiceoverKey]) {
-          assets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}`);
+        if ((step as any).originalVoiceoverKey) {
+          const t = (step as any).updatedAt || Date.now();
+          assets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}`) + `?t=${t}`;
         }
-        if ((step as any).syntheticVoiceoverKey && !assets[(step as any).syntheticVoiceoverKey]) {
-          assets[(step as any).syntheticVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).syntheticVoiceoverKey}`);
+        if ((step as any).syntheticVoiceoverKey) {
+          const t = (step as any).updatedAt || Date.now();
+          assets[(step as any).syntheticVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).syntheticVoiceoverKey}`) + `?t=${t}`;
         }
       }
       sessionData.assets = assets;
@@ -737,12 +741,14 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       voiceoverSource: string | null;
       voiceoverKey: string | null;
       voiceoverDurationMs: number | null;
+      updatedAt: number | null;
     }>(`/sessions/${sessionId}/steps/${stepId}/audio-status`);
 
     if (result.voiceoverSource !== 'generating') {
       set({ audioPollingStepId: null });
       if (result.voiceoverKey) {
-        const url = apiClient.getUrl(`/assets/${result.voiceoverKey}`);
+        const t = result.updatedAt || Date.now();
+        const url = apiClient.getUrl(`/assets/${result.voiceoverKey}`) + `?t=${t}`;
         const sess = get().session;
         if (sess) {
           set({ session: { ...sess, assets: { ...sess.assets, [result.voiceoverKey]: url } } });
@@ -752,6 +758,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         voiceoverKey: result.voiceoverKey,
         voiceoverSource: result.voiceoverSource,
         voiceoverDurationMs: result.voiceoverDurationMs,
+        updatedAt: result.updatedAt,
       } as any);
     }
   },

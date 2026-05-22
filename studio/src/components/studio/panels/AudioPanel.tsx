@@ -17,6 +17,7 @@ interface StepAudioStatus {
   voiceoverDurationMs: number | null;
   swapVoiceId?: string | null;
   originalVoiceoverKey?: string | null;
+  updatedAt?: number | null;
 }
 
 const ELEVENLABS_VOICES = [
@@ -313,8 +314,9 @@ export const AudioPanel: React.FC = () => {
           const voiceoverSourceChanged = status.voiceoverSource !== (step as any).voiceoverSource;
           const durationChanged = status.voiceoverDurationMs !== step.voiceoverDurationMs;
           const originalKeyChanged = status.originalVoiceoverKey !== (step as any).originalVoiceoverKey;
+          const updatedAtChanged = status.updatedAt !== (step as any).updatedAt;
 
-          if (voiceoverKeyChanged || voiceoverSourceChanged || durationChanged || originalKeyChanged) {
+          if (voiceoverKeyChanged || voiceoverSourceChanged || durationChanged || originalKeyChanged || updatedAtChanged) {
             sessionChanged = true;
             return {
               ...step,
@@ -322,6 +324,7 @@ export const AudioPanel: React.FC = () => {
               voiceoverSource: status.voiceoverSource,
               voiceoverDurationMs: status.voiceoverDurationMs,
               originalVoiceoverKey: status.originalVoiceoverKey,
+              updatedAt: status.updatedAt,
             };
           }
           return step;
@@ -331,11 +334,13 @@ export const AudioPanel: React.FC = () => {
           console.log('[AudioPanel] Syncing updated narration status to global store.');
           const updatedAssets = { ...(currentSession.assets ?? {}) };
           for (const step of updatedSteps) {
-            if (step.voiceoverKey && !updatedAssets[step.voiceoverKey]) {
-              updatedAssets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`);
+            if (step.voiceoverKey) {
+              const t = (step as any).updatedAt || Date.now();
+              updatedAssets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`) + `?t=${t}`;
             }
-            if ((step as any).originalVoiceoverKey && !updatedAssets[(step as any).originalVoiceoverKey]) {
-              updatedAssets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}`);
+            if ((step as any).originalVoiceoverKey) {
+              const t = (step as any).updatedAt || Date.now();
+              updatedAssets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}`) + `?t=${t}`;
             }
           }
           useStudioStore.setState({
