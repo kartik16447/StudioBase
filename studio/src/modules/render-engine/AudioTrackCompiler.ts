@@ -69,6 +69,18 @@ function bufferToWav(buffer: AudioBuffer): Blob {
   return new Blob([wavBuffer], { type: 'audio/wav' });
 }
 
+let sharedAudioCtx: AudioContext | null = null;
+function getSharedAudioContext(): AudioContext {
+  if (typeof window === 'undefined') {
+    throw new Error('[AudioTrackCompiler] AudioContext is only available in the browser.');
+  }
+  if (!sharedAudioCtx) {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    sharedAudioCtx = new AudioContextClass();
+  }
+  return sharedAudioCtx;
+}
+
 /**
  * Fetches and decodes multiple audio files, maps them onto a timeline using
  * OfflineAudioContext, and renders a single consolidated WAV Blob URL.
@@ -91,14 +103,42 @@ export async function compileAudioTrack(
   
   // Fetch and decode all audio assets in parallel
   const decodePromises = items.map(async (item) => {
-    try {
+    // We race the fetch and decode steps against a 10s timeout to prevent infinite hanging
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error('Asset processing timed out after 10 seconds')), 10000)
+    );
+
+    const processPromise = (async () => {
       console.log(`[AudioTrackCompiler] Fetching asset for startMs: ${item.startMs} | url: ${item.url.substring(0, 100)}...`);
+      const startTime = performance.now();
       const res = await fetch(item.url);
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const arrayBuffer = await res.arrayBuffer();
+      const fetchTime = performance.now() - startTime;
+      console.log(`[AudioTrackCompiler] Fetch completed for startMs: ${item.startMs} | size: ${arrayBuffer.byteLength} bytes | took ${Math.round(fetchTime)}ms`);
+
+      if (arrayBuffer.byteLength === 0) {
+        throw new Error('Fetched empty audio file (0 bytes)');
+      }
+
+      console.log(`[AudioTrackCompiler] Starting decoding for startMs: ${item.startMs}`);
+      const decodeStart = performance.now();
+      const audioCtx = getSharedAudioContext();
       
-      // Decode audio data using OfflineAudioContext
-      const audioBuffer = await offlineCtx.decodeAudioData(arrayBuffer);
+      const audioBuffer = await new Promise<AudioBuffer>((resolve, reject) => {
+        audioCtx.decodeAudioData(
+          arrayBuffer,
+          (buf) => resolve(buf),
+          (err) => reject(err || new Error('Unknown decoding error'))
+        );
+      });
+      const decodeTime = performance.now() - decodeStart;
+      console.log(`[AudioTrackCompiler] Decoding completed for startMs: ${item.startMs} | took ${Math.round(decodeTime)}ms`);
+      return audioBuffer;
+    })();
+
+    try {
+      const audioBuffer = await Promise.race([processPromise, timeoutPromise]);
       return { item, audioBuffer };
     } catch (err) {
       console.error(`[AudioTrackCompiler] Failed to fetch or decode audio for startMs: ${item.startMs} | url: ${item.url}`, err);

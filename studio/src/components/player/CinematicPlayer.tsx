@@ -796,6 +796,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const lastCompiledKeyRef = useRef<string>('');
   const compilationIdRef = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true);
+  const masterAudioUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    masterAudioUrlRef.current = masterAudioUrl;
+  }, [masterAudioUrl]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -805,6 +810,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   }, []);
 
   useEffect(() => {
+    // Invalidate any in-flight compilation immediately when dependencies change
+    const compId = ++compilationIdRef.current;
+
     // Guard against transient empty/loading steps state
     if (steps.length === 0) {
       return;
@@ -865,8 +873,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     lastCompiledKeyRef.current = currentKey;
     setCompilingAudio(true);
 
-    const compId = ++compilationIdRef.current;
-
     compileAudioTrack(trackItems, totalMs)
       .then((blobUrl) => {
         if (!isMountedRef.current || compId !== compilationIdRef.current) {
@@ -920,12 +926,13 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   useEffect(() => {
     return () => {
       // Only revoke if the component is being removed from the DOM
-      if (masterAudioUrl && masterAudioUrl.startsWith('blob:')) {
-        console.log("[CinematicPlayer] Component unmounting, revoking blob.");
-        URL.revokeObjectURL(masterAudioUrl);
+      const url = masterAudioUrlRef.current;
+      if (url && url.startsWith('blob:')) {
+        console.log("[CinematicPlayer] Component unmounting, revoking blob:", url);
+        URL.revokeObjectURL(url);
       }
     };
-  }, [masterAudioUrl]); // Keep this dependency to track the current URL
+  }, []);
 
   // ── Voiceover — play/pause ──────────────────────────────────────────────────
   // Listens strictly to playback controls and masterAudioUrl, avoiding store updates.
