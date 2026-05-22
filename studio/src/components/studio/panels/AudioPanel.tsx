@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { apiClient } from '../../../lib/apiClient';
 import { I } from '../../icons';
