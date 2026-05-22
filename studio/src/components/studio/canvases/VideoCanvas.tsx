@@ -69,10 +69,7 @@ export const VideoCanvas: React.FC = () => {
         base[key] = apiClient.getUrl(`/assets/${key}`);
       }
     }
-    console.log(`[VideoCanvas] Resolved enrichedAssets:`, Object.keys(base).reduce((acc, k) => {
-      acc[k] = base[k].substring(base[k].lastIndexOf('/')); // just log filename/path for brevity
-      return acc;
-    }, {} as Record<string, string>));
+
     return base;
   })();
 
@@ -89,7 +86,7 @@ export const VideoCanvas: React.FC = () => {
   // getCurrentStep() === currentStepIndex and we skip the seek entirely.
   useEffect(() => {
     const playerStep = cinPlayerRef.current?.getCurrentStep() ?? currentStepIndex;
-    console.log('[VideoCanvas] sync effect | store:', currentStepIndex, '| playerStep:', playerStep, '| will seek:', playerStep !== currentStepIndex);
+
     if (playerStep !== currentStepIndex) {
       cinPlayerRef.current?.seekToStep(currentStepIndex);
     }
@@ -97,7 +94,7 @@ export const VideoCanvas: React.FC = () => {
 
   // ── Callbacks from CinematicPlayer → store ─────────────────────────────────
   const handlePlayerStepSelect = useCallback((idx: number) => {
-    console.log('[VideoCanvas] handlePlayerStepSelect → setStepIndex', idx);
+
     setStepIndex(idx);
   }, [setStepIndex]);
 

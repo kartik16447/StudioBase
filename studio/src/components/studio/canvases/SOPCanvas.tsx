@@ -44,10 +44,8 @@ export const SOPCanvas: React.FC = () => {
     console.log('[SOPCanvas] startPolling — sessionId:', sessionId);
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
-      console.log('[SOPCanvas] polling tick — fetching session...');
       await fetchSession(sessionId);
       const status = useStudioStore.getState().sessionStatus;
-      console.log('[SOPCanvas] poll result — sessionStatus:', status);
       if (status === 'ready' || status === 'failed' || status === 'credit_exhausted') {
         console.log('[SOPCanvas] polling done — status:', status);
         clearInterval(pollingRef.current!);

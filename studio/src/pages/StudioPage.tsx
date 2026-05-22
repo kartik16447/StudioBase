@@ -60,12 +60,7 @@ export const StudioPage: React.FC = () => {
     return <EmbedSOPView />;
   }
 
-  console.log('[StudioPage] Render state:', { 
-    hasSession: !!session, 
-    stepCount: session?.steps?.length, 
-    sessionError,
-    activeView
-  });
+
 
   if (sessionError) {
     return (

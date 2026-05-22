@@ -750,7 +750,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   pollAudioStatus: async (sessionId, stepId) => {
-    console.log(`[useStudioStore][pollAudioStatus] Polling audio status for stepId: ${stepId} in session: ${sessionId}`);
     const { updateStep } = get();
     const result = await apiClient.get<{
       voiceoverSource: string | null;
@@ -758,8 +757,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       voiceoverDurationMs: number | null;
       updatedAt: number | null;
     }>(`/sessions/${sessionId}/steps/${stepId}/audio-status`);
-
-    console.log(`[useStudioStore][pollAudioStatus] Received response for stepId: ${stepId}:`, result);
 
     if (result.voiceoverSource !== 'generating') {
       console.log(`[useStudioStore][pollAudioStatus] Step ${stepId} completed generating. Source: ${result.voiceoverSource}`);
@@ -779,8 +776,6 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         voiceoverDurationMs: result.voiceoverDurationMs,
         updatedAt: result.updatedAt,
       } as any);
-    } else {
-      console.log(`[useStudioStore][pollAudioStatus] Step ${stepId} is still generating...`);
     }
   },
 

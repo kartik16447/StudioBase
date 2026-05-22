@@ -790,7 +790,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     if (videoRef.current) videoRef.current.muted = isMuted;
   }, [isMuted]);
 
-  console.log(`[CinematicPlayer] Render masterAudioUrl: "${masterAudioUrl}" | isCompilingAudio: ${isCompilingAudio}`);
+
 
   // ── Master Audio Compilation Trigger ──────────────────────────────────────────
   const lastCompiledKeyRef = useRef<string>('');
