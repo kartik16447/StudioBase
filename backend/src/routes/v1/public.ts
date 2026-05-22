@@ -233,3 +233,78 @@ publicRoutes.get('/:shareToken/asset/:key{.+}', async (c) => {
     'Access-Control-Allow-Origin': '*',
   });
 });
+
+publicRoutes.post('/admin/trigger-swap-voice', async (c) => {
+  const { AudioProcessor } = await import('../../services/audio/AudioProcessor');
+  try {
+    const { sessionId, stepId, voiceId } = await c.req.json();
+    console.log(`[PUBLIC ADMIN SWAP] Triggering swap for sessionId: ${sessionId}, stepId: ${stepId}, voiceId: ${voiceId}`);
+    
+    const audioProcessor = new AudioProcessor(c.env);
+    
+    // Find ownerId and workspaceId for audit logs
+    const session = await c.env.DB.prepare(
+      'SELECT ownerId, workspaceId FROM sessions WHERE id = ?'
+    ).bind(sessionId).first<any>();
+    
+    if (!session) {
+      return c.json({ error: `Session not found: ${sessionId}` }, 404);
+    }
+    
+    // Ensure active audio exists and we're not already generating
+    const existing = await c.env.DB.prepare(
+      'SELECT voiceoverSource, voiceoverKey FROM step_audio WHERE stepId = ? AND sessionId = ?'
+    ).bind(stepId, sessionId).first() as any;
+
+    if (!existing || !existing.voiceoverKey) {
+      console.log(`[PUBLIC ADMIN SWAP] No existing audio track found for stepId=${stepId}. Running TTS generation first.`);
+      
+      // Fetch step text from steps table
+      const stepRow = await c.env.DB.prepare(
+        'SELECT content FROM steps WHERE id = ? AND sopId = (SELECT id FROM sops WHERE sessionId = ? LIMIT 1)'
+      ).bind(stepId, sessionId).first<{ content: string }>();
+
+      let text = 'Navigate to the next screen';
+      if (stepRow?.content) {
+        try {
+          const data = JSON.parse(stepRow.content);
+          text = data.textOverride || data.generatedText || data.elementText || text;
+        } catch {}
+      }
+      
+      console.log(`[PUBLIC ADMIN SWAP] Step text extracted: "${text}"`);
+
+      const ttsJob = {
+        type: 'audio_tts' as const,
+        sessionId,
+        stepId,
+        text,
+        userId: session.ownerId,
+        workspaceId: session.workspaceId,
+        jobId: crypto.randomUUID()
+      };
+      
+      await audioProcessor.process(ttsJob);
+      console.log(`[PUBLIC ADMIN SWAP] TTS generation successful for stepId=${stepId}. Proceeding to swap.`);
+    }
+    
+    const job = {
+      type: 'audio_swap' as const,
+      sessionId,
+      stepId,
+      voiceId,
+      userId: session.ownerId,
+      workspaceId: session.workspaceId,
+      jobId: crypto.randomUUID()
+    };
+    
+    await audioProcessor.processSwap(job);
+    
+    return c.json({ success: true, job });
+  } catch (err: any) {
+    console.error(`[PUBLIC ADMIN SWAP] Error running processSwap:`, err);
+    return c.json({ success: false, error: err.message, stack: err.stack }, 500);
+  }
+});
+
+
