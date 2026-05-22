@@ -436,6 +436,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             syntheticVoiceoverKey: audio.syntheticVoiceoverKey ?? null,
             voiceoverSource:       audio.voiceoverSource       ?? null,
             voiceoverDurationMs:   audio.voiceoverDurationMs   ?? s.voiceoverDurationMs,
+            swapVoiceId:           audio.swapVoiceId           ?? null,
           };
         });
       }

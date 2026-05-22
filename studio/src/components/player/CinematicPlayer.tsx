@@ -483,6 +483,33 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       const { stepIndex: newIdx, progress: stepProgress } =
         getSegmentAt(currentMsRef.current, segs);
 
+      // ── Audio Latching & Soft-Sync ───────────────────────────────────────
+      const audio = audioRef.current;
+      if (audio && audio.src && !showChapterCardRef.current) {
+        const seg = segs[newIdx];
+        if (seg) {
+          const step = stepsRef.current[seg.stepIndex];
+          if (step && step.voiceoverKey) {
+            if (audio.readyState >= 1) { // metadata loaded
+              let targetSec = (currentMsRef.current - seg.startMs) / 1000;
+              if (audio.duration && targetSec > audio.duration) {
+                targetSec = audio.duration;
+              }
+              // Soft-sync if audio drifts from playhead by more than 250ms
+              if (Math.abs(audio.currentTime - targetSec) > 0.25) {
+                audio.currentTime = targetSec;
+              }
+            }
+            // Ensure audio play state matches player state
+            if (isPlayingRef.current && audio.paused) {
+              audio.play().catch(() => {});
+            } else if (!isPlayingRef.current && !audio.paused) {
+              audio.pause();
+            }
+          }
+        }
+      }
+
       if (newIdx !== currentIdxRef.current) {
         const prevIdx = currentIdxRef.current;
         const prevStep = stepsRef.current[prevIdx];

@@ -73,7 +73,7 @@ export class SessionService {
     try {
       const { results: audioRows } = await this.env.DB.prepare(
         `SELECT stepId, voiceoverKey, originalVoiceoverKey, syntheticVoiceoverKey,
-                voiceoverSource, voiceoverDurationMs
+                voiceoverSource, voiceoverDurationMs, swapVoiceId
          FROM step_audio WHERE sessionId = ?`
       ).bind(session.id).all();
       for (const row of audioRows as any[]) {

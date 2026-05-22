@@ -67,7 +67,7 @@ publicRoutes.get('/:shareToken/json', async (c) => {
   if (!session?.r2JsonKey) return c.json({ error: 'Not found' }, 404);
 
   // ── Fetch R2 snapshot + D1 live overrides in parallel ───────────────────
-  const [obj, sessionMeta, sopRow] = await Promise.all([
+  const [obj, sessionMeta, sopRow, audioRows] = await Promise.all([
     c.env.R2.get(session.r2JsonKey),
 
     // Session metadata holds stepOverrides (zoom / animationTarget edits)
@@ -79,6 +79,21 @@ publicRoutes.get('/:shareToken/json', async (c) => {
     c.env.DB.prepare(
       `SELECT id FROM sops WHERE sessionId = ? LIMIT 1`
     ).bind(session.id).first<{ id: string }>(),
+
+    // Query D1 step_audio for live voiceovers
+    c.env.DB.prepare(
+      `SELECT stepId, voiceoverKey, originalVoiceoverKey, syntheticVoiceoverKey,
+              voiceoverSource, voiceoverDurationMs, swapVoiceId
+       FROM step_audio WHERE sessionId = ?`
+    ).bind(session.id).all<{
+      stepId: string;
+      voiceoverKey: string | null;
+      originalVoiceoverKey: string | null;
+      syntheticVoiceoverKey: string | null;
+      voiceoverSource: string | null;
+      voiceoverDurationMs: number | null;
+      swapVoiceId: string | null;
+    }>(),
   ]);
 
   if (!obj) return c.json({ error: 'Asset not found' }, 404);
@@ -109,6 +124,14 @@ publicRoutes.get('/:shareToken/json', async (c) => {
         } catch {}
       }
     } catch {}
+  }
+
+  // Parse step_audio into a map
+  const stepAudioMap = new Map<string, any>();
+  if (audioRows?.results) {
+    for (const row of audioRows.results) {
+      stepAudioMap.set(row.stepId, row);
+    }
   }
 
   // ── Build asset proxy map ────────────────────────────────────────────────
@@ -179,12 +202,14 @@ publicRoutes.get('/:shareToken/json', async (c) => {
   //   • animationTarget (zoom) — from session.metadata.stepOverrides (D1)
   //   • textOverride (text edits) — from steps table (D1)
   //   • coordinates — promoted from step.data.coordinates if not at root
+  //   • voiceoverKey, voiceoverSource, voiceoverDurationMs, etc. — from step_audio (D1)
   const ZOOM_MAX = 1.40; // mirror RenderConstants.CAMERA_SCALE_LIMITS.max
   const ZOOM_MIN = 1.00;
   if (Array.isArray(json.steps)) {
     json.steps = json.steps.map((step: any) => {
       const override   = stepOverrides[step.id] || {};
       const liveText   = d1TextByStepId.get(step.id);
+      const audio      = stepAudioMap.get(step.id);
 
       // Normalize coordinates to root level (pipeline may nest them in step.data)
       const coordinates =
@@ -209,8 +234,39 @@ publicRoutes.get('/:shareToken/json', async (c) => {
         step.textOverride ??
         null;
 
-      return { ...step, coordinates, animationTarget, textOverride };
+      // Audio hydration from D1 step_audio
+      const voiceoverKey = audio?.voiceoverKey ?? step.voiceoverKey ?? null;
+      const originalVoiceoverKey = audio?.originalVoiceoverKey ?? step.originalVoiceoverKey ?? null;
+      const syntheticVoiceoverKey = audio?.syntheticVoiceoverKey ?? step.syntheticVoiceoverKey ?? null;
+      const voiceoverSource = audio?.voiceoverSource ?? step.voiceoverSource ?? null;
+      const voiceoverDurationMs = audio?.voiceoverDurationMs ?? step.voiceoverDurationMs ?? null;
+      const swapVoiceId = audio?.swapVoiceId ?? step.swapVoiceId ?? null;
+
+      return {
+        ...step,
+        coordinates,
+        animationTarget,
+        textOverride,
+        voiceoverKey,
+        originalVoiceoverKey,
+        syntheticVoiceoverKey,
+        voiceoverSource,
+        voiceoverDurationMs,
+        swapVoiceId
+      };
     });
+  }
+
+  // Pass 3: register voiceover files in assets proxy (run after step normalization)
+  if (Array.isArray(json.steps)) {
+    for (const step of json.steps) {
+      const keys = [step.voiceoverKey, step.originalVoiceoverKey, step.syntheticVoiceoverKey];
+      for (const key of keys) {
+        if (key && !assets[key]) {
+          assets[key] = `${origin}/v1/public/${shareToken}/asset/${encodeURIComponent(key)}`;
+        }
+      }
+    }
   }
 
   return c.json({ ...json, assets });

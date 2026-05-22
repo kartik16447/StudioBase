@@ -450,22 +450,48 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
   // Stuck-state TTL recovery: job didn't complete in 5 min → reset + refund
   if (row.voiceoverSource === 'generating' && row.jobStartedAt && (Date.now() - row.jobStartedAt > STUCK_JOB_TTL_MS)) {
     const now = Date.now();
+    const isSwapJob = row.originalVoiceoverKey !== null;
+    const ledgerReason = isSwapJob ? 'audio_swap_refund_ttl' : 'audio_tts_refund_ttl';
+
+    const updateQuery = isSwapJob
+      ? c.env.DB.prepare(`
+          UPDATE step_audio SET
+            voiceoverKey = COALESCE(originalVoiceoverKey, voiceoverKey),
+            voiceoverSource = CASE 
+              WHEN originalVoiceoverKey IS NOT NULL THEN (CASE WHEN originalVoiceoverKey LIKE '%tts%' THEN 'tts' ELSE 'original' END)
+              ELSE 'original'
+            END,
+            originalVoiceoverKey = NULL,
+            swapVoiceId = NULL,
+            jobId = NULL,
+            jobStartedAt = NULL,
+            updatedAt = ?
+          WHERE stepId = ? AND sessionId = ?
+        `).bind(now, stepId, sessionId)
+      : c.env.DB.prepare(
+          'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
+        ).bind(now, stepId, sessionId);
+
     await c.env.DB.batch([
-      c.env.DB.prepare(
-        'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
-      ).bind(now, stepId, sessionId),
+      updateQuery,
       c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + 1 WHERE id = ?')
         .bind(row.userId),
       c.env.DB.prepare(
         'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, 1, ?, ?, ?)'
-      ).bind(crypto.randomUUID(), row.userId, 'audio_tts_refund_ttl', sessionId, now),
+      ).bind(crypto.randomUUID(), row.userId, ledgerReason, sessionId, now),
     ]);
+
+    const rolledBackVoiceoverKey = isSwapJob ? (row.originalVoiceoverKey ?? row.voiceoverKey) : null;
+    const rolledBackVoiceoverSource = isSwapJob
+      ? (row.originalVoiceoverKey ? (row.originalVoiceoverKey.includes('tts') ? 'tts' : 'original') : 'original')
+      : null;
+
     return c.json({
-      voiceoverSource: null,
-      voiceoverKey: row.voiceoverKey,
+      voiceoverSource: rolledBackVoiceoverSource,
+      voiceoverKey: rolledBackVoiceoverKey,
       voiceoverDurationMs: row.voiceoverDurationMs,
-      swapVoiceId: row.swapVoiceId,
-      originalVoiceoverKey: row.originalVoiceoverKey,
+      swapVoiceId: null,
+      originalVoiceoverKey: null,
     });
   }
 
