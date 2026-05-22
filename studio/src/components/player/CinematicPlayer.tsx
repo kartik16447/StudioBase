@@ -36,6 +36,7 @@ import {
   type ChapterMarker,
   type StepSegment,
 } from '../../modules/render-engine/PlayerTimeline';
+import { compileAudioTrack, type AudioTrackItem } from '../../modules/render-engine/AudioTrackCompiler';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -279,6 +280,10 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   // Step index — derived from playhead, but kept as state to trigger effects
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Master compiled WAV audio track state
+  const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null);
+  const [isCompilingAudio, setIsCompilingAudio] = useState(false);
 
   // Chapter break transition state and refs
   const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
@@ -598,27 +603,21 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       // ── Audio Latching & Soft-Sync ───────────────────────────────────────
       const audio = audioRef.current;
       if (audio && audio.src && audio.src !== window.location.href && !showChapterCardRef.current) {
-        const seg = segs[newIdx];
-        if (seg) {
-          const step = stepsRef.current[seg.stepIndex];
-          if (step && step.voiceoverKey) {
-            if (audio.readyState >= 1) { // metadata loaded
-              let targetSec = (currentMsRef.current - seg.startMs) / 1000;
-              if (audio.duration && targetSec > audio.duration) {
-                targetSec = audio.duration;
-              }
-              // Soft-sync if audio drifts from playhead by more than 250ms
-              if (isPlayingRef.current && !audio.seeking && Math.abs(audio.currentTime - targetSec) > 0.25) {
-                audio.currentTime = targetSec;
-              }
-            }
-            // Ensure audio play state matches player state
-            if (isPlayingRef.current && audio.paused) {
-              safePlayAudio();
-            } else if (!isPlayingRef.current && !audio.paused) {
-              safePauseAudio();
-            }
+        if (audio.readyState >= 1) { // metadata loaded
+          let targetSec = currentMsRef.current / 1000;
+          if (audio.duration && targetSec > audio.duration) {
+            targetSec = audio.duration;
           }
+          // Soft-sync if audio drifts from playhead by more than 250ms
+          if (isPlayingRef.current && !audio.seeking && Math.abs(audio.currentTime - targetSec) > 0.25) {
+            audio.currentTime = targetSec;
+          }
+        }
+        // Ensure audio play state matches player state
+        if (isPlayingRef.current && audio.paused) {
+          safePlayAudio();
+        } else if (!isPlayingRef.current && !audio.paused) {
+          safePauseAudio();
         }
       }
 
@@ -790,67 +789,132 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     if (videoRef.current) videoRef.current.muted = isMuted;
   }, [isMuted]);
 
-  const activeVoiceoverKey = steps[currentIndex]?.voiceoverKey;
-  const activeVoiceoverSource = steps[currentIndex]?.voiceoverSource;
-  const activeAudioUrl = (activeVoiceoverSource === 'generating' || !activeVoiceoverKey)
-    ? ''
-    : (assets[activeVoiceoverKey] ?? '');
+  console.log(`[CinematicPlayer] Render masterAudioUrl: "${masterAudioUrl}" | isCompilingAudio: ${isCompilingAudio}`);
 
-  console.log(`[CinematicPlayer] Render activeAudioUrl: "${activeAudioUrl}" | voiceoverKey: "${activeVoiceoverKey}" | voiceoverSource: "${activeVoiceoverSource}"`);
+  // ── Master Audio Compilation Trigger ──────────────────────────────────────────
+  const lastCompiledKeyRef = useRef<string>('');
 
-  // ── Voiceover — step change or audio URL update ────────────────────────────
-  // Fires on step change or when the active step's audio URL is resolved/swapped.
-  // assets map must contain resolved URLs for any voiceoverKey values.
+  useEffect(() => {
+    const voiceoverSteps = steps.filter(s => s.voiceoverKey);
+    
+    // If no steps need voiceover, clear masterAudioUrl
+    if (voiceoverSteps.length === 0) {
+      if (masterAudioUrl) {
+        console.log('[CinematicPlayer] No voiceover steps. Revoking master audio URL:', masterAudioUrl);
+        URL.revokeObjectURL(masterAudioUrl);
+        setMasterAudioUrl(null);
+      }
+      lastCompiledKeyRef.current = '';
+      return;
+    }
+
+    // Check if all voiceover assets are resolved and ready (none generating)
+    const allReady = voiceoverSteps.every(
+      s => s.voiceoverSource !== 'generating' && s.voiceoverKey && assets[s.voiceoverKey]
+    );
+
+    if (!allReady) {
+      console.log('[CinematicPlayer] Voiceover assets are not all ready yet (some are still generating or missing).');
+      return;
+    }
+
+    // Map the steps with voiceover to AudioTrackItem
+    const items: AudioTrackItem[] = [];
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (step.voiceoverKey && assets[step.voiceoverKey]) {
+        const seg = segments[i];
+        if (seg) {
+          items.push({
+            url: assets[step.voiceoverKey],
+            startMs: seg.startMs,
+            durationMs: step.voiceoverDurationMs || seg.durationMs,
+          });
+        }
+      }
+    }
+
+    // Generate unique representation to detect meaningful changes
+    const currentKey = JSON.stringify({ items, totalMs });
+    if (currentKey === lastCompiledKeyRef.current) {
+      return;
+    }
+
+    console.log(`[CinematicPlayer] All voiceover assets resolved. Triggering master WAV compilation for ${items.length} segments. totalMs: ${totalMs}`);
+    lastCompiledKeyRef.current = currentKey;
+    setIsCompilingAudio(true);
+
+    let active = true;
+    compileAudioTrack(items, totalMs)
+      .then((url) => {
+        if (!active) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        setMasterAudioUrl(url);
+        setIsCompilingAudio(false);
+      })
+      .catch((err) => {
+        if (!active) return;
+        console.error('[CinematicPlayer] Master audio compilation failed:', err);
+        setIsCompilingAudio(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [steps, assets, segments, totalMs]);
+
+  // ── Master Audio Sync Effect ────────────────────────────────────────────────
+  // Binds the audio element's source to the master compiled track.
+  // This ONLY runs when masterAudioUrl changes, preventing thrashing.
   useEffect(() => {
     const audio = audioRef.current;
-    
-    console.log(`[CinematicPlayer][AudioSyncEffect] Triggered. currentIndex: ${currentIndex} | activeAudioUrl: ${activeAudioUrl} | audio.src: ${audio.src}`);
-    
-    if (activeAudioUrl) {
-      // Create a temporary Audio element to resolve any relative URLs to fully qualified ones
-      // so we can compare accurately with audio.src.
-      const tempAudio = new Audio();
-      tempAudio.src = activeAudioUrl;
-      const resolvedActiveUrl = tempAudio.src;
+    console.log(`[CinematicPlayer][AudioSyncEffect] masterAudioUrl changed. old src: ${audio.src} -> new: ${masterAudioUrl}`);
 
-      if (audio.src !== resolvedActiveUrl) {
-        console.log(`[CinematicPlayer][AudioSyncEffect] URL changed. old src: ${audio.src} -> new src: ${resolvedActiveUrl}`);
-        isPlayPendingRef.current = false;
-        audio.pause();
-        audio.src = resolvedActiveUrl;
-        audio.load(); // Explicitly trigger load to avoid browser cache issues or state latching
-        // Calculate logical offset for current step and seek to it (avoids reset to 0)
-        const seg = segmentsRef.current[currentIndex];
-        let targetSec = 0;
-        if (seg) {
-          targetSec = Math.max(0, (currentMsRef.current - seg.startMs) / 1000);
-        }
-        audio.currentTime = targetSec;
-        audio.playbackRate = speed;
-        if (isPlaying && !isTransitioningRef.current) {
-          console.log(`[CinematicPlayer][AudioSyncEffect] Player is playing, calling safePlayAudio()`);
-          safePlayAudio();
-        }
-      } else {
-        console.log(`[CinematicPlayer][AudioSyncEffect] URL is identical (${resolvedActiveUrl}), not reloading.`);
+    if (masterAudioUrl) {
+      isPlayPendingRef.current = false;
+      audio.pause();
+      audio.src = masterAudioUrl;
+      audio.load();
+
+      // Sync playback times and properties
+      const targetSec = currentMsRef.current / 1000;
+      audio.currentTime = targetSec;
+      audio.playbackRate = speed;
+
+      if (isPlaying && !isTransitioningRef.current) {
+        console.log(`[CinematicPlayer][AudioSyncEffect] Player is playing, starting master track`);
+        safePlayAudio();
       }
     } else {
-      console.log(`[CinematicPlayer][AudioSyncEffect] No active audio URL. Pausing and clearing src.`);
+      console.log(`[CinematicPlayer][AudioSyncEffect] No master track available. Clearing.`);
       safePauseAudio();
       audio.removeAttribute('src');
       audio.load();
     }
-  }, [currentIndex, activeAudioUrl, isPlaying, speed, safePlayAudio, safePauseAudio]); // activeAudioUrl dependency catches voice swaps and generations
+  }, [masterAudioUrl]);
 
-  // ── Voiceover — play/pause ────────────────────────────────────────────────
+  // ── Memory Cleanup ──────────────────────────────────────────────────────────
   useEffect(() => {
-    console.log(`[CinematicPlayer][AudioPlayPauseEffect] isPlaying: ${isPlaying} | showChapterCard: ${showChapterCard} | audio.src: ${audioRef.current.src}`);
-    if (isPlaying && !isTransitioningRef.current) {
+    return () => {
+      if (masterAudioUrl) {
+        console.log('[CinematicPlayer] Cleanup: Revoking master audio object URL:', masterAudioUrl);
+        URL.revokeObjectURL(masterAudioUrl);
+      }
+    };
+  }, [masterAudioUrl]);
+
+  // ── Voiceover — play/pause ──────────────────────────────────────────────────
+  // Listens strictly to playback controls and masterAudioUrl, avoiding store updates.
+  useEffect(() => {
+    console.log(`[CinematicPlayer][AudioPlayPauseEffect] isPlaying: ${isPlaying} | showChapterCard: ${showChapterCard} | masterAudioUrl: ${masterAudioUrl}`);
+    if (isPlaying && !isTransitioningRef.current && masterAudioUrl) {
       safePlayAudio();
     } else {
       safePauseAudio();
     }
-  }, [isPlaying, showChapterCard, safePlayAudio, safePauseAudio]);
+  }, [isPlaying, showChapterCard, masterAudioUrl, safePlayAudio, safePauseAudio]);
 
   // ── Play/Pause handling during chapter transition ──────────────────────────
   useEffect(() => {
@@ -972,14 +1036,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     // Seek audio if active
     const audio = audioRef.current;
     if (audio && audio.src && audio.src !== window.location.href) {
-      const seg = segmentsRef.current[newIdx];
-      if (seg) {
-        let targetSec = (clamped - seg.startMs) / 1000;
-        if (audio.duration && targetSec > audio.duration) {
-          targetSec = audio.duration;
-        }
-        audio.currentTime = targetSec;
+      let targetSec = clamped / 1000;
+      if (audio.duration && targetSec > audio.duration) {
+        targetSec = audio.duration;
       }
+      audio.currentTime = targetSec;
     }
 
     // Update progress bar immediately
@@ -1219,12 +1280,17 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 {/* Play/Pause */}
                 <button
                   onClick={handleTogglePlay}
-                  className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:bg-white/90 active:scale-95 flex-shrink-0 transition-all shadow"
-                  title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+                  disabled={isCompilingAudio}
+                  className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:bg-white/90 active:scale-95 disabled:opacity-50 flex-shrink-0 transition-all shadow"
+                  title={isCompilingAudio ? 'Compiling audio...' : isPlaying ? 'Pause (Space)' : 'Play (Space)'}
                 >
-                  {isPlaying
-                    ? <I.Pause size={15} className="text-black" />
-                    : <I.Play  size={15} className="text-black ml-0.5" />}
+                  {isCompilingAudio ? (
+                    <I.Loader size={15} className="text-black animate-spin" />
+                  ) : isPlaying ? (
+                    <I.Pause size={15} className="text-black" />
+                  ) : (
+                    <I.Play  size={15} className="text-black ml-0.5" />
+                  )}
                 </button>
 
                 {/* Next step */}
