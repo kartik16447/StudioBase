@@ -311,6 +311,12 @@ export const StepCard: React.FC<{
   const stepLabel = `Step ${step.sequence ?? (step as any).index + 1}`;
   const stepTitle = step.stepTitle || step.elementText || '';
 
+  const [textValue, setTextValue] = React.useState(step.textOverride ?? step.generatedText ?? '');
+
+  React.useEffect(() => {
+    setTextValue(step.textOverride ?? step.generatedText ?? '');
+  }, [step.textOverride, step.generatedText]);
+
   return (
     <article
       onClick={onFocus}
@@ -360,11 +366,12 @@ export const StepCard: React.FC<{
         {sopStatus !== 'published' ? (
           <textarea
             className="w-full bg-surface-2/60 border border-border rounded-sm p-3 text-[14px] resize-none focus:outline-none focus:border-primary/40 text-text-2 leading-[1.7] transition-colors"
-            defaultValue={step.textOverride ?? step.generatedText ?? ''}
+            value={textValue}
+            onChange={(e) => setTextValue(e.target.value)}
             rows={3}
             placeholder="Step description…"
-            onBlur={(e) => {
-              const newText = e.currentTarget.value.trim();
+            onBlur={() => {
+              const newText = textValue.trim();
               const original = step.textOverride ?? step.generatedText ?? '';
               if (newText !== original) {
                 useStudioStore.getState().saveStep(step.id, { textOverride: newText });

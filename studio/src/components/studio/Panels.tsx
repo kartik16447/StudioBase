@@ -131,6 +131,11 @@ const ScriptStepRow: React.FC<{
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(step.textOverride || step.generatedText || '');
   const [isGenerating, setIsGenerating] = useState(false);
+
+  useEffect(() => {
+    setText(step.textOverride || step.generatedText || '');
+  }, [step.textOverride, step.generatedText]);
+
   const deleteStep = useStudioStore(state => state.deleteStep);
   const session = useStudioStore(state => state.session);
   const updateStep = useStudioStore(state => state.updateStep);
