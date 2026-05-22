@@ -532,10 +532,11 @@ steps.patch('/:sessionId/steps/:stepId/audio-duration',
 steps.post('/:sessionId/generate-narration', async (c) => {
   const user = c.get('user');
   const { sessionId } = c.req.param();
-  const body = await c.req.json().catch(() => ({})) as { language?: string };
+  const body = await c.req.json().catch(() => ({})) as { language?: string; voiceId?: string };
   const language = typeof body.language === 'string' ? body.language : undefined;
+  const voiceId = typeof body.voiceId === 'string' ? body.voiceId : undefined;
 
-  console.log(`[generate-narration] Overall request received: sessionId=${sessionId}, language=${language}`);
+  console.log(`[generate-narration] Overall request received: sessionId=${sessionId}, language=${language}, voiceId=${voiceId}`);
 
   const session = await requireSession(c.env, sessionId, user.id);
   const workspaceId = session.workspaceId;
@@ -630,6 +631,7 @@ steps.post('/:sessionId/generate-narration', async (c) => {
         workspaceId,
         jobId,
         language,
+        voiceId,
       });
     } catch (qErr: any) {
       console.error(`[generate-narration] Queue failed for step ${stepId}:`, qErr?.message);

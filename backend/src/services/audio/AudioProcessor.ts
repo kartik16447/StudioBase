@@ -11,6 +11,7 @@ export interface AudioTTSJob {
   workspaceId: string;
   jobId: string;
   language?: string;
+  voiceId?: string;
 }
 
 export interface AudioSwapJob {
@@ -27,13 +28,13 @@ export class AudioProcessor {
   constructor(private env: Env) {}
 
   async process(job: AudioTTSJob) {
-    const { sessionId, stepId, text, userId, workspaceId, language, jobId } = job;
+    const { sessionId, stepId, text, userId, workspaceId, language, voiceId, jobId } = job;
     const r2Key = `audio/sessions/${sessionId}/steps/${stepId}/tts-v1.wav`;
 
-    console.log(`[AUDIO] TTS start — session:${sessionId} step:${stepId} jobId:${jobId}`);
+    console.log(`[AUDIO] TTS start — session:${sessionId} step:${stepId} voiceId:${voiceId} jobId:${jobId}`);
 
     const audioService = getAudioService(this.env);
-    const result = await audioService.generateFromText(text, { language });
+    const result = await audioService.generateFromText(text, { language, voiceId });
 
     await this.env.R2.put(r2Key, result.buffer, {
       httpMetadata: { contentType: result.mimeType },
@@ -41,17 +42,18 @@ export class AudioProcessor {
 
     const now = Date.now();
     await this.env.DB.prepare(`
-      INSERT INTO step_audio (stepId, sessionId, userId, voiceoverKey, syntheticVoiceoverKey, voiceoverSource, voiceoverDurationMs, jobId, jobStartedAt, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, 'tts', ?, NULL, NULL, ?, ?)
+      INSERT INTO step_audio (stepId, sessionId, userId, voiceoverKey, syntheticVoiceoverKey, voiceoverSource, voiceoverDurationMs, swapVoiceId, jobId, jobStartedAt, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, 'tts', ?, ?, NULL, NULL, ?, ?)
       ON CONFLICT(stepId, sessionId) DO UPDATE SET
         voiceoverKey          = excluded.voiceoverKey,
         syntheticVoiceoverKey = excluded.syntheticVoiceoverKey,
         voiceoverSource       = 'tts',
         voiceoverDurationMs   = excluded.voiceoverDurationMs,
+        swapVoiceId           = excluded.swapVoiceId,
         jobId                 = NULL,
         jobStartedAt          = NULL,
         updatedAt             = excluded.updatedAt
-    `).bind(stepId, sessionId, userId, r2Key, r2Key, result.durationMs, now, now).run();
+    `).bind(stepId, sessionId, userId, r2Key, r2Key, result.durationMs, voiceId || null, now, now).run();
 
     await writeAuditLog(this.env, {
       actorId: userId,

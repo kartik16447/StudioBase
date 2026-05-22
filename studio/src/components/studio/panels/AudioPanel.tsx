@@ -261,6 +261,19 @@ export const AudioPanel: React.FC = () => {
   const [pollingStepIds, setPollingStepIds] = useState<Set<string>>(new Set());
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const [globalVoice, setGlobalVoice] = useState(ELEVENLABS_VOICES[0].id);
+  const [hasInitializedVoice, setHasInitializedVoice] = useState(false);
+
+  useEffect(() => {
+    if (stepStatuses.length > 0 && !hasInitializedVoice) {
+      const firstWithVoice = stepStatuses.find(s => s.swapVoiceId);
+      if (firstWithVoice?.swapVoiceId) {
+        setGlobalVoice(firstWithVoice.swapVoiceId);
+        setHasInitializedVoice(true);
+      }
+    }
+  }, [stepStatuses, hasInitializedVoice]);
+
   // ── Helpers ──
   const steps = session?.steps ?? [];
   const stepsWithText = steps.filter(s =>
@@ -401,10 +414,10 @@ export const AudioPanel: React.FC = () => {
     setError(null);
     setIsGenerating(true);
     try {
-      console.log(`[AudioPanel][Regenerate AI Voice] Sending POST to /sessions/${sessionId}/generate-narration with empty payload (triggers all missing)`);
+      console.log(`[AudioPanel][Regenerate AI Voice] Sending POST to /sessions/${sessionId}/generate-narration with voiceId: ${globalVoice}`);
       const result = await apiClient.post<{ queued: string[]; totalCost: number }>(
         `/sessions/${sessionId}/generate-narration`,
-        {}
+        { voiceId: globalVoice }
       );
       console.log(`[AudioPanel][Regenerate AI Voice] Server accepted request. Response data (queued steps to update UI):`, result);
       // Mark queued steps as generating locally for immediate feedback
@@ -527,7 +540,25 @@ export const AudioPanel: React.FC = () => {
       </div>
 
       {/* ── Footer CTA ── */}
-      <div className="px-4 pb-4 pt-2 border-t border-border shrink-0 flex flex-col gap-2">
+      <div className="px-4 pb-4 pt-2 border-t border-border shrink-0 flex flex-col gap-2.5">
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-semibold text-text-3 uppercase tracking-wider">
+            Narrator Voice (Global)
+          </label>
+          <select
+            value={globalVoice}
+            onChange={(e) => setGlobalVoice(e.target.value)}
+            disabled={activelyGenerating}
+            className="w-full bg-surface-3 border border-border rounded-md px-2.5 py-1.5 text-[11px] text-text font-medium focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+          >
+            {ELEVENLABS_VOICES.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <Button
           variant="primary"
           size="sm"
