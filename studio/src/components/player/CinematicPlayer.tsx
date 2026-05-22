@@ -316,7 +316,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   const safePlayAudio = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio.src || audio.src === window.location.href) return;
+    if (!masterAudioUrl || !audio.src || audio.src === window.location.href) return;
     if (isPlayPendingRef.current) return;
     
     if (audio.paused) {
@@ -332,7 +332,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           }
         });
     }
-  }, []);
+  }, [masterAudioUrl]);
 
   const safePauseAudio = useCallback(() => {
     const audio = audioRef.current;
@@ -896,7 +896,10 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         audioRef.current.load(); // Force the browser to decode the new Blob
       } else {
         audioRef.current.pause();
-        audioRef.current.src = '';
+        audioRef.current.removeAttribute('src'); // Cleanly reset without triggering MediaError
+        try {
+          audioRef.current.load(); // Re-initialize the media element's empty state
+        } catch (_) {}
       }
     }
   }, [masterAudioUrl]);
