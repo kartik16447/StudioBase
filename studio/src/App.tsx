@@ -184,6 +184,15 @@ function App() {
       setRuntimeError(e.message + (e.error?.stack ? '\n' + e.error.stack : ''));
     };
     const promiseHandler = (e: PromiseRejectionEvent) => {
+      // Ignore benign media/fetch abort errors to prevent crashing the application
+      if (
+        e.reason?.name === 'AbortError' ||
+        (e.reason?.message && e.reason.message.includes('AbortError')) ||
+        e.reason === 'AbortError'
+      ) {
+        console.warn('[SB Unhandled Rejection Ignored]', e.reason);
+        return;
+      }
       console.error('[SB Unhandled Rejection]', e);
       setRuntimeError('Unhandled Promise Rejection: ' + (e.reason?.message || e.reason || 'Unknown error'));
     };

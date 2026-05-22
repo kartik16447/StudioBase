@@ -300,6 +300,25 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   useEffect(() => {
     return () => {
       if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+
+      // Pause audio and video elements to prevent memory leaks and unhandled rejections on unmount
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        audio.removeAttribute('src');
+        try {
+          audio.load();
+        } catch (_) {}
+      }
+
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        video.removeAttribute('src');
+        try {
+          video.load();
+        } catch (_) {}
+      }
     };
   }, []);
 
@@ -337,9 +356,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const safePauseAudio = useCallback(() => {
     const audio = audioRef.current;
     isPlayPendingRef.current = false;
-    if (!audio.paused) {
-      audio.pause();
-    }
+    audio.pause();
   }, []);
 
 
@@ -615,9 +632,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           }
         }
         // Ensure audio play state matches player state
-        if (isPlayingRef.current && audio.paused) {
+        if (isPlayingRef.current && audio.paused && !isPlayPendingRef.current) {
           safePlayAudio();
-        } else if (!isPlayingRef.current && !audio.paused) {
+        } else if (!isPlayingRef.current && (!audio.paused || isPlayPendingRef.current)) {
           safePauseAudio();
         }
       }

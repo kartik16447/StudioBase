@@ -53,8 +53,18 @@ const StepAudioRow: React.FC<{
   function togglePlay() {
     const el = audioRef.current;
     if (!el || !audioUrl) return;
-    if (playing) { el.pause(); setPlaying(false); }
-    else { el.play(); setPlaying(true); }
+    if (playing) {
+      el.pause();
+      setPlaying(false);
+    } else {
+      setPlaying(true);
+      el.play().catch((err) => {
+        setPlaying(false);
+        if (err.name !== 'AbortError') {
+          console.error('[AudioPanel] Failed to play preview audio:', err);
+        }
+      });
+    }
   }
 
   async function handleSwap() {
@@ -120,6 +130,20 @@ const StepAudioRow: React.FC<{
       setIsSwapping(false);
     }
   }, [generating]);
+
+  // Clean up audio element on unmount to prevent background play & unhandled rejections
+  useEffect(() => {
+    return () => {
+      const el = audioRef.current;
+      if (el) {
+        el.pause();
+        el.removeAttribute('src');
+        try {
+          el.load();
+        } catch (_) {}
+      }
+    };
+  }, []);
 
   return (
     <div className="flex flex-col gap-1.5">
