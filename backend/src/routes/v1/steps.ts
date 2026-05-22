@@ -319,11 +319,11 @@ steps.post('/:sessionId/steps/:stepId/revert-audio', async (c) => {
   ).bind(stepId, sessionId).first() as any;
 
   const revertKey = row?.originalVoiceoverKey ?? null;
-  const revertSource = revertKey ? 'original' : null;
+  const revertSource = revertKey ? (revertKey.includes('tts') ? 'tts' : 'original') : null;
 
   await c.env.DB.prepare(`
     UPDATE step_audio
-    SET voiceoverKey = ?, voiceoverSource = ?, jobId = NULL, jobStartedAt = NULL, updatedAt = ?
+    SET voiceoverKey = ?, voiceoverSource = ?, originalVoiceoverKey = NULL, swapVoiceId = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ?
     WHERE stepId = ? AND sessionId = ?
   `).bind(revertKey, revertSource, Date.now(), stepId, sessionId).run();
 

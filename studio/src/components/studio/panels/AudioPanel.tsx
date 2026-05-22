@@ -245,7 +245,17 @@ export const AudioPanel: React.FC = () => {
   const sessionId = (session as any)?.id || (session as any)?.sessionId;
 
   // Per-step audio statuses fetched from /narration-status
-  const [stepStatuses, setStepStatuses] = useState<StepAudioStatus[]>([]);
+  const [stepStatuses, setStepStatuses] = useState<StepAudioStatus[]>(() => {
+    if (!session?.steps) return [];
+    return session.steps.map(s => ({
+      stepId: s.id,
+      voiceoverSource: (s as any).voiceoverSource ?? null,
+      voiceoverKey: s.voiceoverKey ?? null,
+      voiceoverDurationMs: s.voiceoverDurationMs ?? null,
+      swapVoiceId: (s as any).swapVoiceId ?? null,
+      originalVoiceoverKey: (s as any).originalVoiceoverKey ?? null,
+    }));
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pollingStepIds, setPollingStepIds] = useState<Set<string>>(new Set());
@@ -264,7 +274,7 @@ export const AudioPanel: React.FC = () => {
 
   const generatingCount = stepStatuses.filter(s => s.voiceoverSource === 'generating').length;
   const doneCount = stepStatuses.filter(s =>
-    s.voiceoverSource === 'tts' || s.voiceoverSource === 'original'
+    s.voiceoverSource === 'tts' || s.voiceoverSource === 'original' || s.voiceoverSource === 'swap'
   ).length;
   const hasAnyAudio = doneCount > 0;
   const allDone = stepsWithText.length > 0 && doneCount === stepsWithText.length;
@@ -277,6 +287,53 @@ export const AudioPanel: React.FC = () => {
         `/sessions/${sessionId}/narration-status`
       );
       setStepStatuses(data.steps ?? []);
+
+      // Sync to global store if there are changes
+      const currentSession = useStudioStore.getState().session;
+      if (currentSession?.steps) {
+        let sessionChanged = false;
+        const updatedSteps = currentSession.steps.map(step => {
+          const status = (data.steps ?? []).find(s => s.stepId === step.id);
+          if (!status) return step;
+
+          const voiceoverKeyChanged = status.voiceoverKey !== step.voiceoverKey;
+          const voiceoverSourceChanged = status.voiceoverSource !== (step as any).voiceoverSource;
+          const durationChanged = status.voiceoverDurationMs !== step.voiceoverDurationMs;
+          const originalKeyChanged = status.originalVoiceoverKey !== (step as any).originalVoiceoverKey;
+
+          if (voiceoverKeyChanged || voiceoverSourceChanged || durationChanged || originalKeyChanged) {
+            sessionChanged = true;
+            return {
+              ...step,
+              voiceoverKey: status.voiceoverKey,
+              voiceoverSource: status.voiceoverSource,
+              voiceoverDurationMs: status.voiceoverDurationMs,
+              originalVoiceoverKey: status.originalVoiceoverKey,
+            };
+          }
+          return step;
+        });
+
+        if (sessionChanged) {
+          console.log('[AudioPanel] Syncing updated narration status to global store.');
+          const updatedAssets = { ...(currentSession.assets ?? {}) };
+          for (const step of updatedSteps) {
+            if (step.voiceoverKey && !updatedAssets[step.voiceoverKey]) {
+              updatedAssets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}`);
+            }
+            if ((step as any).originalVoiceoverKey && !updatedAssets[(step as any).originalVoiceoverKey]) {
+              updatedAssets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}`);
+            }
+          }
+          useStudioStore.setState({
+            session: {
+              ...currentSession,
+              steps: updatedSteps,
+              assets: updatedAssets,
+            }
+          });
+        }
+      }
 
       // Update pollingStepIds based on what's still generating
       const stillGenerating = new Set(
@@ -299,6 +356,22 @@ export const AudioPanel: React.FC = () => {
   useEffect(() => {
     loadStatus();
   }, [loadStatus]);
+
+  // Keep stepStatuses in sync with session.steps to prevent flash on initial load
+  const prevStepsRef = useRef<any>(null);
+  useEffect(() => {
+    if (session?.steps && session.steps !== prevStepsRef.current) {
+      prevStepsRef.current = session.steps;
+      setStepStatuses(session.steps.map(s => ({
+        stepId: s.id,
+        voiceoverSource: (s as any).voiceoverSource ?? null,
+        voiceoverKey: s.voiceoverKey ?? null,
+        voiceoverDurationMs: s.voiceoverDurationMs ?? null,
+        swapVoiceId: (s as any).swapVoiceId ?? null,
+        originalVoiceoverKey: (s as any).originalVoiceoverKey ?? null,
+      })));
+    }
+  }, [session?.steps]);
 
   // ── Poll while generating ──
   useEffect(() => {
