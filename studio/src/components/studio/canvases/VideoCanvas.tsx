@@ -47,14 +47,18 @@ export const VideoCanvas: React.FC = () => {
   const rawVideoRef       = useRef<HTMLVideoElement>(null);
 
   const renderMode = useStudioStore((s) => s.renderMode);
-  const steps      = session?.steps || [];
+  const steps      = useMemo(() => session?.steps || [], [session?.steps]);
+
+  const sopId       = session?.sopId ?? null;
+  const sessionId   = session?.sessionId ?? 'unknown';
+  const workspaceId = session?.workspaceId ?? 'default';
 
   const rawVideoUrl = session?.videoKey
     ? (session.assets?.[session.videoKey] ?? null)
     : null;
   const hybridVideoUrl = renderMode === 'hybrid' ? rawVideoUrl : null;
-  const sessionStartMs = (session as any)?.startedAt
-    ? new Date((session as any).startedAt).getTime()
+  const sessionStartMs = (session as unknown as Record<string, unknown>)?.startedAt
+    ? new Date((session as unknown as Record<string, unknown>).startedAt as string).getTime()
     : session?.capturedAt ? new Date(session.capturedAt).getTime() : 0;
 
   // Enrich the assets map with resolved voiceover URLs so CinematicPlayer can
@@ -64,7 +68,7 @@ export const VideoCanvas: React.FC = () => {
   const enrichedAssets = useMemo(() => {
     const base: Record<string, string> = { ...(session?.assets ?? {}) };
     for (const step of steps) {
-      const key = (step as any).voiceoverKey as string | null | undefined;
+      const key = step.voiceoverKey;
       if (key && !base[key]) {
         base[key] = apiClient.getUrl(`/assets/${key}`);
       }
@@ -78,7 +82,7 @@ export const VideoCanvas: React.FC = () => {
     if (exportTrigger > 0 && !isExporting && useStudioStore.getState().activeView === 'video') {
       handleSOPVideoExport({ session, theme: brand, renderMode: 'slideshow' });
     }
-  }, [exportTrigger]);
+  }, [exportTrigger, brand, isExporting, session]);
 
   // ── Sync external step changes (sidebar click, keyboard) → CinematicPlayer ──
   // Uses getCurrentStep() to check the player's actual internal index, making
@@ -107,7 +111,7 @@ export const VideoCanvas: React.FC = () => {
   useEffect(() => {
     handleSessionEndRef.current = () => {
       setPlaying(false);
-      const completionMs = Math.round(performance.now() - stepEnteredAt.current);
+      const completionMs = Math.round(performance.now() - (stepTimeRef.current.get('enteredAt') ?? 0));
       analyticsClient.track({ sessionId, sopId, workspaceId, eventType: 'sop_completed', durationMs: completionMs });
       if (brand.showOutro) {
         setShowOutroSlide(true);
@@ -120,7 +124,7 @@ export const VideoCanvas: React.FC = () => {
         setIsEnded(true);
       }
     };
-  }, [brand.showOutro]);
+  }, [brand.showOutro, sessionId, sopId, workspaceId, setPlaying]);
 
 
 
@@ -131,11 +135,11 @@ export const VideoCanvas: React.FC = () => {
 
   // Analytics tracking refs
   const viewedSteps = useRef<Set<number>>(new Set());
-  const stepEnteredAt = useRef<number>(performance.now());
+  const stepTimeRef = useRef<Map<string, number>>(new Map([['enteredAt', 0]]));
 
-  const sopId: string | null = (session as any)?.sopId ?? null;
-  const sessionId: string = session?.sessionId ?? 'unknown';
-  const workspaceId: string = (session as any)?.workspaceId ?? 'default';
+  useEffect(() => {
+    stepTimeRef.current.set('enteredAt', performance.now());
+  }, []);
 
   // Track step_viewed / step_skipped / step_replayed on step change
   useEffect(() => {
@@ -144,12 +148,12 @@ export const VideoCanvas: React.FC = () => {
     const prevIndex = currentStepIndex - 1;
     // Record dwell on the previous step before moving
     if (viewedSteps.current.size > 0 && prevIndex >= 0) {
-      const dwell = Math.round(now - stepEnteredAt.current);
+      const dwell = Math.round(now - (stepTimeRef.current.get('enteredAt') ?? 0));
       if (dwell < 2000) {
         analyticsClient.track({ sessionId, sopId, workspaceId, stepIndex: prevIndex, eventType: 'step_skipped', durationMs: dwell });
       }
     }
-    stepEnteredAt.current = now;
+    stepTimeRef.current.set('enteredAt', now);
     const alreadySeen = viewedSteps.current.has(currentStepIndex);
     if (alreadySeen) {
       analyticsClient.track({ sessionId, sopId, workspaceId, stepIndex: currentStepIndex, eventType: 'step_replayed' });
@@ -157,7 +161,7 @@ export const VideoCanvas: React.FC = () => {
       viewedSteps.current.add(currentStepIndex);
       analyticsClient.track({ sessionId, sopId, workspaceId, stepIndex: currentStepIndex, eventType: 'step_viewed' });
     }
-  }, [currentStepIndex]);
+  }, [currentStepIndex, session, isExporting, sessionId, sopId, workspaceId]);
 
   // Track sop_abandoned on unload
   useEffect(() => {
@@ -171,7 +175,7 @@ export const VideoCanvas: React.FC = () => {
     };
     window.addEventListener('beforeunload', onUnload);
     return () => window.removeEventListener('beforeunload', onUnload);
-  }, [session]);
+  }, [session, sessionId, sopId, workspaceId]);
 
   // Voiceover is now handled inside CinematicPlayer via the enrichedAssets map.
 
@@ -427,8 +431,9 @@ export const VideoCanvas: React.FC = () => {
                   else if (p.phase === 'rendering') setScreenshotProgress(`Rendering ${p.step}/${p.total}…`);
                   else setScreenshotProgress('Finishing…');
                 });
-              } catch (e: any) {
-                alert(`Export failed: ${e.message}`);
+              } catch (e) {
+                const err = e as Error;
+                alert(`Export failed: ${err.message}`);
               } finally {
                 setScreenshotExporting(false);
                 setScreenshotProgress('');
