@@ -284,10 +284,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const [currentIndex, setCurrentIndex] = useState(0);
 
   // Master compiled WAV audio track state pulled from global store
-  const masterAudioUrl = useStudioStore(state => state.masterAudioUrl);
-  const setMasterAudioUrl = useStudioStore(state => state.setMasterAudioUrl);
-  const isCompilingAudio = useStudioStore(state => state.isCompilingAudio);
-  const setIsCompilingAudio = useStudioStore(state => state.setCompilingAudio);
+  const { masterAudioUrl, isCompilingAudio, setMasterAudioUrl, setCompilingAudio } = useStudioStore();
 
   // Chapter break transition state and refs
   const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
@@ -846,7 +843,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
     console.log(`[CinematicPlayer] All voiceover assets resolved. Triggering master WAV compilation for ${items.length} segments. totalMs: ${totalMs}`);
     lastCompiledKeyRef.current = currentKey;
-    setIsCompilingAudio(true);
+    setCompilingAudio(true);
 
     let active = true;
     compileAudioTrack(items, totalMs)
@@ -856,18 +853,18 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           return;
         }
         setMasterAudioUrl(url);
-        setIsCompilingAudio(false);
+        setCompilingAudio(false);
       })
       .catch((err) => {
         if (!active) return;
         console.error('[CinematicPlayer] Master audio compilation failed:', err);
-        setIsCompilingAudio(false);
+        setCompilingAudio(false);
       });
 
     return () => {
       active = false;
     };
-  }, [steps, assets, segments, totalMs]);
+  }, [steps, assets, segments, totalMs, setMasterAudioUrl, setCompilingAudio]);
 
   // ── Master Audio Sync Effect ────────────────────────────────────────────────
   // Binds the audio element's source to the master compiled track.
