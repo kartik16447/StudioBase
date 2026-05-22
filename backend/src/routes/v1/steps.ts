@@ -558,10 +558,39 @@ steps.post('/:sessionId/generate-narration', async (c) => {
     throw new HTTPException(500, { message: 'Failed to parse session data' });
   }
 
+  // ── Fetch D1 live step overrides in parallel ──────────────────────────────
+  const [sopRow] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT id FROM sops WHERE sessionId = ? LIMIT 1`
+    ).bind(sessionId).first<{ id: string }>(),
+  ]);
+
+  const d1TextByStepId = new Map<string, string>();
+  if (sopRow?.id) {
+    try {
+      const { results } = await c.env.DB.prepare(
+        `SELECT id, content FROM steps WHERE sopId = ?`
+      ).bind(sopRow.id).all<{ id: string; content: string }>();
+      if (results) {
+        for (const row of results) {
+          try {
+            const content = JSON.parse(row.content);
+            if (typeof content?.textOverride === 'string') {
+              d1TextByStepId.set(row.id, content.textOverride);
+            }
+          } catch {}
+        }
+      }
+    } catch (d1Err) {
+      console.error(`[generate-narration] Failed to fetch D1 steps:`, d1Err);
+    }
+  }
+
   // Build (stepId → text) map — prefer textOverride, fall back to generatedText / elementText
   const stepsWithText: { id: string; text: string }[] = [];
   for (const step of (envelope.steps || [])) {
-    const text: string = step.textOverride || step.generatedText || step.elementText || '';
+    const d1Override = d1TextByStepId.get(step.id);
+    const text: string = d1Override !== undefined ? d1Override : (step.textOverride || step.generatedText || step.elementText || '');
     if (text.trim() && text.trim().toLowerCase() !== '[silence]') {
       stepsWithText.push({ id: step.id, text: text.trim() });
     }

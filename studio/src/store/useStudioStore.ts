@@ -910,6 +910,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       if (stillGenerating.length === 0) {
         console.log('[useStudioStore][fetchNarrationStatus] All steps done generating — stopping audio polling.');
         get().stopAudioPolling();
+      } else if (!audioPollInterval) {
+        get().startAudioPolling(sessionId);
       }
     } catch (err) {
       console.error('[useStudioStore][fetchNarrationStatus] error:', err);
