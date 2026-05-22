@@ -47,6 +47,10 @@ interface StudioState {
   exportError: string | null;
   exportProgress: number;
 
+  // Master compiled audio tracks
+  masterAudioUrl: string | null;
+  isCompilingAudio: boolean;
+
   brand: BrandState;
   setBrand: (updates: Partial<BrandState>) => void;
 
@@ -76,6 +80,8 @@ interface StudioState {
   setExportProgress: (progress: number) => void;
   triggerExport: () => void;
   fetchSession: (sessionId: string) => Promise<void>;
+  setMasterAudioUrl: (url: string | null) => void;
+  setCompilingAudio: (compiling: boolean) => void;
   
   // Phase 5 SOP Editor additions
   sopStatus: 'draft' | 'review' | 'published' | null;
@@ -152,6 +158,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   exportStatus: 'idle',
   exportError: null,
   exportProgress: 0,
+  masterAudioUrl: null,
+  isCompilingAudio: false,
 
   brand: {
     primaryColor: '#5E5CE6',
@@ -541,6 +549,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   setExportError: (error) => set({ exportError: error }),
   setExportProgress: (progress) => set({ exportProgress: progress }),
   triggerExport: () => set((state) => ({ exportTrigger: state.exportTrigger + 1 })),
+  setMasterAudioUrl: (url) => set({ masterAudioUrl: url }),
+  setCompilingAudio: (compiling) => set({ isCompilingAudio: compiling }),
 
   // Phase 5 SOP Editor body
   sopStatus: null,

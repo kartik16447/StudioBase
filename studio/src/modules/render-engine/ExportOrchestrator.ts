@@ -15,6 +15,7 @@ export async function handleSOPVideoExport(config: {
   session: any;
   theme: any;
   renderMode: string;
+  masterAudioUrl?: string | null;
 }) {
   const store = useStudioStore.getState();
   if (store.isExporting) return;
@@ -23,7 +24,7 @@ export async function handleSOPVideoExport(config: {
   const workspaceId = (session as any)?.workspaceId || 'default';
   const sessionId   = session?.sessionId || 'unknown';
 
-  console.log('[Export] handleSOPVideoExport invoked:', { sessionId, workspaceId, renderMode, hasIntro: brand?.showIntro, hasOutro: brand?.showOutro });
+  console.log('[Export] handleSOPVideoExport invoked:', { sessionId, workspaceId, renderMode, hasIntro: brand?.showIntro, hasOutro: brand?.showOutro, hasMasterAudio: !!config.masterAudioUrl });
 
   store.setIsExporting(true);
   store.setExportStatus('checking');
@@ -92,15 +93,49 @@ export async function handleSOPVideoExport(config: {
   let videoTrack: MediaStreamTrack | null = null;
   const chunks: Blob[] = [];
 
+  // Web Audio Muxing variables
+  let audioElement: HTMLAudioElement | null = null;
+  let audioCtx: AudioContext | null = null;
+  let sourceNode: MediaElementAudioSourceNode | null = null;
+  let destinationNode: MediaStreamAudioDestinationNode | null = null;
+
   try {
     const videoKey = (session as any)?.videoKey || 'screen-recording';
     const videoUrl = session?.assets?.[videoKey] || session?.assets?.['video'] || '';
 
     const stream    = (canvas as any).captureStream(RenderConstants.EXPORT_FPS);
     videoTrack      = stream.getVideoTracks()[0];
+
+    let combinedStream: MediaStream = stream;
+
+    if (config.masterAudioUrl) {
+      console.log('[Export] Muxing masterAudioUrl:', config.masterAudioUrl);
+
+      // Safeguard 1: Create hidden audio element and append to DOM before connecting
+      audioElement = document.createElement('audio');
+      audioElement.src = config.masterAudioUrl;
+      audioElement.style.display = 'none';
+      document.body.appendChild(audioElement);
+
+      // Create AudioContext
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+      // Safeguard 2: Call resume() to guarantee context is not suspended
+      await audioCtx.resume();
+
+      destinationNode = audioCtx.createMediaStreamDestination();
+      sourceNode = audioCtx.createMediaElementSource(audioElement);
+      sourceNode.connect(destinationNode);
+
+      const canvasTracks = stream.getVideoTracks();
+      const audioTracks = destinationNode.stream.getAudioTracks();
+      combinedStream = new MediaStream([...canvasTracks, ...audioTracks]);
+      console.log('[Export] Muxed combinedStream created successfully.');
+    }
+
     const mimeType  = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
       ? 'video/webm;codecs=vp9' : 'video/webm';
-    const recorder  = new MediaRecorder(stream, {
+    const recorder  = new MediaRecorder(combinedStream, {
       mimeType,
       videoBitsPerSecond: RenderConstants.EXPORT_VIDEO_BITRATE,
     });
@@ -180,6 +215,7 @@ export async function handleSOPVideoExport(config: {
     if (brand.showIntro) {
       const title = session?.aiOutputs?.title || 'Walkthrough';
       const introFrames = Math.round(fps * 3);
+      const introStartTime = performance.now();
       for (let f = 0; f < introFrames; f++) {
         const fadeA = f < 15 ? f / 15 : f > introFrames - 15 ? (introFrames - f) / 15 : 1;
         ctx.fillStyle = '#0a0a10';
@@ -202,13 +238,29 @@ export async function handleSOPVideoExport(config: {
         ctx.restore();
         jitter();
         if (videoTrack && (videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
-        await delay(0);
+        
+        // Pace intro slide frames to real-time
+        const targetRealTime = (f / fps) * 1000;
+        const elapsed = performance.now() - introStartTime;
+        const waitTime = targetRealTime - elapsed;
+        if (waitTime > 0) {
+          await delay(waitTime);
+        } else {
+          await delay(0);
+        }
       }
     }
 
     // ── Main Timeline rendering (Frame by Frame) ──────────────────────────
     const totalFrames = Math.ceil(timeline.totalMs / 1000 * fps);
     let lastChapterIndex = -1;
+
+    let mainStartTime = performance.now();
+    if (audioElement) {
+      console.log('[Export] Playhead reset & playback start for sync...');
+      audioElement.currentTime = 0; // Safeguard 3: The Playhead Reset
+      audioElement.play().catch(e => console.error('[Export] Failed to start master audio playback:', e));
+    }
 
     for (let f = 0; f < totalFrames; f++) {
       const logicalCurrentMs = (f / fps) * 1000;
@@ -224,9 +276,14 @@ export async function handleSOPVideoExport(config: {
         lastChapterIndex = stepIndex;
         const exportChapter = stepIndex > 0 ? chapterMap.get(steps[stepIndex - 1].id) : null;
         if (exportChapter) {
+          console.log(`[Export] Chapter transition detected at step ${stepIndex}. Pausing audio.`);
+          if (audioElement) {
+            audioElement.pause();
+          }
           const chFrames = Math.round(fps * 1.5);
+          const transitionStartTime = performance.now();
           for (let cf = 0; cf < chFrames; cf++) {
-            const fadeA = cf < 10 ? cf / 10 : cf > chFrames - 10 ? (chFrames - f) / 10 : 1;
+            const fadeA = cf < 10 ? cf / 10 : cf > chFrames - 10 ? (chFrames - cf) / 10 : 1;
             ctx.fillStyle = '#0a0a10';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.save();
@@ -247,8 +304,23 @@ export async function handleSOPVideoExport(config: {
             ctx.restore();
             jitter();
             if (videoTrack && (videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
-            await delay(0);
+            
+            // Pace transition frames to real-time
+            const targetRealTime = (cf / fps) * 1000;
+            const elapsed = performance.now() - transitionStartTime;
+            const waitTime = targetRealTime - elapsed;
+            if (waitTime > 0) {
+              await delay(waitTime);
+            } else {
+              await delay(0);
+            }
           }
+          console.log('[Export] Chapter transition finished. Resuming audio.');
+          if (audioElement) {
+            audioElement.play().catch(e => console.error('[Export] Failed to resume master audio:', e));
+          }
+          // Shift mainStartTime clock to account for the chapter card's 1.5 seconds duration
+          mainStartTime += (chFrames / fps) * 1000;
         }
       }
 
@@ -309,7 +381,16 @@ export async function handleSOPVideoExport(config: {
 
       jitter();
       if (videoTrack && (videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
-      await delay(0);
+
+      // Pace main frame rendering loop to real-time
+      const targetRealTime = (f / fps) * 1000;
+      const elapsed = performance.now() - mainStartTime;
+      const waitTime = targetRealTime - elapsed;
+      if (waitTime > 0) {
+        await delay(waitTime);
+      } else {
+        await delay(0);
+      }
 
       // Progress reporting
       if (f % 30 === 0) {
@@ -324,8 +405,12 @@ export async function handleSOPVideoExport(config: {
     // ── Outro slide (3 s) ──────────────────────────────────────────────────
     if (brand.showOutro) {
       console.log('[Export] Rendering outro slide...');
+      if (audioElement) {
+        audioElement.pause();
+      }
       const watermarkText = brand.watermark || 'StudioBase';
       const outroFrames = Math.round(fps * 3);
+      const outroStartTime = performance.now();
       for (let f = 0; f < outroFrames; f++) {
         const fadeA = f < 15 ? f / 15 : f > outroFrames - 15 ? (outroFrames - f) / 15 : 1;
         ctx.fillStyle = '#0a0a10';
@@ -345,7 +430,16 @@ export async function handleSOPVideoExport(config: {
         ctx.restore();
         jitter();
         if (videoTrack && (videoTrack as any).requestFrame) (videoTrack as any).requestFrame();
-        await delay(0);
+        
+        // Pace outro slide frames to real-time
+        const targetRealTime = (f / fps) * 1000;
+        const elapsed = performance.now() - outroStartTime;
+        const waitTime = targetRealTime - elapsed;
+        if (waitTime > 0) {
+          await delay(waitTime);
+        } else {
+          await delay(0);
+        }
       }
     }
 
@@ -412,11 +506,23 @@ export async function handleSOPVideoExport(config: {
     store.setExportStatus('failed');
     store.setExportError(err.message);
   } finally {
-    console.log('[Export] Cleaning up compositor elements and tracks.');
+    console.log('[Export] Cleaning up compositor elements, tracks, and audio nodes.');
     if (extractor) await extractor.destroy().catch((e) => console.error('[Export] Failed to destroy extractor:', e));
     if (videoTrack) videoTrack.stop();
     canvas.remove();
     overlay.remove();
+    
+    // Safeguard 1 Cleanup: Stop and remove audio element from DOM
+    if (audioElement) {
+      audioElement.pause();
+      if (document.body.contains(audioElement)) {
+        document.body.removeChild(audioElement);
+      }
+    }
+    // Close AudioContext to release device hardware resources
+    if (audioCtx) {
+      audioCtx.close().catch((e) => console.error('[Export] Failed to close AudioContext:', e));
+    }
     store.setIsExporting(false);
   }
 }

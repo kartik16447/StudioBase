@@ -47,6 +47,7 @@ export const StudioPage: React.FC = () => {
   const setActiveView = useStudioStore(state => state.setActiveView);
   const renderMode = useStudioStore(state => state.renderMode);
   const setRenderMode = useStudioStore(state => state.setRenderMode);
+  const masterAudioUrl = useStudioStore(state => state.masterAudioUrl);
   const [shareOpen, setShareOpen] = useState(false);
 
   useSessionManager();
@@ -126,7 +127,7 @@ export const StudioPage: React.FC = () => {
         setRenderMode={setRenderMode}
         onNavigateHome={() => navigate('home')}
         onShareClick={() => setShareOpen(true)}
-        onSandboxExport={() => handleSOPVideoExport({ session, theme: useStudioStore.getState().brand, renderMode })}
+        onSandboxExport={() => handleSOPVideoExport({ session, theme: useStudioStore.getState().brand, renderMode, masterAudioUrl })}
       />
       <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
       <div className="flex-1 flex min-h-0">

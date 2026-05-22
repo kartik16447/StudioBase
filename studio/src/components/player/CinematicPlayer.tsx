@@ -37,6 +37,8 @@ import {
   type StepSegment,
 } from '../../modules/render-engine/PlayerTimeline';
 import { compileAudioTrack, type AudioTrackItem } from '../../modules/render-engine/AudioTrackCompiler';
+import { useStudioStore } from '../../store/useStudioStore';
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -281,9 +283,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // Step index — derived from playhead, but kept as state to trigger effects
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Master compiled WAV audio track state
-  const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null);
-  const [isCompilingAudio, setIsCompilingAudio] = useState(false);
+  // Master compiled WAV audio track state pulled from global store
+  const masterAudioUrl = useStudioStore(state => state.masterAudioUrl);
+  const setMasterAudioUrl = useStudioStore(state => state.setMasterAudioUrl);
+  const isCompilingAudio = useStudioStore(state => state.isCompilingAudio);
+  const setIsCompilingAudio = useStudioStore(state => state.setCompilingAudio);
 
   // Chapter break transition state and refs
   const [showChapterCard, setShowChapterCard] = useState<string | null>(null);
