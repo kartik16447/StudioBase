@@ -83,8 +83,7 @@ export class ElevenLabsAdapter implements IAudioService {
           { 
             text, 
             speaker,
-            encoding: 'mp3',
-            container: 'none'
+            encoding: 'mp3'
           },
           { returnRawResponse: true }
         ) as Response;
