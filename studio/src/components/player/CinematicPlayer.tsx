@@ -608,7 +608,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 targetSec = audio.duration;
               }
               // Soft-sync if audio drifts from playhead by more than 250ms
-              if (Math.abs(audio.currentTime - targetSec) > 0.25) {
+              if (isPlayingRef.current && !audio.seeking && Math.abs(audio.currentTime - targetSec) > 0.25) {
                 audio.currentTime = targetSec;
               }
             }
@@ -819,7 +819,13 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         audio.pause();
         audio.src = resolvedActiveUrl;
         audio.load(); // Explicitly trigger load to avoid browser cache issues or state latching
-        audio.currentTime = 0;
+        // Calculate logical offset for current step and seek to it (avoids reset to 0)
+        const seg = segmentsRef.current[currentIndex];
+        let targetSec = 0;
+        if (seg) {
+          targetSec = Math.max(0, (currentMsRef.current - seg.startMs) / 1000);
+        }
+        audio.currentTime = targetSec;
         audio.playbackRate = speed;
         if (isPlaying && !isTransitioningRef.current) {
           console.log(`[CinematicPlayer][AudioSyncEffect] Player is playing, calling safePlayAudio()`);
@@ -960,6 +966,19 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           targetSec = (vClip.sourceStartMs + (clamped - vClip.logicalStartMs) * clipRate) / 1000;
         }
         videoRef.current.currentTime = targetSec;
+      }
+    }
+
+    // Seek audio if active
+    const audio = audioRef.current;
+    if (audio && audio.src && audio.src !== window.location.href) {
+      const seg = segmentsRef.current[newIdx];
+      if (seg) {
+        let targetSec = (clamped - seg.startMs) / 1000;
+        if (audio.duration && targetSec > audio.duration) {
+          targetSec = audio.duration;
+        }
+        audio.currentTime = targetSec;
       }
     }
 
