@@ -12,7 +12,7 @@ function formatDuration(ms: number | null | undefined): string {
 
 interface StepAudioStatus {
   stepId: string;
-  voiceoverSource: string | null;
+  voiceoverSource: 'original' | 'tts' | 'swap' | 'generating' | null;
   voiceoverKey: string | null;
   voiceoverDurationMs: number | null;
   swapVoiceId?: string | null;
