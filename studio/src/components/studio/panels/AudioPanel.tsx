@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { apiClient } from '../../../lib/apiClient';
 import { I } from '../../icons';
@@ -255,25 +255,25 @@ const StepAudioRow: React.FC<{
 // ─── Main panel ───────────────────────────────────────────────────────────────
 export const AudioPanel: React.FC = () => {
   const session = useStudioStore(s => s.session);
+  const isAudioGenerating = useStudioStore(s => s.isAudioGenerating);
+  const audioPollingStepIds = useStudioStore(s => s.audioPollingStepIds);
+  const generateAllAudio = useStudioStore(s => s.generateAllAudio);
+  const fetchNarrationStatus = useStudioStore(s => s.fetchNarrationStatus);
+
   const sessionId = (session as any)?.id || (session as any)?.sessionId;
 
-  // Per-step audio statuses fetched from /narration-status
-  const [stepStatuses, setStepStatuses] = useState<StepAudioStatus[]>(() => {
-    if (!session?.steps) return [];
-    return session.steps.map(s => ({
-      stepId: s.id,
-      voiceoverSource: (s as any).voiceoverSource ?? null,
-      voiceoverKey: s.voiceoverKey ?? null,
-      voiceoverDurationMs: s.voiceoverDurationMs ?? null,
-      swapVoiceId: (s as any).swapVoiceId ?? null,
-      originalVoiceoverKey: (s as any).originalVoiceoverKey ?? null,
-    }));
-  });
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pollingStepIds, setPollingStepIds] = useState<Set<string>>(new Set());
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Derive step statuses directly from session.steps (always in sync via global store)
+  const stepStatuses: StepAudioStatus[] = (session?.steps ?? []).map((s: any) => ({
+    stepId: s.id,
+    voiceoverSource: s.voiceoverSource ?? null,
+    voiceoverKey: s.voiceoverKey ?? null,
+    voiceoverDurationMs: s.voiceoverDurationMs ?? null,
+    swapVoiceId: s.swapVoiceId ?? null,
+    originalVoiceoverKey: s.originalVoiceoverKey ?? null,
+    updatedAt: s.updatedAt ?? null,
+  }));
 
+  const [error, setError] = useState<string | null>(null);
   const [globalVoice, setGlobalVoice] = useState(ELEVENLABS_VOICES[0].id);
   const [hasInitializedVoice, setHasInitializedVoice] = useState(false);
 
@@ -305,195 +305,21 @@ export const AudioPanel: React.FC = () => {
   const hasAnyAudio = doneCount > 0;
   const allDone = stepsWithText.length > 0 && doneCount === stepsWithText.length;
 
-  // ── Load narration status on mount ──
-  const loadStatus = useCallback(async () => {
-    if (!sessionId) return;
-    console.log(`[AudioPanel][narration-status] Fetching status for session: ${sessionId}`);
-    try {
-      const data = await apiClient.get<{ steps: StepAudioStatus[] }>(
-        `/sessions/${sessionId}/narration-status`
-      );
-      console.log(`[AudioPanel][narration-status] Received response with ${data.steps?.length || 0} step statuses.`);
-      setStepStatuses(data.steps ?? []);
-
-      // Sync to global store if there are changes
-      const currentSession = useStudioStore.getState().session;
-      if (currentSession?.steps) {
-        let sessionChanged = false;
-        const updatedSteps = currentSession.steps.map(step => {
-          const status = (data.steps ?? []).find(s => s.stepId === step.id);
-          if (!status) return step;
-
-          const voiceoverKeyChanged = status.voiceoverKey !== step.voiceoverKey;
-          const voiceoverSourceChanged = status.voiceoverSource !== (step as any).voiceoverSource;
-          const durationChanged = status.voiceoverDurationMs !== step.voiceoverDurationMs;
-          const originalKeyChanged = status.originalVoiceoverKey !== (step as any).originalVoiceoverKey;
-          const updatedAtChanged = status.updatedAt !== (step as any).updatedAt;
-
-          if (voiceoverKeyChanged || voiceoverSourceChanged || durationChanged || originalKeyChanged || updatedAtChanged) {
-            sessionChanged = true;
-            const isInitialSync = (step as any).updatedAt === undefined || (step as any).updatedAt === null;
-            if (!isInitialSync) {
-              console.log(`[AudioPanel][narration-status] Step ${step.sequence} (${step.id}) changed:`, {
-                voiceoverKey: `${step.voiceoverKey} -> ${status.voiceoverKey}`,
-                voiceoverSource: `${(step as any).voiceoverSource} -> ${status.voiceoverSource}`,
-                duration: `${step.voiceoverDurationMs} -> ${status.voiceoverDurationMs}`,
-                originalVoiceoverKey: `${(step as any).originalVoiceoverKey} -> ${status.originalVoiceoverKey}`,
-                updatedAt: `${(step as any).updatedAt} -> ${status.updatedAt}`
-              });
-            }
-            return {
-              ...step,
-              voiceoverKey: status.voiceoverKey,
-              voiceoverSource: status.voiceoverSource,
-              voiceoverDurationMs: status.voiceoverDurationMs,
-              originalVoiceoverKey: status.originalVoiceoverKey,
-              updatedAt: status.updatedAt,
-            };
-          }
-          return step;
-        });
-
-        if (sessionChanged) {
-          console.log('[AudioPanel] Syncing updated narration status to global store.');
-          const updatedAssets = { ...(currentSession.assets ?? {}) };
-          for (const step of updatedSteps) {
-            const prevStep = currentSession.steps.find(s => s.id === step.id);
-            const isInitialSync = prevStep && ((prevStep as any).updatedAt === undefined || (prevStep as any).updatedAt === null);
-
-            if (step.voiceoverKey) {
-              const t = (step as any).updatedAt || Date.now();
-              const newUrl = apiClient.getUrl(`/assets/${step.voiceoverKey}?t=${t}`);
-              if (updatedAssets[step.voiceoverKey] !== newUrl) {
-                updatedAssets[step.voiceoverKey] = newUrl;
-                if (!isInitialSync) {
-                  console.log(`[AudioPanel] step ${step.sequence} updated asset url: ${newUrl}`);
-                }
-              }
-            }
-            if ((step as any).originalVoiceoverKey) {
-              const t = (step as any).updatedAt || Date.now();
-              const newUrl = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}?t=${t}`);
-              if (updatedAssets[(step as any).originalVoiceoverKey] !== newUrl) {
-                updatedAssets[(step as any).originalVoiceoverKey] = newUrl;
-              }
-            }
-          }
-          useStudioStore.setState({
-            session: {
-              ...currentSession,
-              steps: updatedSteps,
-              assets: updatedAssets,
-            }
-          });
-        }
-      }
-
-      // Update pollingStepIds based on what's still generating
-      const stillGenerating = new Set(
-        (data.steps ?? [])
-          .filter(s => s.voiceoverSource === 'generating')
-          .map(s => s.stepId)
-      );
-      if (stillGenerating.size > 0) {
-        console.log(`[AudioPanel][narration-status] Still generating steps:`, Array.from(stillGenerating));
-      }
-      setPollingStepIds(stillGenerating);
-
-      if (stillGenerating.size === 0) {
-        setIsGenerating(false);
-        if (pollIntervalRef.current) {
-          console.log(`[AudioPanel][narration-status] All steps completed generating, stopping polling.`);
-          clearInterval(pollIntervalRef.current);
-          pollIntervalRef.current = null;
-        }
-      }
-    } catch (e: any) {
-      console.error(`[AudioPanel][narration-status] Failed to fetch narration status:`, e);
-    }
+  // Fetch once on mount to pick up any already-completed audio that may not be in the R2 snapshot
+  useEffect(() => {
+    if (sessionId) fetchNarrationStatus(sessionId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
-
-  useEffect(() => {
-    loadStatus();
-  }, [loadStatus]);
-
-  // Keep stepStatuses in sync with session.steps to prevent flash on initial load
-  const prevStepsRef = useRef<any>(null);
-  useEffect(() => {
-    if (session?.steps && session.steps !== prevStepsRef.current) {
-      prevStepsRef.current = session.steps;
-      setStepStatuses(session.steps.map(s => ({
-        stepId: s.id,
-        voiceoverSource: (s as any).voiceoverSource ?? null,
-        voiceoverKey: s.voiceoverKey ?? null,
-        voiceoverDurationMs: s.voiceoverDurationMs ?? null,
-        swapVoiceId: (s as any).swapVoiceId ?? null,
-        originalVoiceoverKey: (s as any).originalVoiceoverKey ?? null,
-      })));
-    }
-  }, [session?.steps]);
-
-  // ── Poll while generating ──
-  useEffect(() => {
-    if (pollingStepIds.size > 0 && !pollIntervalRef.current) {
-      pollIntervalRef.current = setInterval(loadStatus, 2500);
-    }
-    return () => {
-      if (pollIntervalRef.current && pollingStepIds.size === 0) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-    };
-  }, [pollingStepIds.size, loadStatus]);
-
-  // Cleanup on unmount
-  useEffect(() => () => {
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-  }, []);
 
   // ── Generate all ──
   async function handleGenerateAll() {
     console.log(`[AudioPanel][Regenerate AI Voice] Clicked Generate All. sessionId=${sessionId}, valid steps=${stepsWithText.length}`);
-    if (!sessionId || stepsWithText.length === 0) {
-      console.log(`[AudioPanel][Regenerate AI Voice] Bailing out because no session or no valid steps with text.`);
-      return;
-    }
+    if (!sessionId || stepsWithText.length === 0) return;
     setError(null);
-    setIsGenerating(true);
     try {
-      console.log(`[AudioPanel][Regenerate AI Voice] Sending POST to /sessions/${sessionId}/generate-narration with voiceId: ${globalVoice}`);
-      const result = await apiClient.post<{ queued: string[]; totalCost: number }>(
-        `/sessions/${sessionId}/generate-narration`,
-        { voiceId: globalVoice }
-      );
-      console.log(`[AudioPanel][Regenerate AI Voice] Server accepted request. Response data (queued steps to update UI):`, result);
-      // Mark queued steps as generating locally for immediate feedback
-      setStepStatuses(prev => {
-        const map = new Map(prev.map(s => [s.stepId, s]));
-        for (const id of result.queued) {
-          map.set(id, { stepId: id, voiceoverSource: 'generating', voiceoverKey: null, voiceoverDurationMs: null });
-        }
-        return [...map.values()];
-      });
-
-      // Update global store immediately
-      const store = useStudioStore.getState();
-      for (const id of result.queued) {
-        store.updateStep(id, {
-          voiceoverSource: 'generating',
-          voiceoverKey: null,
-          voiceoverDurationMs: null,
-        } as any);
-      }
-
-      setPollingStepIds(new Set(result.queued));
-      // Start polling
-      if (!pollIntervalRef.current) {
-        pollIntervalRef.current = setInterval(loadStatus, 2500);
-      }
+      await generateAllAudio(sessionId, globalVoice);
     } catch (e: any) {
       setError(e.message || 'Failed to start generation');
-      setIsGenerating(false);
     }
   }
 
@@ -517,7 +343,7 @@ export const AudioPanel: React.FC = () => {
     );
   }
 
-  const activelyGenerating = generatingCount > 0 || (isGenerating && pollingStepIds.size > 0);
+  const activelyGenerating = generatingCount > 0 || isAudioGenerating;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -588,9 +414,9 @@ export const AudioPanel: React.FC = () => {
                 step={step as any}
                 status={status}
                 audioUrl={url}
-                isPolling={pollingStepIds.has(step.id)}
+                isPolling={audioPollingStepIds.includes(step.id)}
                 sessionId={sessionId}
-                onRefresh={loadStatus}
+                onRefresh={() => fetchNarrationStatus(sessionId)}
               />
             );
           })}

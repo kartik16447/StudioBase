@@ -3,6 +3,7 @@ import type { SessionEnvelope, Step } from '../../../shared/types/session';
 import { apiClient, type CommentItem, type NotificationItem } from '../lib/apiClient';
 
 let pipelinePollInterval: ReturnType<typeof setInterval> | null = null;
+let audioPollInterval: ReturnType<typeof setInterval> | null = null;
 
 export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'player' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team' | 'analytics';
 
@@ -112,12 +113,20 @@ interface StudioState {
   markNotificationRead: (notifId: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
 
-  // Phase 7 — Audio
+  // Phase 7 — Audio (per-step single-step actions)
   audioPollingStepId: string | null;
   generateAudio: (sessionId: string, stepId: string, text: string, language?: string) => Promise<void>;
   revertAudio: (sessionId: string, stepId: string) => Promise<void>;
   pollAudioStatus: (sessionId: string, stepId: string) => Promise<void>;
   patchAudioDuration: (sessionId: string, stepId: string, durationMs: number) => Promise<void>;
+
+  // Phase 7 — Audio (global/centralized bulk narration)
+  isAudioGenerating: boolean;
+  audioPollingStepIds: string[];
+  fetchNarrationStatus: (sessionId: string) => Promise<void>;
+  startAudioPolling: (sessionId: string) => void;
+  stopAudioPolling: () => void;
+  generateAllAudio: (sessionId: string, voiceId: string) => Promise<{ queued: string[]; totalCost: number }>;
 
   isAiProcessing: boolean;
   triggerPipeline: () => Promise<void>;
@@ -508,6 +517,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           }
         }
       }
+
+      // Auto-resume audio polling if any step is still generating voiceover
+      const hasGeneratingAudio = sessionData.steps?.some(
+        (s: any) => s.voiceoverSource === 'generating'
+      );
+      if (hasGeneratingAudio && !audioPollInterval) {
+        console.log('[fetchSession] Detected in-progress voiceover generation — resuming audio polling.');
+        get().startAudioPolling(sessionId);
+      }
     } catch (err: any) {
       console.error('[fetchSession] error:', err.message);
       set({ sessionError: err.message || 'Failed to load session' });
@@ -749,8 +767,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     return { shareUrl: result.shareUrl, shareToken: result.shareToken };
   },
 
-  // Phase 7 — Audio
+  // Phase 7 — Audio (per-step)
   audioPollingStepId: null,
+
+  // Phase 7 — Audio (global/centralized)
+  isAudioGenerating: false,
+  audioPollingStepIds: [],
 
   generateAudio: async (sessionId, stepId, text, language) => {
     const { updateStep } = get();
@@ -805,6 +827,124 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   patchAudioDuration: async (sessionId, stepId, durationMs) => {
     await apiClient.patch(`/sessions/${sessionId}/steps/${stepId}/audio-duration`, { durationMs });
     get().updateStep(stepId, { voiceoverDurationMs: durationMs } as any);
+  },
+
+  fetchNarrationStatus: async (sessionId) => {
+    try {
+      const data = await apiClient.get<{ steps: Array<{
+        stepId: string;
+        voiceoverSource: string | null;
+        voiceoverKey: string | null;
+        voiceoverDurationMs: number | null;
+        originalVoiceoverKey: string | null;
+        syntheticVoiceoverKey: string | null;
+        swapVoiceId: string | null;
+        updatedAt: number | null;
+      }> }>(`/sessions/${sessionId}/narration-status`);
+
+      const remoteSteps = data.steps ?? [];
+
+      // Merge into global session store
+      const currentSession = get().session;
+      if (currentSession?.steps) {
+        let changed = false;
+        const updatedSteps = currentSession.steps.map((step: any) => {
+          const remote = remoteSteps.find(r => r.stepId === step.id);
+          if (!remote) return step;
+          const differs =
+            remote.voiceoverKey !== step.voiceoverKey ||
+            remote.voiceoverSource !== step.voiceoverSource ||
+            remote.voiceoverDurationMs !== step.voiceoverDurationMs ||
+            remote.originalVoiceoverKey !== step.originalVoiceoverKey ||
+            remote.updatedAt !== step.updatedAt;
+          if (!differs) return step;
+          changed = true;
+          return {
+            ...step,
+            voiceoverKey: remote.voiceoverKey,
+            voiceoverSource: remote.voiceoverSource,
+            voiceoverDurationMs: remote.voiceoverDurationMs,
+            originalVoiceoverKey: remote.originalVoiceoverKey,
+            syntheticVoiceoverKey: remote.syntheticVoiceoverKey,
+            swapVoiceId: remote.swapVoiceId,
+            updatedAt: remote.updatedAt,
+          };
+        });
+
+        if (changed) {
+          const updatedAssets = { ...(currentSession.assets ?? {}) };
+          for (const step of updatedSteps as any[]) {
+            if (step.voiceoverKey) {
+              const t = step.updatedAt || Date.now();
+              updatedAssets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}?t=${t}`);
+            }
+            if (step.originalVoiceoverKey) {
+              const t = step.updatedAt || Date.now();
+              updatedAssets[step.originalVoiceoverKey] = apiClient.getUrl(`/assets/${step.originalVoiceoverKey}?t=${t}`);
+            }
+            if (step.syntheticVoiceoverKey) {
+              const t = step.updatedAt || Date.now();
+              updatedAssets[step.syntheticVoiceoverKey] = apiClient.getUrl(`/assets/${step.syntheticVoiceoverKey}?t=${t}`);
+            }
+          }
+          set({
+            session: { ...currentSession, steps: updatedSteps, assets: updatedAssets },
+          });
+        }
+      }
+
+      // Update the global polling step IDs
+      const stillGenerating = remoteSteps
+        .filter(s => s.voiceoverSource === 'generating')
+        .map(s => s.stepId);
+      set({ audioPollingStepIds: stillGenerating });
+
+      if (stillGenerating.length === 0) {
+        console.log('[useStudioStore][fetchNarrationStatus] All steps done generating — stopping audio polling.');
+        get().stopAudioPolling();
+      }
+    } catch (err) {
+      console.error('[useStudioStore][fetchNarrationStatus] error:', err);
+    }
+  },
+
+  startAudioPolling: (sessionId: string) => {
+    if (audioPollInterval) {
+      clearInterval(audioPollInterval);
+      audioPollInterval = null;
+    }
+    console.log('[useStudioStore][startAudioPolling] Starting background audio polling for', sessionId);
+    set({ isAudioGenerating: true });
+    audioPollInterval = setInterval(() => {
+      get().fetchNarrationStatus(sessionId);
+    }, 2500);
+  },
+
+  stopAudioPolling: () => {
+    if (audioPollInterval) {
+      clearInterval(audioPollInterval);
+      audioPollInterval = null;
+    }
+    set({ isAudioGenerating: false, audioPollingStepIds: [] });
+  },
+
+  generateAllAudio: async (sessionId, voiceId) => {
+    const result = await apiClient.post<{ queued: string[]; totalCost: number }>(
+      `/sessions/${sessionId}/generate-narration`,
+      { voiceId }
+    );
+    // Optimistically mark all queued steps as generating in the global store
+    const store = get();
+    for (const id of result.queued) {
+      store.updateStep(id, {
+        voiceoverSource: 'generating',
+        voiceoverKey: null,
+        voiceoverDurationMs: null,
+      } as any);
+    }
+    set({ audioPollingStepIds: result.queued, isAudioGenerating: true });
+    get().startAudioPolling(sessionId);
+    return result;
   },
 
   isAiProcessing: false,
