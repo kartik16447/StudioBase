@@ -65,6 +65,11 @@ const StepAudioRow: React.FC<{
     }
     setIsSwapping(true);
     setSwapError(null);
+    useStudioStore.getState().updateStep(step.id, {
+      voiceoverSource: 'generating',
+      voiceoverKey: null,
+      voiceoverDurationMs: null,
+    } as any);
     try {
       console.log(`[AudioPanel][Swap Voice] Sending POST to /sessions/${sessionId}/steps/${step.id}/swap-voice with payload:`, { voiceId: selectedVoice });
       const res = await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/swap-voice`, {
@@ -77,6 +82,7 @@ const StepAudioRow: React.FC<{
       console.error(`[AudioPanel][Swap Voice] Failed to swap voice. Error details:`, e);
       setSwapError(e.message || 'Failed to swap voice');
       setIsSwapping(false);
+      onRefresh();
     }
   }
 
@@ -88,6 +94,11 @@ const StepAudioRow: React.FC<{
     }
     setIsSwapping(true);
     setSwapError(null);
+    useStudioStore.getState().updateStep(step.id, {
+      voiceoverSource: 'generating',
+      voiceoverKey: null,
+      voiceoverDurationMs: null,
+    } as any);
     try {
       console.log(`[AudioPanel][Revert Voice] Sending POST to /sessions/${sessionId}/steps/${step.id}/revert-audio`);
       const res = await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/revert-audio`, {});
@@ -99,6 +110,7 @@ const StepAudioRow: React.FC<{
       console.error(`[AudioPanel][Revert Voice] Failed to revert. Error details:`, e);
       setSwapError(e.message || 'Failed to revert');
       setIsSwapping(false);
+      onRefresh();
     }
   }
 
@@ -296,10 +308,12 @@ export const AudioPanel: React.FC = () => {
   // ── Load narration status on mount ──
   const loadStatus = useCallback(async () => {
     if (!sessionId) return;
+    console.log(`[AudioPanel][narration-status] Fetching status for session: ${sessionId}`);
     try {
       const data = await apiClient.get<{ steps: StepAudioStatus[] }>(
         `/sessions/${sessionId}/narration-status`
       );
+      console.log(`[AudioPanel][narration-status] Received response with ${data.steps?.length || 0} step statuses.`);
       setStepStatuses(data.steps ?? []);
 
       // Sync to global store if there are changes
@@ -318,6 +332,13 @@ export const AudioPanel: React.FC = () => {
 
           if (voiceoverKeyChanged || voiceoverSourceChanged || durationChanged || originalKeyChanged || updatedAtChanged) {
             sessionChanged = true;
+            console.log(`[AudioPanel][narration-status] Step ${step.sequence} (${step.id}) changed:`, {
+              voiceoverKey: `${step.voiceoverKey} -> ${status.voiceoverKey}`,
+              voiceoverSource: `${(step as any).voiceoverSource} -> ${status.voiceoverSource}`,
+              duration: `${step.voiceoverDurationMs} -> ${status.voiceoverDurationMs}`,
+              originalVoiceoverKey: `${(step as any).originalVoiceoverKey} -> ${status.originalVoiceoverKey}`,
+              updatedAt: `${(step as any).updatedAt} -> ${status.updatedAt}`
+            });
             return {
               ...step,
               voiceoverKey: status.voiceoverKey,
@@ -337,6 +358,7 @@ export const AudioPanel: React.FC = () => {
             if (step.voiceoverKey) {
               const t = (step as any).updatedAt || Date.now();
               updatedAssets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}?t=${t}`);
+              console.log(`[AudioPanel] step ${step.sequence} updated asset url: ${updatedAssets[step.voiceoverKey]}`);
             }
             if ((step as any).originalVoiceoverKey) {
               const t = (step as any).updatedAt || Date.now();
@@ -359,16 +381,22 @@ export const AudioPanel: React.FC = () => {
           .filter(s => s.voiceoverSource === 'generating')
           .map(s => s.stepId)
       );
+      if (stillGenerating.size > 0) {
+        console.log(`[AudioPanel][narration-status] Still generating steps:`, Array.from(stillGenerating));
+      }
       setPollingStepIds(stillGenerating);
 
       if (stillGenerating.size === 0) {
         setIsGenerating(false);
         if (pollIntervalRef.current) {
+          console.log(`[AudioPanel][narration-status] All steps completed generating, stopping polling.`);
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
         }
       }
-    } catch { /* silent */ }
+    } catch (e: any) {
+      console.error(`[AudioPanel][narration-status] Failed to fetch narration status:`, e);
+    }
   }, [sessionId]);
 
   useEffect(() => {
@@ -433,6 +461,17 @@ export const AudioPanel: React.FC = () => {
         }
         return [...map.values()];
       });
+
+      // Update global store immediately
+      const store = useStudioStore.getState();
+      for (const id of result.queued) {
+        store.updateStep(id, {
+          voiceoverSource: 'generating',
+          voiceoverKey: null,
+          voiceoverDurationMs: null,
+        } as any);
+      }
+
       setPollingStepIds(new Set(result.queued));
       // Start polling
       if (!pollIntervalRef.current) {

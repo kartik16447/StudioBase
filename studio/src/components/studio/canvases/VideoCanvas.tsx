@@ -69,6 +69,10 @@ export const VideoCanvas: React.FC = () => {
         base[key] = apiClient.getUrl(`/assets/${key}`);
       }
     }
+    console.log(`[VideoCanvas] Resolved enrichedAssets:`, Object.keys(base).reduce((acc, k) => {
+      acc[k] = base[k].substring(base[k].lastIndexOf('/')); // just log filename/path for brevity
+      return acc;
+    }, {} as Record<string, string>));
     return base;
   })();
 

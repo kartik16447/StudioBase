@@ -722,7 +722,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   generateAudio: async (sessionId, stepId, text, language) => {
     const { updateStep } = get();
     await apiClient.post(`/sessions/${sessionId}/steps/${stepId}/generate-audio`, { text, language });
-    updateStep(stepId, { voiceoverSource: 'generating' } as any);
+    updateStep(stepId, {
+      voiceoverSource: 'generating',
+      voiceoverKey: null,
+      voiceoverDurationMs: null,
+    } as any);
     set({ audioPollingStepId: stepId });
   },
 
@@ -736,6 +740,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   pollAudioStatus: async (sessionId, stepId) => {
+    console.log(`[useStudioStore][pollAudioStatus] Polling audio status for stepId: ${stepId} in session: ${sessionId}`);
     const { updateStep } = get();
     const result = await apiClient.get<{
       voiceoverSource: string | null;
@@ -744,11 +749,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       updatedAt: number | null;
     }>(`/sessions/${sessionId}/steps/${stepId}/audio-status`);
 
+    console.log(`[useStudioStore][pollAudioStatus] Received response for stepId: ${stepId}:`, result);
+
     if (result.voiceoverSource !== 'generating') {
+      console.log(`[useStudioStore][pollAudioStatus] Step ${stepId} completed generating. Source: ${result.voiceoverSource}`);
       set({ audioPollingStepId: null });
       if (result.voiceoverKey) {
         const t = result.updatedAt || Date.now();
         const url = apiClient.getUrl(`/assets/${result.voiceoverKey}?t=${t}`);
+        console.log(`[useStudioStore][pollAudioStatus] Resolved asset URL for ${result.voiceoverKey} with cache buster: ${url}`);
         const sess = get().session;
         if (sess) {
           set({ session: { ...sess, assets: { ...sess.assets, [result.voiceoverKey]: url } } });
@@ -760,6 +769,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         voiceoverDurationMs: result.voiceoverDurationMs,
         updatedAt: result.updatedAt,
       } as any);
+    } else {
+      console.log(`[useStudioStore][pollAudioStatus] Step ${stepId} is still generating...`);
     }
   },
 
