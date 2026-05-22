@@ -332,13 +332,16 @@ export const AudioPanel: React.FC = () => {
 
           if (voiceoverKeyChanged || voiceoverSourceChanged || durationChanged || originalKeyChanged || updatedAtChanged) {
             sessionChanged = true;
-            console.log(`[AudioPanel][narration-status] Step ${step.sequence} (${step.id}) changed:`, {
-              voiceoverKey: `${step.voiceoverKey} -> ${status.voiceoverKey}`,
-              voiceoverSource: `${(step as any).voiceoverSource} -> ${status.voiceoverSource}`,
-              duration: `${step.voiceoverDurationMs} -> ${status.voiceoverDurationMs}`,
-              originalVoiceoverKey: `${(step as any).originalVoiceoverKey} -> ${status.originalVoiceoverKey}`,
-              updatedAt: `${(step as any).updatedAt} -> ${status.updatedAt}`
-            });
+            const isInitialSync = (step as any).updatedAt === undefined || (step as any).updatedAt === null;
+            if (!isInitialSync) {
+              console.log(`[AudioPanel][narration-status] Step ${step.sequence} (${step.id}) changed:`, {
+                voiceoverKey: `${step.voiceoverKey} -> ${status.voiceoverKey}`,
+                voiceoverSource: `${(step as any).voiceoverSource} -> ${status.voiceoverSource}`,
+                duration: `${step.voiceoverDurationMs} -> ${status.voiceoverDurationMs}`,
+                originalVoiceoverKey: `${(step as any).originalVoiceoverKey} -> ${status.originalVoiceoverKey}`,
+                updatedAt: `${(step as any).updatedAt} -> ${status.updatedAt}`
+              });
+            }
             return {
               ...step,
               voiceoverKey: status.voiceoverKey,
@@ -355,14 +358,25 @@ export const AudioPanel: React.FC = () => {
           console.log('[AudioPanel] Syncing updated narration status to global store.');
           const updatedAssets = { ...(currentSession.assets ?? {}) };
           for (const step of updatedSteps) {
+            const prevStep = currentSession.steps.find(s => s.id === step.id);
+            const isInitialSync = prevStep && ((prevStep as any).updatedAt === undefined || (prevStep as any).updatedAt === null);
+
             if (step.voiceoverKey) {
               const t = (step as any).updatedAt || Date.now();
-              updatedAssets[step.voiceoverKey] = apiClient.getUrl(`/assets/${step.voiceoverKey}?t=${t}`);
-              console.log(`[AudioPanel] step ${step.sequence} updated asset url: ${updatedAssets[step.voiceoverKey]}`);
+              const newUrl = apiClient.getUrl(`/assets/${step.voiceoverKey}?t=${t}`);
+              if (updatedAssets[step.voiceoverKey] !== newUrl) {
+                updatedAssets[step.voiceoverKey] = newUrl;
+                if (!isInitialSync) {
+                  console.log(`[AudioPanel] step ${step.sequence} updated asset url: ${newUrl}`);
+                }
+              }
             }
             if ((step as any).originalVoiceoverKey) {
               const t = (step as any).updatedAt || Date.now();
-              updatedAssets[(step as any).originalVoiceoverKey] = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}?t=${t}`);
+              const newUrl = apiClient.getUrl(`/assets/${(step as any).originalVoiceoverKey}?t=${t}`);
+              if (updatedAssets[(step as any).originalVoiceoverKey] !== newUrl) {
+                updatedAssets[(step as any).originalVoiceoverKey] = newUrl;
+              }
             }
           }
           useStudioStore.setState({
