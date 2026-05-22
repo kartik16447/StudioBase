@@ -23,7 +23,8 @@ export const ScriptPanel: React.FC = () => {
   
   const [tone, setTone] = useState('Friendly & concise');
   const [search, setSearch] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
+  const isAiProcessing = useStudioStore(state => state.isAiProcessing);
+  const triggerPipeline = useStudioStore(state => state.triggerPipeline);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
@@ -54,13 +55,18 @@ export const ScriptPanel: React.FC = () => {
         <div className="flex items-center justify-between">
           <SectionLabel className="!mb-0">Voiceover tone</SectionLabel>
           <button
-            onClick={() => {
-              setIsGenerating(true);
-              setTimeout(() => setIsGenerating(false), 2800);
+            disabled={isAiProcessing}
+            onClick={async () => {
+              console.log('[ScriptPanel][Regenerate all] Button clicked.');
+              try {
+                await triggerPipeline();
+              } catch (err) {
+                console.error('[ScriptPanel][Regenerate all] triggerPipeline failed!', err);
+              }
             }}
-            className="text-[11px] text-primary font-semibold inline-flex items-center gap-1 hover:opacity-80"
+            className="text-[11px] text-primary font-semibold inline-flex items-center gap-1 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <I.Sparkles size={11} strokeWidth={2.4} /> Regenerate all
+            <I.Sparkles size={11} strokeWidth={2.4} className={cn(isAiProcessing && "animate-spin")} /> {isAiProcessing ? 'Regenerating...' : 'Regenerate all'}
           </button>
         </div>
         <div className="flex flex-wrap gap-1.5 mt-2">
@@ -80,7 +86,7 @@ export const ScriptPanel: React.FC = () => {
       </div>
 
       {/* Step list — wrapped in AIShimmer for processing state */}
-      <AIShimmer isActive={isGenerating} className="flex-1 min-h-0">
+      <AIShimmer isActive={isAiProcessing} className="flex-1 min-h-0">
         <div className="h-full scroll-y p-2 space-y-1">
           {steps.map((step, idx) => (
             <ScriptStepRow 

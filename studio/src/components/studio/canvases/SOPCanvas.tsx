@@ -5,7 +5,6 @@ import { I } from '../../../components/icons';
 import { Badge, AIShimmer, AIButton, DotGrid, Button, cn } from '../../../components/ui';
 import { SummaryCallout, StepCard, ChapterBreak } from '../../../components/studio';
 import { RenderConstants } from '../../../modules/render-engine/RenderConstants';
-import { apiClient } from '../../../lib/apiClient';
 import type { Step, ChapterBreak as IChapterBreak } from '../../../../../shared/types/session';
 import { CommentPanel } from '../panels/CommentPanel';
 import { EmbedModal } from '../panels/EmbedModal';
@@ -30,32 +29,13 @@ export const SOPCanvas: React.FC = () => {
   const setCommentsPanelOpen = useStudioStore(state => state.setCommentsPanelOpen);
   const unresolvedCount = comments.filter((c) => !c.resolvedAt).length;
 
-  const fetchSession = useStudioStore(state => state.fetchSession);
+  const isAiProcessing = useStudioStore(state => state.isAiProcessing);
+  const triggerPipeline = useStudioStore(state => state.triggerPipeline);
 
-  const [isProcessing, setIsProcessing] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-
-  // Poll every 3s after trigger until session is ready or failed
-  const startPolling = (sessionId: string) => {
-    console.log('[SOPCanvas] startPolling — sessionId:', sessionId);
-    if (pollingRef.current) clearInterval(pollingRef.current);
-    pollingRef.current = setInterval(async () => {
-      await fetchSession(sessionId);
-      const status = useStudioStore.getState().sessionStatus;
-      if (status === 'ready' || status === 'failed' || status === 'credit_exhausted') {
-        console.log('[SOPCanvas] polling done — status:', status);
-        clearInterval(pollingRef.current!);
-        pollingRef.current = null;
-        setIsProcessing(false);
-      }
-    }, 3000);
-  };
-
-  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current); }, []);
 
   // Scroll the focused card into view when focus changes
   useEffect(() => {
@@ -206,37 +186,27 @@ export const SOPCanvas: React.FC = () => {
 
         <div className="my-6 flex items-center justify-end">
           <AIButton
-            isProcessing={isProcessing}
+            isProcessing={isAiProcessing}
             icon={I.Sparkles}
             onClick={async () => {
               console.log('[SOPCanvas][Generate AI Content] Button clicked.');
-              if (!session || isProcessing) {
-                console.log('[SOPCanvas][Generate AI Content] Bailing out. Session:', !!session, 'isProcessing:', isProcessing);
+              if (!session || isAiProcessing) {
+                console.log('[SOPCanvas][Generate AI Content] Bailing out. Session:', !!session, 'isAiProcessing:', isAiProcessing);
                 return;
               }
               console.log(`[SOPCanvas][Generate AI Content] Starting processing for sessionId: ${session.sessionId}`);
-              setIsProcessing(true);
               try {
-                const payload = {
-                  sessionId: session.sessionId,
-                  requestedOutputs: { sop: true, demo: true },
-                };
-                console.log('[SOPCanvas][Generate AI Content] Sending POST to /pipeline/trigger with payload:', payload);
-                const res = await apiClient.post('/pipeline/trigger', payload);
-                console.log('[SOPCanvas][Generate AI Content] Server accepted trigger request. Response:', res);
-                console.log('[SOPCanvas][Generate AI Content] Starting client-side polling to wait for backend processing to finish...');
-                startPolling(session.sessionId);
+                await triggerPipeline();
               } catch (err) {
-                console.error('[SOPCanvas][Generate AI Content] /pipeline/trigger request failed!', err);
-                setIsProcessing(false);
+                console.error('[SOPCanvas][Generate AI Content] triggerPipeline failed!', err);
               }
             }}
           >
-            {isProcessing ? 'Generating AI Content…' : 'Generate AI Content'}
+            {isAiProcessing ? 'Generating AI Content…' : 'Generate AI Content'}
           </AIButton>
         </div>
 
-        <AIShimmer isActive={isProcessing} className="rounded-card">
+        <AIShimmer isActive={isAiProcessing} className="rounded-card">
           <div className="space-y-6">
             {items.map((it, i) => {
               const itemKey = it.kind === 'step' ? (it.step.id || `step-${it.idx}`) : `ch-${i}`;

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import type { SessionEnvelope, Step } from '../../../shared/types/session';
 import { apiClient, type CommentItem, type NotificationItem } from '../lib/apiClient';
 
+let pipelinePollInterval: ReturnType<typeof setInterval> | null = null;
+
 export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'player' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team' | 'analytics';
 
 interface Route {
@@ -116,6 +118,11 @@ interface StudioState {
   revertAudio: (sessionId: string, stepId: string) => Promise<void>;
   pollAudioStatus: (sessionId: string, stepId: string) => Promise<void>;
   patchAudioDuration: (sessionId: string, stepId: string, durationMs: number) => Promise<void>;
+
+  isAiProcessing: boolean;
+  triggerPipeline: () => Promise<void>;
+  startPipelinePolling: (sessionId: string) => void;
+  stopPipelinePolling: () => void;
 }
 
 // const RESTORABLE_ROUTES: RouteName[] = ['home', 'brand', 'templates', 'team', 'analytics'];
@@ -477,13 +484,29 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       }
       sessionData.assets = assets;
 
-      set({ session: sessionData, sessionStatus: (data as any).status ?? null });
+      const status = (data as any).status ?? null;
+      set({ session: sessionData, sessionStatus: status });
       if (sessionData.steps?.length > 0) {
         set({ focusedStepId: sessionData.steps[0].id, focusedStepIndex: 0 });
       }
       // Initialise sopStatus from the backend response (sopStatus lives on the SOP row, not R2 envelope)
       if (data.sopStatus) {
         set({ sopStatus: data.sopStatus as 'draft' | 'review' | 'published' });
+      }
+
+      if (status === 'processing') {
+        set({ isAiProcessing: true });
+        if (!pipelinePollInterval) {
+          get().startPipelinePolling(sessionId);
+        }
+      } else {
+        if (status === 'ready' || status === 'failed' || status === 'credit_exhausted') {
+          if (pipelinePollInterval) {
+            get().stopPipelinePolling();
+          } else {
+            set({ isAiProcessing: false });
+          }
+        }
       }
     } catch (err: any) {
       console.error('[fetchSession] error:', err.message);
@@ -782,5 +805,58 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   patchAudioDuration: async (sessionId, stepId, durationMs) => {
     await apiClient.patch(`/sessions/${sessionId}/steps/${stepId}/audio-duration`, { durationMs });
     get().updateStep(stepId, { voiceoverDurationMs: durationMs } as any);
+  },
+
+  isAiProcessing: false,
+
+  triggerPipeline: async () => {
+    const { session, startPipelinePolling } = get();
+    if (!session) return;
+    const sessionId = session.sessionId;
+    set({ isAiProcessing: true });
+    try {
+      const payload = {
+        sessionId,
+        requestedOutputs: { sop: true, demo: true },
+      };
+      console.log('[useStudioStore][triggerPipeline] Sending POST to /pipeline/trigger with payload:', payload);
+      await apiClient.post('/pipeline/trigger', payload);
+      console.log('[useStudioStore][triggerPipeline] Pipeline triggered successfully. Starting polling...');
+      startPipelinePolling(sessionId);
+    } catch (err) {
+      console.error('[useStudioStore][triggerPipeline] Pipeline trigger failed:', err);
+      set({ isAiProcessing: false });
+      throw err;
+    }
+  },
+
+  startPipelinePolling: (sessionId: string) => {
+    const { stopPipelinePolling, fetchSession } = get();
+    stopPipelinePolling();
+    
+    console.log('[useStudioStore][startPipelinePolling] Starting background polling for sessionId:', sessionId);
+    
+    pipelinePollInterval = setInterval(async () => {
+      try {
+        await fetchSession(sessionId);
+        const status = get().sessionStatus;
+        console.log('[useStudioStore][polling] sessionStatus:', status);
+        if (status === 'ready' || status === 'failed' || status === 'credit_exhausted') {
+          console.log('[useStudioStore][polling] Terminal status reached:', status);
+          get().stopPipelinePolling();
+        }
+      } catch (err) {
+        console.error('[useStudioStore][polling] Fetch error:', err);
+      }
+    }, 3000);
+  },
+
+  stopPipelinePolling: () => {
+    if (pipelinePollInterval) {
+      console.log('[useStudioStore][stopPipelinePolling] Stopping background polling...');
+      clearInterval(pipelinePollInterval);
+      pipelinePollInterval = null;
+    }
+    set({ isAiProcessing: false });
   },
 }));
