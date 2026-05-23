@@ -39,4 +39,4 @@ export const V1_API_URL = `${BACKEND_URL}/v1`;
 
 export const STUDIO_URL = DEV_MODE
   ? "http://localhost:5173"
-  : "https://studio.studiobase.app";
+  : "https://studiobase-umber.vercel.app";

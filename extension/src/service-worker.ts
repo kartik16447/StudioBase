@@ -1,6 +1,6 @@
 import { AppState, CaptureTarget, WorkerMessage, BackendUser, StorageSchema } from "./types";
 import { sbLog } from "./logger";
-import { BACKEND_URL } from "../../shared/constants";
+import { BACKEND_URL, STUDIO_URL } from "../../shared/constants";
 import {
   startSession,
   stopSession,
@@ -246,6 +246,11 @@ chrome.runtime.onMessage.addListener(
       case "RETRY_UPLOAD":
         retryUpload();
         break;
+      case "OPEN_STUDIO": {
+        const studioUrl = `${STUDIO_URL}/sessions/${state.sessionId}`;
+        chrome.tabs.create({ url: studioUrl });
+        break;
+      }
       case "CAPTURE_STEP":
         // Await init() before checking state — a restarted SW may not have
         // rehydrated state yet when the first click message arrives.

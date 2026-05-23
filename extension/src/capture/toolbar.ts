@@ -187,6 +187,19 @@ function buildRecordingPill(pill: HTMLDivElement): void {
   }));
 
   pill.appendChild(makeSpacer(4));
+  pill.appendChild(makeDivider());
+  pill.appendChild(makeSpacer(4));
+
+  // Cursor mode tool tray
+  pill.appendChild(makeCursorModeBtn('default', 'Default cursor'));
+  pill.appendChild(makeCursorModeBtn('black', 'Black cursor'));
+  pill.appendChild(makeCursorModeBtn('ripple', 'Click ripple'));
+  pill.appendChild(makeCursorModeBtn('spotlight', 'Spotlight'));
+  pill.appendChild(makeCursorModeBtn('laser', 'Laser pointer'));
+
+  pill.appendChild(makeSpacer(4));
+  pill.appendChild(makeDivider());
+  pill.appendChild(makeSpacer(4));
 
   // Stop & Process
   pill.appendChild(makePillBtn('stop', 'Stop & Process', 'danger', () => {
@@ -234,6 +247,19 @@ function buildPausedPill(pill: HTMLDivElement): void {
     chrome.runtime.sendMessage({ type: 'ANNOTATION' });
   }));
 
+  pill.appendChild(makeSpacer(4));
+  pill.appendChild(makeDivider());
+  pill.appendChild(makeSpacer(4));
+
+  // Cursor mode tool tray
+  pill.appendChild(makeCursorModeBtn('default', 'Default cursor'));
+  pill.appendChild(makeCursorModeBtn('black', 'Black cursor'));
+  pill.appendChild(makeCursorModeBtn('ripple', 'Click ripple'));
+  pill.appendChild(makeCursorModeBtn('spotlight', 'Spotlight'));
+  pill.appendChild(makeCursorModeBtn('laser', 'Laser pointer'));
+
+  pill.appendChild(makeSpacer(4));
+  pill.appendChild(makeDivider());
   pill.appendChild(makeSpacer(4));
 
   pill.appendChild(makePillBtn('stop', 'Stop & Process', 'danger', () => {
@@ -370,6 +396,51 @@ function makeSpacer(w: number): HTMLSpanElement {
   const el = document.createElement('span');
   el.style.width = `${w}px`;
   return el;
+}
+
+const CURSOR_ICONS: Record<string, string> = {
+  default:   `<path d="M7 2L25 20L15.5 21L11.5 30L7 2Z" fill="white" stroke="rgba(0,0,0,0.5)" stroke-width="2" stroke-linejoin="round"/>`,
+  black:     `<path d="M7 2L25 20L15.5 21L11.5 30L7 2Z" fill="rgba(0,0,0,0.9)" stroke="white" stroke-width="2" stroke-linejoin="round"/>`,
+  ripple:    `<circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.8" fill="none"/><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="13" stroke="currentColor" stroke-width="1" fill="none" opacity="0.4"/>`,
+  spotlight: `<circle cx="12" cy="12" r="5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5.22 5.22l2.12 2.12M16.66 16.66l2.12 2.12M16.66 7.34l2.12-2.12M5.22 18.78l2.12-2.12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`,
+  laser:     `<circle cx="12" cy="12" r="3" fill="#FF453A"/><circle cx="12" cy="12" r="7" stroke="#FF453A" stroke-width="1.2" fill="none" opacity="0.6"/><circle cx="12" cy="12" r="11" stroke="#FF453A" stroke-width="0.8" fill="none" opacity="0.25"/>`,
+};
+
+function makeCursorModeBtn(mode: CursorMode, label: string): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.id = `sb-cursor-${mode}`;
+  btn.title = label;
+  const isLaser = mode === 'laser';
+  const isActive = activeCursorMode === mode;
+  btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block">${CURSOR_ICONS[mode]}</svg>`;
+  Object.assign(btn.style, {
+    width: '30px', height: '30px', borderRadius: '6px',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    background: isActive ? 'rgba(94,92,230,0.30)' : 'transparent',
+    border: isActive ? `1px solid rgba(94,92,230,0.55)` : '1px solid transparent',
+    padding: '0', cursor: 'pointer',
+    color: TB.textDim,
+    transition: 'background 120ms, border-color 120ms',
+  });
+  btn.addEventListener('mouseenter', () => {
+    if (activeCursorMode !== mode) btn.style.background = 'rgba(255,255,255,0.08)';
+  });
+  btn.addEventListener('mouseleave', () => {
+    if (activeCursorMode !== mode) btn.style.background = 'transparent';
+  });
+  btn.addEventListener('click', () => {
+    setCursorMode(mode);
+    // Update all cursor mode buttons' active state
+    const modes: CursorMode[] = ['default', 'black', 'ripple', 'spotlight', 'laser'];
+    modes.forEach(m => {
+      const b = document.getElementById(`sb-cursor-${m}`) as HTMLButtonElement | null;
+      if (!b) return;
+      const active = m === mode;
+      b.style.background = active ? 'rgba(94,92,230,0.30)' : 'transparent';
+      b.style.border = active ? '1px solid rgba(94,92,230,0.55)' : '1px solid transparent';
+    });
+  });
+  return btn;
 }
 
 const ICONS: Record<string, string> = {

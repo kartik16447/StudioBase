@@ -36,7 +36,7 @@ export class AudioProcessor {
 
     console.log(`[AUDIO] TTS start — session:${sessionId} step:${stepId} voiceId:${effectiveVoiceId} jobId:${jobId}`);
 
-    const audioService = getAudioService(this.env);
+    const audioService = getElevenLabsService(this.env);
     const result = await audioService.generateFromText(text, { language, voiceId: effectiveVoiceId });
 
     await this.env.R2.put(r2Key, result.buffer, {

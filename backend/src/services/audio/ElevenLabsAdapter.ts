@@ -6,14 +6,43 @@ export class ElevenLabsAdapter implements IAudioService {
 
   async generateFromText(text: string, options?: { voiceId?: string; language?: string }): Promise<AudioResult> {
     const apiKey = this.env.ELEVENLABS_API_KEY;
-    if (!apiKey || apiKey === '' || apiKey === 'DUMMY_KEY') {
-       console.log('[ElevenLabsAdapter] No API key for TTS, falling back to WorkersAIAdapter');
-       const fallback = new (require('./WorkersAIAdapter').WorkersAIAdapter)(this.env);
-       return fallback.generateFromText(text, options);
-    }
-    
+
     // Default to Rachel if no voiceId is provided
     const voiceId = options?.voiceId || '21m00Tcm4TlvDq8ikWAM';
+
+    if (!apiKey || apiKey === '' || apiKey === 'DUMMY_KEY') {
+      console.log(`[ElevenLabsAdapter] No API key for TTS — using Deepgram Aura-1 with voice mapping for voiceId: ${voiceId}`);
+
+      // Map ElevenLabs voiceId to a Deepgram Aura speaker (same mapping as swapVoice)
+      const auraSpeakers = ['angus', 'asteria', 'arcas', 'orion', 'orpheus', 'athena', 'luna', 'zeus', 'perseus', 'helios', 'hera', 'stella'];
+      let speaker = 'asteria'; // default (Rachel)
+      if (auraSpeakers.includes(voiceId.toLowerCase())) {
+        speaker = voiceId.toLowerCase();
+      } else if (voiceId === '21m00Tcm4TlvDq8ikWAM') speaker = 'asteria';
+      else if (voiceId === '29vD33N1CtxCmqQRPOHJ') speaker = 'angus';
+      else if (voiceId === '2EiwWnXF2V4jofwvRnss') speaker = 'zeus';
+      else if (voiceId === 'piTKgcLEGmPEe24yT1vF') speaker = 'luna';
+      else if (voiceId === 'AZnzlk1Xgd1AawpnG3qV') speaker = 'arcas';
+
+      try {
+        console.log(`[ElevenLabsAdapter] Calling Deepgram Aura-1 (${speaker}) for TTS...`);
+        const ttsResponse = await (this.env.AI.run as any)(
+          '@cf/deepgram/aura-1',
+          { text, speaker, encoding: 'mp3' },
+          { returnRawResponse: true }
+        ) as Response;
+
+        if (!ttsResponse.ok) throw new Error(`Deepgram Aura-1 failed: ${ttsResponse.status}`);
+
+        const outputBuffer = await ttsResponse.arrayBuffer();
+        return { buffer: outputBuffer, mimeType: 'audio/mpeg', durationMs: estimateAudioDuration(outputBuffer, 'audio/mpeg') };
+      } catch (deepgramErr: any) {
+        console.warn('[ElevenLabsAdapter] Deepgram TTS failed, falling back to MeloTTS:', deepgramErr.message);
+        const fallback = new (await import('./WorkersAIAdapter')).WorkersAIAdapter(this.env);
+        return fallback.generateFromText(text, options);
+      }
+    }
+
     console.log(`[ElevenLabsAdapter] Calling ElevenLabs Text-to-Speech API for voice: ${voiceId}`);
     
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
