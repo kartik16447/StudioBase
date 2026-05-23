@@ -4,6 +4,7 @@ import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../../components/icons';
 import { ScreenshotPlaceholder } from '../../../components/ui';
 import { handleSOPVideoExport } from '../../../modules/render-engine/ExportOrchestrator';
+import { displayText } from '../../../lib/textUtils';
 
 export const DemoCanvas: React.FC = () => {
   const session = useStudioStore(state => state.session);
@@ -66,7 +67,7 @@ export const DemoCanvas: React.FC = () => {
   const coords = step.coordinates || (step.data?.coordinates as typeof step.coordinates | undefined);
   const hotspotX = coords ? (coords.x / (coords.viewportWidth || 1440)) * 100 : 50;
   const hotspotY = coords ? (coords.y / (coords.viewportHeight || 900)) * 100 : 50;
-  const stepText = step.textOverride || step.generatedText || '';
+  const stepText = displayText(step.textOverride || step.generatedText);
 
   return (
     <div

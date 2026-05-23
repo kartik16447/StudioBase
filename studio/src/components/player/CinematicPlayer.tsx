@@ -681,15 +681,17 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       if (camStep) {
         const prevStep = stepsRef.current[currentIdxRef.current - 1] ?? null;
         const nextStep = stepsRef.current[currentIdxRef.current + 1] ?? null;
-        const ct = CinematicMath.getStepCameraTarget(camStep, stepProgress, prevStep, nextStep, isPlayingRef.current);
+        const seg = segs[currentIdxRef.current];
+        const holdFraction = seg?.holdFraction ?? 1;
+        const ct = CinematicMath.getStepCameraTarget(camStep, stepProgress, prevStep, nextStep, isPlayingRef.current, holdFraction);
         camX.set(ct.pctX);
         camY.set(ct.pctY);
         camScale.set(ct.scale);
         // Log camera target once per phase change (not every frame)
-        const phase = stepProgress < 0.20 ? 'overview' : stepProgress >= 0.80 ? 'retreat' : 'event';
+        const phase = stepProgress > holdFraction && holdFraction < 0.85 ? 'hold-focus' : stepProgress < 0.20 ? 'overview' : stepProgress >= 0.80 ? 'retreat' : 'event';
         if (phase !== (camStep as any).__lastPhase) {
           (camStep as any).__lastPhase = phase;
-          console.log('[CinematicPlayer] camera phase →', phase, '| step:', currentIdxRef.current, '| progress:', stepProgress.toFixed(2), '| target:', JSON.stringify(ct));
+          console.log('[CinematicPlayer] camera phase →', phase, '| step:', currentIdxRef.current, '| progress:', stepProgress.toFixed(2), '| holdFraction:', holdFraction.toFixed(2), '| target:', JSON.stringify(ct));
         }
       }
 

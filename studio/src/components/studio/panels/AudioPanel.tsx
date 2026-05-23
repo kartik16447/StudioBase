@@ -3,6 +3,7 @@ import { useStudioStore } from '../../../store/useStudioStore';
 import { apiClient } from '../../../lib/apiClient';
 import { I } from '../../icons';
 import { cn, Button, AIShimmer } from '../../ui';
+import { displayText } from '../../../lib/textUtils';
 
 function formatDuration(ms: number | null | undefined): string {
   if (!ms) return '';
@@ -44,7 +45,7 @@ const StepAudioRow: React.FC<{
   const [swapError, setSwapError] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement>(null);
-  const text = step.textOverride || step.generatedText || step.elementText || '';
+  const text = displayText(step.textOverride || step.generatedText) || step.elementText || '';
   
   const done = status?.voiceoverSource === 'tts' || status?.voiceoverSource === 'original' || status?.voiceoverSource === 'swap';
   const generating = status?.voiceoverSource === 'generating' || isPolling || isSwapping;

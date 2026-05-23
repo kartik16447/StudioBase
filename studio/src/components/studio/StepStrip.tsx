@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Step } from '../../../../shared/types/session';
 import { cn, StepNumber } from '../ui';
+import { displayText } from '../../lib/textUtils';
 
 interface StepStripProps {
   steps: Step[];
@@ -25,7 +26,7 @@ export const StepStrip: React.FC<StepStripProps> = ({ steps, focusedStepId, onPi
             'text-[13px] leading-snug line-clamp-2',
             focusedStepId === s.id ? 'text-text font-medium' : 'text-text-2',
           )}>
-            {(s.textOverride || s.generatedText || '').slice(0, 90)}
+            {displayText(s.textOverride || s.generatedText).slice(0, 90)}
           </span>
         </button>
       ))}

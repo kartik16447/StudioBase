@@ -164,6 +164,7 @@ export const CinematicMath = {
     prevStep: any = null,
     nextStep: any = null,
     isPlaying: boolean = true,
+    holdFraction: number = 1,
   ): CameraTarget {
     const L = RenderConstants.CAMERA_SCALE_LIMITS;
     const overview: CameraTarget = { pctX: 50, pctY: 50, scale: L.min };
@@ -235,6 +236,14 @@ export const CinematicMath = {
       }
       // Cross-page or no prev: show full overview while screenshot cross-dissolves in
       return overview;
+    }
+
+    // ── Hold / focus phase ────────────────────────────────────────────────────
+    // When audio overruns the video (holdFraction < ~0.85), the video has
+    // finished but the narration is still playing. Signal "intentional dwell"
+    // with a very subtle zoom-in (1.04) on the element so it doesn't look frozen.
+    if (holdFraction < 0.85 && stepProgress > holdFraction) {
+      return { pctX: pos.pctX, pctY: pos.pctY, scale: L.near };
     }
 
     // ── Event / comprehension phase ───────────────────────────────────────────

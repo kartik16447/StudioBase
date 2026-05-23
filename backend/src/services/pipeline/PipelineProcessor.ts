@@ -49,48 +49,80 @@ const SOP_JSON_SCHEMA = {
   required: ['title', 'summary', 'tags', 'steps', 'chapterBreaks'],
 };
 
-const SYSTEM_PROMPT = `**SYSTEM ROLE:** You are an elite technical scriptwriter producing a continuous voiceover narration for a screen-recording tutorial. Your output will be read aloud by a text-to-speech voice — the entire session must sound like one presenter speaking a single, flowing script, not a list of disconnected instructions.
+const SYSTEM_PROMPT = `**SYSTEM ROLE:** You are an elite technical scriptwriter producing a continuous voiceover narration for a screen-recording tutorial. Your output will be read aloud by a text-to-speech voice (Deepgram Aura) -- the entire session must sound like one presenter speaking a single, flowing script.
 
 Output fields:
 - title: A clear, action-oriented title (e.g. "Navigating the Dashboard"). Do not start with "How to".
-- summary: 2–3 sentences describing the goal. Write in third person.
-- tags: 2–5 lowercase keywords.
+- summary: 2-3 sentences describing the goal. Write in third person.
+- tags: 2-5 lowercase keywords.
 - steps: For each input step produce:
     - stepTitle: A short noun phrase naming the goal of this step.
-    - generatedText: The narration script for this step. See rules below.
+    - generatedText: The narration script. See all rules below.
 - chapterBreaks: Group steps into logical workflow phases using afterStepId.
 
-**NARRATION STYLE — ONE CONTINUOUS SCRIPT:**
-Write all \`generatedText\` fields as beats in a single flowing voiceover. The TTS engine (Deepgram Aura) interprets punctuation as natural speech rhythm — use this deliberately:
+**PUNCTUATION AS SPEECH RHYTHM:**
+Deepgram Aura interprets punctuation as natural pacing. Use deliberately:
+- End every narrated step with "..." so the voice trails off before the next step.
+- Use " -- " (double-dash with spaces) for a mid-sentence clause break with a slight pause.
+- For steps with visualDurationSeconds above 6, split into two sentences with \\n\\n for a paragraph breath.
+- "," creates a micro-pause within a clause (shorter than "--").
+- "?" produces rising intonation at the end -- use for observation/discovery steps.
+- "!" produces emphasis -- use once per chapter maximum for a genuine reveal moment.
+- Filler pauses like "--let's see," or "--now," render as natural hesitation (use sparingly, max 1 per chapter).
 
-- End EVERY step's narration with \`...\` so the voice trails off naturally before the next step begins.
-- Use \` — \` (em-dash with spaces) for a mid-sentence clause break when you want a slight pause within a sentence.
-- For steps with \`visualDurationSeconds\` above 6, split into two sentences with \`\\n\\n\` between them to create a natural paragraph breath.
-- Start steps 2 onward with a light connector word — "then", "from here", "next", "once there" — so consecutive clips sound linked when played back.
+**CONNECTOR VARIETY (rotate these, never repeat the same one twice in a row):**
+"then" / "from here" / "next" / "once there" / "going back" / "let's check" / "--and here," / "at this point" / "now" / "--now,"
 
-**WORD BUDGET:**
-Each step has a \`visualDurationSeconds\` field. Target \`visualDurationSeconds × 1.4\` words — comfortable speaking pace, never rushed. Hard maximum: \`visualDurationSeconds × 1.8\` words. Never exceed this.
+**WORD BUDGET -- THIS IS A HARD LIMIT. CHECK BEFORE SUBMITTING:**
+Deepgram Aura speaks at ~2.3 words/second. Hard maximum = visualDurationSeconds x 1.8 words.
 
-**THE RULES OF NARRATION:**
-1. **No "Why" Bloat:** Do not explain obvious concepts or add motivation.
-   - BAD: "Click on 'Support' to discover available resources for troubleshooting and assistance."
-   - GOOD: "Click Support..."
-2. **Be Direct:** Start with the verb or a connector word. Never use filler like "Next you will want to," "Now," or "Proceed to."
-3. **The Silence Rule:** If the action is a simple UI toggle, a browser back-button, turning off a pointer or cursor tool, or a repetitive click that adds no value — output exactly: \`[SILENCE]\`. No other text.
-4. **Grouping:** If given multiple rapid clicks in a row (under 1 second apart), summarize them as one fluid sentence ending with \`...\`.
+  visualDurationSeconds | max words | example
+  1.5s                  | 2 words   | "Click Support..."
+  2.5s                  | 4 words   | "then select the deployment..."
+  3.0s                  | 5 words   | "from here, open the Logs tab..."
+  4.0s                  | 7 words   | "now click Runtime Logs -- it opens instantly..."
+  5.0s                  | 9 words   | "--and here, the deployment overview shows build status and aliases..."
+  6.0s                  | 10 words  | "from here, select any deployment -- this opens the full build log..."
+  8.0s                  | 14 words  | use \\n\\n to split into two sentences
 
-**EXAMPLE OUTPUT for 3 consecutive steps:**
-- Step 1 generatedText: "Open the dashboard toolbar to access your workspace features..."
-- Step 2 generatedText: "then use Spotlight — the quick-launch menu — to jump between sections..."
-- Step 3 generatedText: "from here, select your project\\n\\nThis opens the full deployment history and live status..."
+If you write more words than the budget allows, audio will OVERRUN the video and the tutorial will break. Count your words. Cut ruthlessly.
+
+**SILENCE RULES -- output ONLY the text "[SILENCE]" for these, no other text:**
+- isBackNavigation is true: the user navigated back up the page hierarchy -- silence.
+- isModalInput is true with no meaningful inputValue -- silence.
+- elementRole is "svg" or "img" with no elementText and the URL has not changed from the previous step -- silence.
+- Simple UI toggles, back-button clicks, closing a modal, repetitive micro-clicks -- silence.
+- The step's enrichedElementText contains "(test input)" -- silence.
+
+**TONE RULES:**
+1. No "Why" Bloat: Never explain why an action exists. BAD: "Click Logs to see what happened during deployment." GOOD: "click Logs..."
+2. Be Direct: Start with a verb or connector. Never use "Next you will want to" / "Now proceed to" / "In order to".
+3. Discovery tone: For steps where content appears on screen (a list loads, a chart appears), end with "?" for natural rising delivery. Example: "Notice how the runtime logs stream in real time?"
+4. Reveal tone: Use "!" once per chapter when something important appears. Example: "There it is -- the full build history!"
+5. Grouping: If multiple rapid clicks happen under 1 second apart, summarize as one fluid sentence.
 
 **YOUR TASK:**
-Output ONLY valid JSON matching the schema.`;
+Output ONLY valid JSON matching the schema. Count words per step before finalizing.`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const TOOLBAR_SELECTOR_PATTERNS = ['sb-toolbar', 'sb-cursor', 'sb-stop-btn', 'sb-discard-btn'];
 const INTERNAL_ACTION_TYPES = ['desktop_anchor'];
+
+// UI chrome strings that are meaningless as narration context
+const UI_CHROME_LABELS = new Set([
+  'other', 'find…', 'find...', 'search', 'close', 'menu', 'back', 'forward',
+  '×', '✕', 'cancel', 'ok', 'done', 'submit', 'more', 'less', 'toggle',
+  'open', 'new tab', 'icon', 'logo', 'avatar',
+]);
+
+// Common test/placeholder input values that carry no semantic meaning
+const TEST_INPUT_PATTERNS = [
+  /^typing\s+(something|here|text|now)$/i,
+  /^test(ing)?(\s+\d+)?$/i,
+  /^(foo|bar|baz|hello|asdf|qwerty|sample|example|lorem|123|abc)$/i,
+  /^[a-z]{1,4}$/i,
+];
 
 function isToolbarOrInternalStep(s: Step): boolean {
   if (INTERNAL_ACTION_TYPES.includes(s.action as string)) return true;
@@ -98,12 +130,106 @@ function isToolbarOrInternalStep(s: Step): boolean {
   return TOOLBAR_SELECTOR_PATTERNS.some(p => sel.includes(p));
 }
 
-function buildStepPayload(steps: Step[]) {
-  // Filter out toolbar/internal events before sending to AI
-  const filtered = steps.filter(s => !isToolbarOrInternalStep(s));
+function isBackNavigation(step: Step, prevStep: Step | null): boolean {
+  if (!prevStep || !step.url || !prevStep.url) return false;
+  try {
+    const prev = new URL(prevStep.url).pathname.replace(/\/$/, '');
+    const curr = new URL(step.url).pathname.replace(/\/$/, '');
+    // curr is an ancestor of prev = navigated backward up the hierarchy
+    return curr !== prev && prev.startsWith(curr);
+  } catch {
+    return false;
+  }
+}
 
-  return filtered.map((s, i) => {
-    let durationSeconds = 3.0; // fallback default
+function isNoisyInput(step: Step): boolean {
+  // Input inside a modal/overlay with no screen coordinates
+  if (step.action !== 'input') return false;
+  const hasNoCoords = (step.coordinates?.x ?? 0) === 0 && (step.coordinates?.y ?? 0) === 0;
+  const isTestValue = step.inputValue
+    ? TEST_INPUT_PATTERNS.some(p => p.test(step.inputValue!.trim()))
+    : true; // no value = noisy
+  return hasNoCoords || isTestValue;
+}
+
+function enrichElementText(s: Step): string | null {
+  const raw = s.elementText;
+
+  // Image element: alt text is usually meaningless; derive from page context instead
+  if (s.elementType === 'img' || s.elementRole === 'img') {
+    const pageLabel = s.pageTitle?.split(/[-–—]/)[0]?.trim() || '';
+    return pageLabel ? `${pageLabel} link` : 'navigation link';
+  }
+
+  // Known UI chrome labels: infer from URL path or page context
+  if (raw && UI_CHROME_LABELS.has(raw.toLowerCase())) {
+    if (raw.toLowerCase().includes('find') || raw.toLowerCase().includes('search')) {
+      const pageLabel = s.pageTitle?.split(/[-–—]/)[0]?.trim() || 'page';
+      return `search / command palette on ${pageLabel}`;
+    }
+    try {
+      const seg = new URL(s.url || '').pathname.split('/').filter(Boolean).pop() || '';
+      return seg ? `navigate to ${seg}` : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return raw;
+}
+
+// Hard post-processing word budget trimmer.
+// The AI frequently ignores the word budget instruction -- this enforces it.
+function trimToBudget(text: string, visualDurationSeconds: number): string {
+  if (!text || text === '[SILENCE]') return text;
+
+  const maxWords = Math.ceil(visualDurationSeconds * 1.8);
+  const words = text.split(/\s+/);
+  if (words.length <= maxWords) return text;
+
+  console.log(`[PIPELINE] trimToBudget: ${words.length} words -> ${maxWords} (${visualDurationSeconds}s)`);
+
+  const trimmed = words.slice(0, maxWords).join(' ');
+
+  // Prefer cutting at a sentence boundary (. ! ?)
+  const sentenceEnd = Math.max(
+    trimmed.lastIndexOf('. '),
+    trimmed.lastIndexOf('! '),
+    trimmed.lastIndexOf('? '),
+  );
+  if (sentenceEnd > trimmed.length * 0.5) {
+    return trimmed.slice(0, sentenceEnd + 1).trimEnd() + '...';
+  }
+
+  // Fall back to clause boundary (-- or ,)
+  const clauseEnd = Math.max(trimmed.lastIndexOf(' -- '), trimmed.lastIndexOf(', '));
+  if (clauseEnd > trimmed.length * 0.5) {
+    return trimmed.slice(0, clauseEnd).trimEnd() + '...';
+  }
+
+  // Last resort: cut at word boundary
+  return trimmed.trimEnd().replace(/[,;:\-]+$/, '').trimEnd() + '...';
+}
+
+interface StepPayloadItem {
+  id: string;
+  action: string | null | undefined;
+  enrichedElementText: string | null;
+  elementRole: string | null | undefined;
+  inputValue: string | null | undefined;
+  pageTitle: string | null | undefined;
+  url: string | null | undefined;
+  visualDurationSeconds: number;
+  isBackNavigation: boolean;
+  isModalInput: boolean;
+}
+
+function buildStepPayload(steps: Step[]): { payload: StepPayloadItem[]; budgetMap: Map<string, number> } {
+  const filtered = steps.filter(s => !isToolbarOrInternalStep(s));
+  const budgetMap = new Map<string, number>();
+
+  const payload = filtered.map((s, i) => {
+    let durationSeconds = 3.0;
 
     if (s.timestamp != null) {
       const nextStep = filtered[i + 1];
@@ -112,25 +238,34 @@ function buildStepPayload(steps: Step[]) {
       }
     }
 
-    // Tiered psychological budget — fast actions get tighter budgets
+    // Tiered budget -- fast actions get tighter word budgets
     let budgetSeconds: number;
-    if (durationSeconds < 0.5)       budgetSeconds = 1.5;  // micro-click: 2–3 words max
-    else if (durationSeconds < 2.0)  budgetSeconds = 2.5;  // fast action: short sentence
-    else if (durationSeconds < 6.0)  budgetSeconds = durationSeconds; // natural pace
-    else                             budgetSeconds = Math.min(durationSeconds, 8.0); // cap long pauses
+    if (durationSeconds < 0.5)      budgetSeconds = 1.5;
+    else if (durationSeconds < 2.0) budgetSeconds = 2.5;
+    else if (durationSeconds < 6.0) budgetSeconds = durationSeconds;
+    else                            budgetSeconds = Math.min(durationSeconds, 8.0);
+
+    budgetMap.set(s.id, budgetSeconds);
+
+    const prevStep = i > 0 ? filtered[i - 1] : null;
+    const backNav  = isBackNavigation(s, prevStep);
+    const noisy    = isNoisyInput(s);
 
     return {
-      id: s.id,
-      action: s.action,
-      elementText: s.elementText,
-      elementRole: s.elementRole,
-      inputValue: s.inputValue,
-      pageTitle: s.pageTitle,
-      url: s.url,
-      selector: s.selector,
+      id:                  s.id,
+      action:              s.action,
+      enrichedElementText: enrichElementText(s),
+      elementRole:         s.elementRole,
+      inputValue:          noisy ? null : s.inputValue,
+      pageTitle:           s.pageTitle,
+      url:                 s.url,
       visualDurationSeconds: Math.round(budgetSeconds * 10) / 10,
+      isBackNavigation:    backNav,
+      isModalInput:        noisy,
     };
   });
+
+  return { payload, budgetMap };
 }
 
 // ─── Processor ───────────────────────────────────────────────────────────────
@@ -154,18 +289,19 @@ export class PipelineProcessor {
         .bind('processing', startedAt, sessionId).run();
 
       if (!job.r2JsonKey) throw new Error('NO_R2_KEY');
-      console.log(`[PIPELINE] fetching R2 object — key:${job.r2JsonKey}`);
+      console.log(`[PIPELINE] fetching R2 object -- key:${job.r2JsonKey}`);
 
       const obj = await this.env.R2.get(job.r2JsonKey);
       if (!obj) throw new Error('R2_OBJECT_NOT_FOUND');
 
       const envelope = await obj.json() as SessionEnvelope;
-      console.log(`[PIPELINE] envelope loaded — steps:${envelope.steps?.length ?? 0} sessionType:${envelope.sessionType}`);
+      console.log(`[PIPELINE] envelope loaded -- steps:${envelope.steps?.length ?? 0} sessionType:${envelope.sessionType}`);
 
       // ── SOP generation ──────────────────────────────────────────────────────
       if (job.requestedOutputs?.sop !== false && envelope.steps?.length > 0) {
-        const userMessage = JSON.stringify(buildStepPayload(envelope.steps));
-        console.log(`[PIPELINE] calling Workers AI — model:@cf/meta/llama-4-scout-17b-16e-instruct steps:${envelope.steps.length} inputChars:${userMessage.length}`);
+        const { payload, budgetMap } = buildStepPayload(envelope.steps);
+        const userMessage = JSON.stringify(payload);
+        console.log(`[PIPELINE] calling Workers AI -- model:@cf/meta/llama-4-scout-17b-16e-instruct steps:${payload.length} inputChars:${userMessage.length}`);
 
         const aiResponse = await (this.env.AI.run as any)(
           '@cf/meta/llama-4-scout-17b-16e-instruct',
@@ -178,8 +314,9 @@ export class PipelineProcessor {
           }
         ) as { response: string };
 
-        console.log(`[PIPELINE] AI response received — raw length:${aiResponse?.response?.length ?? 0}`);
+        console.log(`[PIPELINE] AI response received -- raw length:${aiResponse?.response?.length ?? 0}`);
         console.log(`[PIPELINE] AI raw response:`, aiResponse?.response?.slice(0, 300));
+
         const generated = JSON.parse(aiResponse.response) as {
           title: string;
           summary: string;
@@ -188,17 +325,36 @@ export class PipelineProcessor {
           chapterBreaks: { afterStepId: string; chapterTitle: string }[];
         };
 
-        const aiStepMap = new Map(generated.steps.map(s => [s.id, s]));
+        // Post-process: enforce word budget and sanitize fallback phrases
+        const FALLBACK_PHRASES = new Set(['completed action', 'other', 'find…', 'find...']);
+
+        const aiStepMap = new Map(generated.steps.map(s => {
+          const budget = budgetMap.get(s.id) ?? 3.0;
+          let text = s.generatedText?.trim() || '[SILENCE]';
+
+          // Suppress AI fallback echoes
+          if (FALLBACK_PHRASES.has(text.toLowerCase().replace(/\.+$/, '').trim())) {
+            text = '[SILENCE]';
+          }
+
+          // Enforce hard word budget
+          if (text !== '[SILENCE]') {
+            text = trimToBudget(text, budget);
+          }
+
+          return [s.id, { ...s, generatedText: text }];
+        }));
+
         envelope.steps = envelope.steps.map(step => ({
           ...step,
-          stepTitle: aiStepMap.get(step.id)?.stepTitle ?? step.stepTitle ?? null,
+          stepTitle:     aiStepMap.get(step.id)?.stepTitle     ?? step.stepTitle     ?? null,
           generatedText: aiStepMap.get(step.id)?.generatedText ?? step.generatedText,
         }));
 
         envelope.aiOutputs = {
-          title: generated.title,
+          title:   generated.title,
           summary: generated.summary,
-          tags: generated.tags,
+          tags:    generated.tags,
         };
 
         envelope.metadata = {

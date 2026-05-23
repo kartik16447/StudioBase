@@ -30,6 +30,8 @@ export interface StepSegment {
   startMs:   number;   // cumulative logical start of this step
   durationMs: number;  // resolved logical duration of this step
   endMs:     number;   // startMs + durationMs
+  /** Fraction of durationMs that is "action" (video playing). 1.0 = no hold. */
+  holdFraction: number;
 }
 
 export interface TrackClip {
@@ -168,11 +170,18 @@ export function buildTimeline(
     }
 
     // 5. Update logical segments
+    // holdFraction = fraction of step that is "action" video; remainder is hold/gap
+    const actionDuration = actionClipDuration > 0 ? actionClipDuration : resolvedDuration;
+    const holdFraction = resolvedDuration > 0
+      ? Math.min(1, actionDuration / resolvedDuration)
+      : 1;
+
     segments.push({
-      stepIndex:  i,
-      startMs:    cursor,
-      durationMs: resolvedDuration,
-      endMs:      cursor + resolvedDuration,
+      stepIndex:   i,
+      startMs:     cursor,
+      durationMs:  resolvedDuration,
+      endMs:       cursor + resolvedDuration,
+      holdFraction,
     });
 
     cursor += resolvedDuration;
