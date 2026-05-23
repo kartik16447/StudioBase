@@ -371,6 +371,12 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // We store actual pixel data (not a live element reference) so we always
   // have a valid frame even when the video seeks to a new position.
   const snapshotCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Last-good-frame buffer: after every successful renderer.render() call we
+  // copy the canvas into this offscreen canvas.  When masterFrame is null
+  // (video paused in hold clip, screenshot not yet loaded), we draw from here
+  // instead of showing black.  This is the primary fix for the hold-clip
+  // black screen — it ensures we ALWAYS have a pixel buffer to display.
+  const lastGoodFrameRef  = useRef<HTMLCanvasElement | null>(null);
 
   // Playback clock
   const currentMsRef   = useRef<number>(0);
@@ -504,6 +510,27 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // CinematicMath.getStepCameraTarget(step, stepProgress) — no step-change
   // effect needed.  The springs handle all easing between phase transitions.
 
+  // ── Eager upfront screenshot preload ─────────────────────────────────────
+  // Fire-and-forget: preload ALL step screenshots as soon as assets are known.
+  // This warms the browser's image cache so that when the per-step effect
+  // (below) creates a new Image for the current step, the onload fires almost
+  // instantly instead of racing against network latency.
+  // Critical for step-0: without this, the 1031ms action clip isn't enough
+  // time to load the screenshot before the multi-second hold clip begins,
+  // resulting in a black screen during the hold.
+  useEffect(() => {
+    if (!steps.length || !Object.keys(assets).length) return;
+    steps.forEach(step => {
+      if (!step.screenshotKey) return;
+      const url = assets[step.screenshotKey];
+      if (!url) return;
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = url; // browser caches; per-step effect re-uses from cache
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steps, assets]);
+
   // ── Screenshot preload + cross-dissolve setup ──────────────────────────────
   useEffect(() => {
     prevSlideImageRef.current  = slideImageRef.current;
@@ -518,7 +545,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.src = url;
-    img.onload = () => { slideImageRef.current = img; };
+    img.onload  = () => { slideImageRef.current = img; };
+    img.onerror = (e) => { console.warn('[CinematicPlayer] screenshot load failed:', url, e); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, currentStep?.id, currentStep?.screenshotKey]);
 
@@ -754,24 +782,33 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             masterFrame = slideImageRef.current;
           }
 
-          // Fallback chain for the frame source.
-          // snapshotCanvasRef = pixel snapshot taken right before chapter transitions.
-          // prevSlideImageRef = previous step's screenshot.
-          const safeFrame = masterFrame ?? snapshotCanvasRef.current ?? prevSlideImageRef.current;
+          // ── Fallback frame chain ────────────────────────────────────────────
+          // Priority (highest → lowest):
+          //   1. masterFrame — live video / loaded screenshot / blend canvas
+          //   2. snapshotCanvasRef — pixel snapshot before chapter transitions
+          //   3. lastGoodFrameRef — copy of canvas after last successful render
+          //      (THE primary fix: ensures hold clips never show black even when
+          //       the screenshot hasn't loaded and the video is paused)
+          //   4. prevSlideImageRef — previous step's screenshot
+          //
+          // CanvasRenderer.render() always calls drawBackground() first, which
+          // fills the canvas with the dark gradient.  When masterFrame is null
+          // (video paused during hold clip, screenshot not yet loaded), calling
+          // render() with a null frame produces a black/dark screen.
+          //
+          // The old "skip render" approach relied on canvas *retaining* its last
+          // content, but that breaks whenever canvas dimensions are reset on the
+          // first tick (which clears the canvas).  Using lastGoodFrameRef as an
+          // explicit pixel buffer guarantees we always have something valid to draw.
+          const safeFrame = masterFrame
+            ?? snapshotCanvasRef.current
+            ?? lastGoodFrameRef.current
+            ?? prevSlideImageRef.current;
 
-          // KEY FIX: only call renderer.render() when we have a valid frame.
-          //
-          // CanvasRenderer.render() ALWAYS calls drawBackground() first — which
-          // fills the canvas with the dark gradient on every single frame.  When
-          // masterFrame is null (video paused in hold clip, screenshot still loading),
-          // the background wipes the last good video frame and the user sees black.
-          //
-          // By skipping the render call entirely, the canvas retains its last
-          // painted content (the frozen video frame) until a real frame is available.
-          // This fixes the 4+ second black-screen that appears during the hold phase
-          // of steps where audio far outlasts the visual clip (step-0 here: 1031ms
-          // visual vs 5453ms audio → 4240ms hold with video paused).
           if (!safeFrame) {
+            // No frame whatsoever — player hasn't rendered a single good frame yet
+            // (very first few ticks before video/screenshot loads).  Skip render
+            // so canvas stays transparent rather than showing the dark background.
             rafId = requestAnimationFrame(tick);
             return;
           }
@@ -808,6 +845,20 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             },
             safeFrame,
           );
+
+          // ── Capture last-good-frame after every successful render ───────────
+          // This is what makes the fallback chain above work: we copy the freshly
+          // painted canvas into lastGoodFrameRef so that on the NEXT frame, if
+          // masterFrame becomes null (hold clip, slow network), we can draw this
+          // pixel buffer instead of showing black.
+          // We skip the copy when safeFrame already IS lastGoodFrameRef to avoid
+          // a pointless copy of itself.
+          if (safeFrame !== lastGoodFrameRef.current) {
+            if (!lastGoodFrameRef.current) lastGoodFrameRef.current = document.createElement('canvas');
+            const lgf = lastGoodFrameRef.current;
+            if (lgf.width !== cW || lgf.height !== cH) { lgf.width = cW; lgf.height = cH; }
+            lgf.getContext('2d')?.drawImage(canvas, 0, 0);
+          }
         }
       }
 
