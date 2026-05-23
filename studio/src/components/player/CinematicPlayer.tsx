@@ -301,14 +301,14 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     return () => {
       if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
 
-      // Pause audio and video elements to prevent memory leaks and unhandled rejections on unmount
-      const audio = audioRef.current;
-      if (audio) {
-        audio.pause();
-        audio.removeAttribute('src');
-        try {
-          audio.load();
-        } catch (_) {}
+      // Stop audio source node and close AudioContext
+      if (audioSourceRef.current) {
+        try { audioSourceRef.current.stop(); } catch (_) {}
+        audioSourceRef.current = null;
+      }
+      if (audioCtxRef.current) {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
       }
 
       const video = videoRef.current;
@@ -329,34 +329,67 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const progressBarRef     = useRef<HTMLDivElement>(null);
   const playheadThumbRef   = useRef<HTMLDivElement>(null);
   const timeDisplayRef     = useRef<HTMLSpanElement>(null);
-  // Audio — voiceover per step.  Single element, src-swapped on step change.
-  const audioRef           = useRef<HTMLAudioElement>(new Audio());
-  const isPlayPendingRef   = useRef(false);
 
-  const safePlayAudio = useCallback(() => {
-    const audio = audioRef.current;
-    if (!masterAudioUrl || !audio.src || audio.src === window.location.href) return;
-    if (isPlayPendingRef.current) return;
-    
-    if (audio.paused) {
-      isPlayPendingRef.current = true;
-      audio.play()
-        .then(() => {
-          isPlayPendingRef.current = false;
-        })
-        .catch((err) => {
-          isPlayPendingRef.current = false;
-          if (err.name !== 'AbortError') {
-            console.error('[CinematicPlayer] safePlayAudio failed:', err);
-          }
-        });
+  // ── AudioContext-based audio engine ──────────────────────────────────────
+  const audioCtxRef              = useRef<AudioContext | null>(null);
+  const audioBufferRef           = useRef<AudioBuffer | null>(null);
+  const audioSourceRef           = useRef<AudioBufferSourceNode | null>(null);
+  const audioGainRef             = useRef<GainNode | null>(null);
+  // Records audioCtx.currentTime at the moment playback starts (for Step 2 clock).
+  const audioStartContextTimeRef = useRef<number>(0);
+
+  const getOrCreateAudioCtx = useCallback((): AudioContext => {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
-  }, [masterAudioUrl]);
+    return audioCtxRef.current;
+  }, []);
+
+  // Start (or restart) audio from the given offset. Defaults to currentMsRef.
+  const safePlayAudio = useCallback((offsetMs?: number) => {
+    const buffer = audioBufferRef.current;
+    if (!buffer) return;
+
+    const audioCtx = getOrCreateAudioCtx();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+
+    // Stop any existing source node before creating a new one
+    if (audioSourceRef.current) {
+      try { audioSourceRef.current.stop(); } catch (_) {}
+      audioSourceRef.current = null;
+    }
+
+    // Ensure a single gain node (survives across source replacements)
+    if (!audioGainRef.current) {
+      audioGainRef.current = audioCtx.createGain();
+      audioGainRef.current.connect(audioCtx.destination);
+    }
+
+    const startOffsetSec = Math.max(
+      0,
+      Math.min((offsetMs ?? currentMsRef.current) / 1000, buffer.duration),
+    );
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.playbackRate.value = speedRef.current;
+    source.connect(audioGainRef.current);
+
+    const scheduledAt = audioCtx.currentTime + 0.05;
+    source.start(scheduledAt, startOffsetSec);
+    audioSourceRef.current = source;
+    // Store reference point so Step 2 can derive master clock position
+    audioStartContextTimeRef.current = scheduledAt - startOffsetSec / speedRef.current;
+
+    console.log('[CinematicPlayer] AudioBufferSourceNode started. offset:', startOffsetSec.toFixed(3), 's');
+  }, [getOrCreateAudioCtx]);
 
   const safePauseAudio = useCallback(() => {
-    const audio = audioRef.current;
-    isPlayPendingRef.current = false;
-    audio.pause();
+    if (audioSourceRef.current) {
+      try { audioSourceRef.current.stop(); } catch (_) {}
+      audioSourceRef.current = null;
+    }
+    console.log('[CinematicPlayer] AudioBufferSourceNode stopped.');
   }, []);
 
 
@@ -407,53 +440,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     }
   }, [totalMs]);
 
-  // ── Audio Lifecycle Logging ───────────────────────────────────────────────
-  useEffect(() => {
-    const audio = audioRef.current;
-    const logEvent = (name: string) => {
-      console.log(`[CinematicPlayer][AudioEvent] ${name} | src: ${audio.src} | paused: ${audio.paused} | currentTime: ${audio.currentTime} | readyState: ${audio.readyState}`);
-    };
-
-    const onPlay = () => logEvent('play');
-    const onPause = () => logEvent('pause');
-    const onPlaying = () => logEvent('playing');
-    const onWaiting = () => logEvent('waiting');
-    const onEnded = () => logEvent('ended');
-    const onError = () => {
-      console.error(`[CinematicPlayer][AudioError] Event error occurred. HTMLAudioElement error:`, audio.error);
-    };
-    const onLoadStart = () => logEvent('loadstart');
-    const onCanPlay = () => logEvent('canplay');
-    const onLoadedMetadata = () => logEvent('loadedmetadata');
-    const onEmptied = () => logEvent('emptied');
-    const onStalled = () => logEvent('stalled');
-
-    audio.addEventListener('play', onPlay);
-    audio.addEventListener('pause', onPause);
-    audio.addEventListener('playing', onPlaying);
-    audio.addEventListener('waiting', onWaiting);
-    audio.addEventListener('ended', onEnded);
-    audio.addEventListener('error', onError);
-    audio.addEventListener('loadstart', onLoadStart);
-    audio.addEventListener('canplay', onCanPlay);
-    audio.addEventListener('loadedmetadata', onLoadedMetadata);
-    audio.addEventListener('emptied', onEmptied);
-    audio.addEventListener('stalled', onStalled);
-
-    return () => {
-      audio.removeEventListener('play', onPlay);
-      audio.removeEventListener('pause', onPause);
-      audio.removeEventListener('playing', onPlaying);
-      audio.removeEventListener('waiting', onWaiting);
-      audio.removeEventListener('ended', onEnded);
-      audio.removeEventListener('error', onError);
-      audio.removeEventListener('loadstart', onLoadStart);
-      audio.removeEventListener('canplay', onCanPlay);
-      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
-      audio.removeEventListener('emptied', onEmptied);
-      audio.removeEventListener('stalled', onStalled);
-    };
-  }, []);
 
   // Deletion/Rename self-healing effect
   useEffect(() => {
@@ -473,13 +459,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           if (videoRef.current && videoUrlRef.current && renderMode === 'hybrid') {
             videoRef.current.play().catch(() => {});
           }
-          const step = stepsRef.current[currentIdxRef.current];
-          if (step?.voiceoverKey) {
-            const url = assetsRef.current[step.voiceoverKey] ?? '';
-            if (url) {
-              safePlayAudio();
-            }
-          }
+          safePlayAudio();
         }
       }
     }
@@ -638,31 +618,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       const { stepIndex: newIdx, progress: stepProgress } =
         getSegmentAt(currentMsRef.current, segs);
 
-      // ── Audio Latching & Soft-Sync ───────────────────────────────────────
-      const audio = audioRef.current;
-      if (audio && audio.src && audio.src !== window.location.href && !showChapterCardRef.current) {
-        if (audio.readyState >= 1) { // metadata loaded
-          let targetSec = currentMsRef.current / 1000;
-          if (audio.duration && targetSec > audio.duration) {
-            targetSec = audio.duration;
-          }
-          // Soft-sync if audio drifts from playhead by more than 250ms
-          if (isPlayingRef.current && !audio.seeking && Math.abs(audio.currentTime - targetSec) > 0.25) {
-            audio.currentTime = targetSec;
-          }
-        }
-        // Ensure audio play state matches player state.
-        // Exception: if the player just ended (isPlayingRef false) but audio is
-        // within 1.5 s of its natural end, let it play out so the trailing "..."
-        // sigh finishes naturally instead of being cut off mid-breath.
-        const audioNearEnd = audio.duration > 0
-          && (audio.duration - audio.currentTime) < 1.5;
-        if (isPlayingRef.current && audio.paused && !isPlayPendingRef.current) {
-          safePlayAudio();
-        } else if (!isPlayingRef.current && (!audio.paused || isPlayPendingRef.current) && !audioNearEnd) {
-          safePauseAudio();
-        }
-      }
+      // Audio state is managed via safePlayAudio/safePauseAudio in play/pause effects.
+      // No per-frame polling needed — AudioBufferSourceNode is hardware-clocked.
 
       if (newIdx !== currentIdxRef.current) {
         const prevIdx = currentIdxRef.current;
@@ -835,12 +792,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = speed;
-    audioRef.current.playbackRate = speed;
+    if (audioSourceRef.current) audioSourceRef.current.playbackRate.value = speed;
   }, [speed]);
 
   useEffect(() => {
-    audioRef.current.muted = isMuted;
-    // Also mute the backing video track so it never competes with the voiceover
+    if (audioGainRef.current) audioGainRef.current.gain.value = isMuted ? 0 : 1;
     if (videoRef.current) videoRef.current.muted = isMuted;
   }, [isMuted]);
 
@@ -951,30 +907,39 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       });
   }, [steps, assets, segments, totalMs, setMasterAudioUrl, setCompilingAudio, isAudioGenerating]);
 
-  // ── Master Audio Sync Effect ────────────────────────────────────────────────
-  // Binds the audio element's source to the master compiled track.
-  // This ONLY runs when masterAudioUrl changes, preventing thrashing.
+  // ── Master Audio Decode Effect ─────────────────────────────────────────────
+  // Decodes the compiled WAV blob into an AudioBuffer so AudioBufferSourceNode
+  // can play it on the hardware-backed AudioContext clock.
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (masterAudioUrl) {
-      console.log("[CinematicPlayer] Setting new master source:", masterAudioUrl);
-      audio.src = masterAudioUrl;
-      audio.load();
-    } else {
-      audio.pause();
-      audio.removeAttribute('src'); // Cleanly reset without triggering MediaError
-      try {
-        audio.load(); // Re-initialize the media element's empty state
-      } catch (_) {}
+    if (!masterAudioUrl) {
+      audioBufferRef.current = null;
+      // Stop any currently playing source
+      if (audioSourceRef.current) {
+        try { audioSourceRef.current.stop(); } catch (_) {}
+        audioSourceRef.current = null;
+      }
+      return;
     }
 
-    // THE STABILITY FIX: 
-    // Do NOT revoke the object URL here in the cleanup. 
-    // We will revoke it in a separate effect that tracks 
-    // when the component ACTUALLY unmounts.
-  }, [masterAudioUrl]);
+    const audioCtx = getOrCreateAudioCtx();
+    console.log('[CinematicPlayer] Decoding master audio blob:', masterAudioUrl);
+
+    fetch(masterAudioUrl)
+      .then(r => r.arrayBuffer())
+      .then(ab => audioCtx.decodeAudioData(ab))
+      .then(buffer => {
+        if (!isMountedRef.current) return;
+        audioBufferRef.current = buffer;
+        console.log('[CinematicPlayer] Master AudioBuffer decoded. Duration:', buffer.duration.toFixed(2), 's');
+        // If already playing, restart from current position with new buffer
+        if (isPlayingRef.current && !isTransitioningRef.current) {
+          safePlayAudio();
+        }
+      })
+      .catch(err => {
+        console.error('[CinematicPlayer] Failed to decode master audio:', err);
+      });
+  }, [masterAudioUrl, getOrCreateAudioCtx, safePlayAudio]);
 
   // SEPARATE CLEANUP EFFECT
   useEffect(() => {
@@ -989,15 +954,14 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   }, []);
 
   // ── Voiceover — play/pause ──────────────────────────────────────────────────
-  // Listens strictly to playback controls and masterAudioUrl, avoiding store updates.
   useEffect(() => {
-    console.log(`[CinematicPlayer][AudioPlayPauseEffect] isPlaying: ${isPlaying} | showChapterCard: ${showChapterCard} | masterAudioUrl: ${masterAudioUrl}`);
-    if (isPlaying && !isTransitioningRef.current && masterAudioUrl) {
+    console.log(`[CinematicPlayer][AudioPlayPauseEffect] isPlaying: ${isPlaying} | showChapterCard: ${showChapterCard}`);
+    if (isPlaying && !isTransitioningRef.current) {
       safePlayAudio();
     } else {
       safePauseAudio();
     }
-  }, [isPlaying, showChapterCard, masterAudioUrl, safePlayAudio, safePauseAudio]);
+  }, [isPlaying, showChapterCard, safePlayAudio, safePauseAudio]);
 
   // ── Play/Pause handling during chapter transition ──────────────────────────
   useEffect(() => {
@@ -1019,8 +983,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           if (videoRef.current && videoUrlRef.current && renderMode === 'hybrid') {
             videoRef.current.play().catch(() => {});
           }
-          if (audioRef.current.src && audioRef.current.src !== window.location.href) {
-            console.log(`[CinematicPlayer][ResumedChapterTransition] Calling safePlayAudio() for src: ${audioRef.current.src}`);
+          if (audioBufferRef.current) {
             safePlayAudio();
           }
         }, 1500);
@@ -1116,14 +1079,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       }
     }
 
-    // Seek audio if active
-    const audio = audioRef.current;
-    if (audio && audio.src && audio.src !== window.location.href) {
-      let targetSec = clamped / 1000;
-      if (audio.duration && targetSec > audio.duration) {
-        targetSec = audio.duration;
-      }
-      audio.currentTime = targetSec;
+    // Restart audio from new position if currently playing
+    if (isPlayingRef.current && audioBufferRef.current) {
+      safePlayAudio(clamped);
     }
 
     // Update progress bar immediately
