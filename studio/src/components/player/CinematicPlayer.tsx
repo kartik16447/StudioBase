@@ -651,10 +651,15 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             audio.currentTime = targetSec;
           }
         }
-        // Ensure audio play state matches player state
+        // Ensure audio play state matches player state.
+        // Exception: if the player just ended (isPlayingRef false) but audio is
+        // within 1.5 s of its natural end, let it play out so the trailing "..."
+        // sigh finishes naturally instead of being cut off mid-breath.
+        const audioNearEnd = audio.duration > 0
+          && (audio.duration - audio.currentTime) < 1.5;
         if (isPlayingRef.current && audio.paused && !isPlayPendingRef.current) {
           safePlayAudio();
-        } else if (!isPlayingRef.current && (!audio.paused || isPlayPendingRef.current)) {
+        } else if (!isPlayingRef.current && (!audio.paused || isPlayPendingRef.current) && !audioNearEnd) {
           safePauseAudio();
         }
       }
@@ -1264,9 +1269,15 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             </div>
           )}
 
-          {/* Ended overlay */}
+          {/* Ended overlay — delayed so the trailing audio "..." sigh can finish
+               before the dark overlay appears over the canvas */}
           {isEnded && (
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1.2, duration: 0.5 }}
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8"
+            >
               <div className="w-16 h-16 rounded-full bg-indigo-500/20 flex items-center justify-center mb-5">
                 <I.CheckCircle size={30} className="text-indigo-400" strokeWidth={2} />
               </div>
@@ -1286,7 +1297,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                   Stay here
                 </button>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* Step counter badge */}
