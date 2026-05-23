@@ -3,6 +3,7 @@ import { I } from '../components/icons';
 import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
 import { CinematicPlayer } from '../components/player/CinematicPlayer';
+import { displayText } from '../lib/textUtils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,7 +55,7 @@ const PublicStepCard: React.FC<{ step: PublicStep; index: number; assets?: Recor
   const [imgLoaded, setImgLoaded] = useState(false);
   const screenshotUrl = step.screenshotKey && assets?.[step.screenshotKey] ? assets[step.screenshotKey] : null;
   const title = step.stepTitle || step.elementText || `Step ${index + 1}`;
-  const text = step.textOverride || step.generatedText || step.elementText || '';
+  const text = displayText(step.textOverride || step.generatedText) || step.elementText || '';
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -232,7 +233,9 @@ export const SharePage: React.FC = () => {
   const title = session.aiOutputs?.title || 'Walkthrough';
   const summary = session.aiOutputs?.summary;
   const tags = session.aiOutputs?.tags || [];
-  const steps = session.steps || [];
+  const steps = [...(session.steps || [])].sort(
+    (a, b) => ((a as any).timestamp ?? 0) - ((b as any).timestamp ?? 0)
+  );
   const stepCount = session.metadata?.stepCount || steps.length;
   const chapterMap = new Map((session.metadata?.chapterBreaks || []).map(c => [c.afterStepId, c]));
   let chapterIndex = 1;

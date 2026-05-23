@@ -3,6 +3,7 @@ import { I } from '../components/icons';
 import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
 import { CinematicPlayer, type CinematicPlayerHandle } from '../components/player/CinematicPlayer';
+import { displayText } from '../lib/textUtils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ const TranscriptPanel: React.FC<{
           const isActive = i === currentIndex;
           const thumb    = step.screenshotKey ? assets[step.screenshotKey] : null;
           const title    = step.stepTitle || step.elementText || `Step ${i + 1}`;
-          const text     = step.textOverride || step.generatedText || '';
+          const text     = displayText(step.textOverride || step.generatedText);
           const chapterTitle = chapterMap.get(step.id);
           if (chapterTitle) chapterIdx++;
           return (
@@ -276,7 +277,12 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     return () => clearInterval(id);
   }, [fetchSessionData]);
 
-  const steps  = session?.steps  || [];
+  // Sort by timestamp to guarantee recording order regardless of how the extension uploaded them.
+  // Screenshot keys and voiceover keys are already attached per-step by the backend.
+  const steps = useMemo(() => {
+    const raw = session?.steps || [];
+    return [...raw].sort((a, b) => ((a as any).timestamp ?? 0) - ((b as any).timestamp ?? 0));
+  }, [session?.steps]);
   const assets = session?.assets || {};
 
   const sessionStartMs = useMemo(() => {
@@ -318,7 +324,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const videoUrl     = (session as any).videoKey ? assets[(session as any).videoKey] ?? null : null;
   const currentStep  = steps[displayIndex];
   const currentTitle = currentStep?.stepTitle || currentStep?.elementText || `Step ${displayIndex + 1}`;
-  const currentText  = currentStep?.textOverride || currentStep?.generatedText || '';
+  const currentText  = displayText(currentStep?.textOverride || currentStep?.generatedText);
   const siteDomain   = getDomain(session.capturedUrl);
 
   let currentChapter = '';
