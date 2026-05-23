@@ -367,8 +367,10 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const transitionStartRef= useRef<number>(-Infinity);
   const leavingStepRef    = useRef<PlayerStep | null>(null);
   const previousIdxRef    = useRef<number>(0);
-  // Last non-null rendered frame — prevents black screen during video seek / screenshot load gaps
-  const lastFrameRef      = useRef<HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | null>(null);
+  // Offscreen canvas snapshot taken right before chapter transitions.
+  // We store actual pixel data (not a live element reference) so we always
+  // have a valid frame even when the video seeks to a new position.
+  const snapshotCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Playback clock
   const currentMsRef   = useRef<number>(0);
@@ -649,6 +651,20 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         if (chapter && isPlayingRef.current && !isTransitioningRef.current) {
           console.log('[CinematicPlayer] Chapter transition triggered for:', chapter.chapterTitle);
           isTransitioningRef.current = true;
+
+          // ── Snapshot current canvas pixels before we change anything ─────
+          // We store actual pixel data (not a live element reference), so the
+          // canvas continues to show the last good frame during the card and
+          // the few rAF frames after it exits (when the video is still seeking).
+          if (canvas) {
+            if (!snapshotCanvasRef.current) snapshotCanvasRef.current = document.createElement('canvas');
+            const snap = snapshotCanvasRef.current;
+            if (snap.width !== canvas.width || snap.height !== canvas.height) {
+              snap.width = canvas.width; snap.height = canvas.height;
+            }
+            snap.getContext('2d')?.drawImage(canvas, 0, 0);
+          }
+
           setShowChapterCard(chapter.chapterTitle);
 
           // Pause backing media immediately during overlay
@@ -665,7 +681,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             console.log('[CinematicPlayer] Chapter transition completed.');
             isTransitioningRef.current = false;
             setShowChapterCard(null);
-          }, 1500); // 1.5 seconds transition duration
+            // Clear snapshot after a short post-card window so normal rendering takes over
+            setTimeout(() => { snapshotCanvasRef.current = null; }, 600);
+          }, 800); // 0.8 s — enough to read the title, short enough to feel fluid
         } else {
           console.log('[CinematicPlayer] step advance', currentIdxRef.current, '→', newIdx, '| currentMs:', Math.round(currentMsRef.current), '| totalMs:', Math.round(totMs));
           currentIdxRef.current = newIdx;
@@ -738,8 +756,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
           // Cache the last valid frame so we never draw black during
           // transient gaps (video seek after chapter card, screenshot still loading)
-          if (masterFrame) lastFrameRef.current = masterFrame;
-          const safeFrame = masterFrame ?? lastFrameRef.current;
+          // Use snapshot as fallback when masterFrame is null (e.g. video mid-seek
+          // post-chapter-card) OR the screenshot hasn't loaded yet.
+          // snapshotCanvasRef holds actual pixel data, not a live element ref,
+          // so it always shows the last good frame regardless of video state.
+          const safeFrame = masterFrame ?? snapshotCanvasRef.current ?? prevSlideImageRef.current;
 
           // Cursor lerp (smooth cursor transition between steps)
           const leaving = leavingStepRef.current;
@@ -997,7 +1018,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             console.log(`[CinematicPlayer][ResumedChapterTransition] Calling safePlayAudio() for src: ${audioRef.current.src}`);
             safePlayAudio();
           }
-        }, 1500);
+        }, 800);
       }
     }
   }, [isPlaying, showChapterCard, renderMode]);
