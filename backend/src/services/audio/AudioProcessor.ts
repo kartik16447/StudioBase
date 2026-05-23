@@ -36,8 +36,14 @@ export class AudioProcessor {
 
     console.log(`[AUDIO] TTS start — session:${sessionId} step:${stepId} voiceId:${effectiveVoiceId} jobId:${jobId}`);
 
+    // Ensure natural trailing breath for Aura's punctuation-based pacing.
+    // "..." cues Aura to trail off before the next step begins.
+    const ttsText = text.trimEnd().endsWith('...') || text.trimEnd().endsWith('[SILENCE]')
+      ? text
+      : text.trimEnd() + '...';
+
     const audioService = getElevenLabsService(this.env);
-    const result = await audioService.generateFromText(text, { language, voiceId: effectiveVoiceId });
+    const result = await audioService.generateFromText(ttsText, { language, voiceId: effectiveVoiceId });
 
     await this.env.R2.put(r2Key, result.buffer, {
       httpMetadata: { contentType: result.mimeType },

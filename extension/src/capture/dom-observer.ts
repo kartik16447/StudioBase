@@ -63,6 +63,8 @@ function attachListeners() {
     if (!isCapturing) return;
     const target = e.target as Element;
     if (!target || target.tagName === 'HTML' || target.tagName === 'BODY') return;
+    // Skip clicks on the StudioBase recording toolbar — these are internal tool events
+    if (target.closest('#sb-toolbar-container')) return;
     handleInteraction('click', target, e.clientX, e.clientY);
   };
 

@@ -49,7 +49,7 @@ const SOP_JSON_SCHEMA = {
   required: ['title', 'summary', 'tags', 'steps', 'chapterBreaks'],
 };
 
-const SYSTEM_PROMPT = `**SYSTEM ROLE:** You are an elite, cinematic technical scriptwriter and SOP writer. Your job is to convert a sequence of raw UI interaction logs into polished documentation and punchy, professional voiceover scripts for an automated video engine.
+const SYSTEM_PROMPT = `**SYSTEM ROLE:** You are an elite technical scriptwriter producing a continuous voiceover narration for a screen-recording tutorial. Your output will be read aloud by a text-to-speech voice — the entire session must sound like one presenter speaking a single, flowing script, not a list of disconnected instructions.
 
 Output fields:
 - title: A clear, action-oriented title (e.g. "Navigating the Dashboard"). Do not start with "How to".
@@ -57,40 +57,67 @@ Output fields:
 - tags: 2–5 lowercase keywords.
 - steps: For each input step produce:
     - stepTitle: A short noun phrase naming the goal of this step.
-    - generatedText: The narration script for this step.
+    - generatedText: The narration script for this step. See rules below.
 - chapterBreaks: Group steps into logical workflow phases using afterStepId.
 
-**THE CONSTRAINTS:**
-Each input step has a strict time budget (\`visualDurationSeconds\`). The average speaking rate is 2 words per second.
-- You MUST NEVER exceed \`visualDurationSeconds * 2\` words for a step's \`generatedText\`.
-- If the budget is 3.0s, your absolute maximum length is 6 words.
+**NARRATION STYLE — ONE CONTINUOUS SCRIPT:**
+Write all \`generatedText\` fields as beats in a single flowing voiceover. The TTS engine (Deepgram Aura) interprets punctuation as natural speech rhythm — use this deliberately:
 
-**THE RULES OF NARRATION (\`generatedText\`):**
-1. **No "Why" Bloat:** Do not explain obvious concepts.
+- End EVERY step's narration with \`...\` so the voice trails off naturally before the next step begins.
+- Use \` — \` (em-dash with spaces) for a mid-sentence clause break when you want a slight pause within a sentence.
+- For steps with \`visualDurationSeconds\` above 6, split into two sentences with \`\\n\\n\` between them to create a natural paragraph breath.
+- Start steps 2 onward with a light connector word — "then", "from here", "next", "once there" — so consecutive clips sound linked when played back.
+
+**WORD BUDGET:**
+Each step has a \`visualDurationSeconds\` field. Target \`visualDurationSeconds × 1.4\` words — comfortable speaking pace, never rushed. Hard maximum: \`visualDurationSeconds × 1.8\` words. Never exceed this.
+
+**THE RULES OF NARRATION:**
+1. **No "Why" Bloat:** Do not explain obvious concepts or add motivation.
    - BAD: "Click on 'Support' to discover available resources for troubleshooting and assistance."
-   - GOOD: "Click Support."
-2. **Be Direct:** Start with the verb. Never use filler phrases like "Next you will want to," "Now," or "Proceed to."
-3. **The Silence Rule:** If the action is a simple UI toggle, a browser back-button, turning off a pointer tool, or a repetitive navigation click that requires no explanation, you MUST output exactly the word: \`[SILENCE]\`. Do not narrate obvious visual movements.
-4. **Grouping (If provided multiple steps):** If you are handed multiple rapid clicks in a row, summarize them into one fluid sentence.
+   - GOOD: "Click Support..."
+2. **Be Direct:** Start with the verb or a connector word. Never use filler like "Next you will want to," "Now," or "Proceed to."
+3. **The Silence Rule:** If the action is a simple UI toggle, a browser back-button, turning off a pointer or cursor tool, or a repetitive click that adds no value — output exactly: \`[SILENCE]\`. No other text.
+4. **Grouping:** If given multiple rapid clicks in a row (under 1 second apart), summarize them as one fluid sentence ending with \`...\`.
+
+**EXAMPLE OUTPUT for 3 consecutive steps:**
+- Step 1 generatedText: "Open the dashboard toolbar to access your workspace features..."
+- Step 2 generatedText: "then use Spotlight — the quick-launch menu — to jump between sections..."
+- Step 3 generatedText: "from here, select your project\\n\\nThis opens the full deployment history and live status..."
 
 **YOUR TASK:**
 Output ONLY valid JSON matching the schema.`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+const TOOLBAR_SELECTOR_PATTERNS = ['sb-toolbar', 'sb-cursor', 'sb-stop-btn', 'sb-discard-btn'];
+const INTERNAL_ACTION_TYPES = ['desktop_anchor'];
+
+function isToolbarOrInternalStep(s: Step): boolean {
+  if (INTERNAL_ACTION_TYPES.includes(s.action as string)) return true;
+  const sel = (s.selector || '').toLowerCase();
+  return TOOLBAR_SELECTOR_PATTERNS.some(p => sel.includes(p));
+}
+
 function buildStepPayload(steps: Step[]) {
-  return steps.map((s, i) => {
+  // Filter out toolbar/internal events before sending to AI
+  const filtered = steps.filter(s => !isToolbarOrInternalStep(s));
+
+  return filtered.map((s, i) => {
     let durationSeconds = 3.0; // fallback default
-    
-    if (s.timestamp !== undefined && s.timestamp !== null) {
-      const nextStep = steps[i + 1];
-      if (nextStep && nextStep.timestamp !== undefined && nextStep.timestamp !== null) {
+
+    if (s.timestamp != null) {
+      const nextStep = filtered[i + 1];
+      if (nextStep?.timestamp != null) {
         durationSeconds = (nextStep.timestamp - s.timestamp) / 1000;
       }
     }
-    
-    // Enforce minimum budget floor for micro-actions (e.g. fast clicks)
-    const budgetSeconds = Math.max(durationSeconds, 3.0);
+
+    // Tiered psychological budget — fast actions get tighter budgets
+    let budgetSeconds: number;
+    if (durationSeconds < 0.5)       budgetSeconds = 1.5;  // micro-click: 2–3 words max
+    else if (durationSeconds < 2.0)  budgetSeconds = 2.5;  // fast action: short sentence
+    else if (durationSeconds < 6.0)  budgetSeconds = durationSeconds; // natural pace
+    else                             budgetSeconds = Math.min(durationSeconds, 8.0); // cap long pauses
 
     return {
       id: s.id,

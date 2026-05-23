@@ -6,8 +6,9 @@
  * ensuring logical synchronization between procedural animations and raw media.
  */
 
-export const DEFAULT_STEP_MS = 5000; // fallback when voiceoverDurationMs absent
-export const MIN_STEP_MS     = 1000; // never shorter than 1 s
+export const DEFAULT_STEP_MS    = 5000; // fallback when voiceoverDurationMs absent
+export const MIN_STEP_MS        = 1000; // never shorter than 1 s
+export const POST_STEP_GAP_MS   = 250;  // silence gap between steps — lets Aura's trailing ... breathe
 
 export const MIN_PLAYBACK_RATES: Record<string, number> = {
   navigate: 0.6,
@@ -149,7 +150,24 @@ export function buildTimeline(
       });
     }
 
-    // 3. Update logical segments
+    // 4. Inter-step gap — silence + video hold so Aura's trailing ... can breathe
+    const isLastStep = i === steps.length - 1;
+    if (!isLastStep) {
+      // Hold the last video frame during the gap
+      const gapSourceMs = useVideoTimestamps
+        ? Math.max(0, startSourceMs + Math.max(0, visualDuration - 1))
+        : 0;
+      videoTrack.clips.push({
+        stepIndex: i,
+        logicalStartMs: cursor + resolvedDuration,
+        logicalDurationMs: POST_STEP_GAP_MS,
+        sourceStartMs: gapSourceMs,
+        type: 'hold',
+      });
+      resolvedDuration += POST_STEP_GAP_MS;
+    }
+
+    // 5. Update logical segments
     segments.push({
       stepIndex:  i,
       startMs:    cursor,
