@@ -343,12 +343,26 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   }, []);
 
   // Start (or restart) audio from the given offset. Defaults to currentMsRef.
+  // Always creates the AudioContext and sets audioStartContextTimeRef so the
+  // rAF clock advances even when there is no audio buffer (no voiceover steps).
   const safePlayAudio = useCallback((offsetMs?: number) => {
-    const buffer = audioBufferRef.current;
-    if (!buffer) return;
-
     const audioCtx = getOrCreateAudioCtx();
     if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+
+    const resolvedOffsetMs = offsetMs ?? currentMsRef.current;
+    const startOffsetSec   = resolvedOffsetMs / 1000;
+
+    // Always rebase the clock reference — this is what drives currentMsRef
+    // in the rAF tick regardless of whether there is audio.
+    const scheduledAt = audioCtx.currentTime + 0.05;
+    audioStartContextTimeRef.current = scheduledAt - startOffsetSec / speedRef.current;
+
+    const buffer = audioBufferRef.current;
+    if (!buffer) {
+      // No audio — clock is set, playback will advance visually only
+      console.log('[CinematicPlayer] No audio buffer — clock set, visual-only playback.');
+      return;
+    }
 
     // Stop any existing source node before creating a new one
     if (audioSourceRef.current) {
@@ -362,23 +376,16 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       audioGainRef.current.connect(audioCtx.destination);
     }
 
-    const startOffsetSec = Math.max(
-      0,
-      Math.min((offsetMs ?? currentMsRef.current) / 1000, buffer.duration),
-    );
+    const clampedOffsetSec = Math.max(0, Math.min(startOffsetSec, buffer.duration));
 
     const source = audioCtx.createBufferSource();
     source.buffer = buffer;
     source.playbackRate.value = speedRef.current;
     source.connect(audioGainRef.current);
-
-    const scheduledAt = audioCtx.currentTime + 0.05;
-    source.start(scheduledAt, startOffsetSec);
+    source.start(scheduledAt, clampedOffsetSec);
     audioSourceRef.current = source;
-    // Store reference point so Step 2 can derive master clock position
-    audioStartContextTimeRef.current = scheduledAt - startOffsetSec / speedRef.current;
 
-    console.log('[CinematicPlayer] AudioBufferSourceNode started. offset:', startOffsetSec.toFixed(3), 's');
+    console.log('[CinematicPlayer] AudioBufferSourceNode started. offset:', clampedOffsetSec.toFixed(3), 's');
   }, [getOrCreateAudioCtx]);
 
   const safePauseAudio = useCallback(() => {
