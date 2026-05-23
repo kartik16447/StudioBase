@@ -754,13 +754,27 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             masterFrame = slideImageRef.current;
           }
 
-          // Cache the last valid frame so we never draw black during
-          // transient gaps (video seek after chapter card, screenshot still loading)
-          // Use snapshot as fallback when masterFrame is null (e.g. video mid-seek
-          // post-chapter-card) OR the screenshot hasn't loaded yet.
-          // snapshotCanvasRef holds actual pixel data, not a live element ref,
-          // so it always shows the last good frame regardless of video state.
+          // Fallback chain for the frame source.
+          // snapshotCanvasRef = pixel snapshot taken right before chapter transitions.
+          // prevSlideImageRef = previous step's screenshot.
           const safeFrame = masterFrame ?? snapshotCanvasRef.current ?? prevSlideImageRef.current;
+
+          // KEY FIX: only call renderer.render() when we have a valid frame.
+          //
+          // CanvasRenderer.render() ALWAYS calls drawBackground() first — which
+          // fills the canvas with the dark gradient on every single frame.  When
+          // masterFrame is null (video paused in hold clip, screenshot still loading),
+          // the background wipes the last good video frame and the user sees black.
+          //
+          // By skipping the render call entirely, the canvas retains its last
+          // painted content (the frozen video frame) until a real frame is available.
+          // This fixes the 4+ second black-screen that appears during the hold phase
+          // of steps where audio far outlasts the visual clip (step-0 here: 1031ms
+          // visual vs 5453ms audio → 4240ms hold with video paused).
+          if (!safeFrame) {
+            rafId = requestAnimationFrame(tick);
+            return;
+          }
 
           // Cursor lerp (smooth cursor transition between steps)
           const leaving = leavingStepRef.current;
