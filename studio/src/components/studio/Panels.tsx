@@ -7,6 +7,7 @@ import {
 } from '../ui';
 import type { Step } from '../../../../shared/types/session';
 import { apiClient } from '../../lib/apiClient';
+import { displayText } from '../../lib/textUtils';
 
 
 // ─── Script panel ──────────────────────────────────────────────────────
@@ -262,7 +263,7 @@ const ScriptStepRow: React.FC<{
                 }
               }}
             >
-              {text || 'Click to add a voiceover script for this step...'}
+              {displayText(text) || 'Click to add a voiceover script for this step...'}
             </p>
           )}
         </div>

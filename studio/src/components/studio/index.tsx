@@ -8,6 +8,7 @@ import {
 } from '../ui';
 import { useStudioStore } from '../../store/useStudioStore';
 import { AnimatePresence } from 'framer-motion';
+import { displayText } from '../../lib/textUtils';
 
 // ─── CopyLinkButton ───────────────────────────────────────────────────
 const CopyLinkButton: React.FC<{ url: string }> = ({ url }) => {
@@ -380,7 +381,7 @@ export const StepCard: React.FC<{
           />
         ) : (
           <p className="text-[14px] leading-[1.7] text-text-2" style={{ textWrap: 'pretty' as any }}>
-            {text}
+            {displayText(text)}
           </p>
         )}
 
