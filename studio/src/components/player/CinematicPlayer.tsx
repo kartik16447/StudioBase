@@ -403,9 +403,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const leavingStepRef    = useRef<PlayerStep | null>(null);
   const previousIdxRef    = useRef<number>(0);
 
-  // Playback clock
+  // Playback clock — position driven by AudioContext hardware clock, never accumulated
   const currentMsRef   = useRef<number>(0);
-  const lastTickRef    = useRef<number>(performance.now());
   const currentIdxRef  = useRef<number>(0);
 
   // Ref-shadows of state (read in rAF without stale closures)
@@ -540,25 +539,26 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     let rafId: number;
 
     const tick = (now: number) => {
-      const dt = now - lastTickRef.current;
-      lastTickRef.current = now;
-
       const canvas    = canvasRef.current;
       const segs      = segmentsRef.current;
       const totMs     = totalMsRef.current;
       const hasVideo  = !!(videoUrlRef.current && videoRef.current);
       const video     = videoRef.current;
 
-      // ── Advance playhead ─────────────────────────────────────────────────
+      // ── Advance playhead — driven by AudioContext hardware clock ─────────
+      // Formula: (ctx.currentTime - startRef) * speed * 1000
+      // Verified: at T wall-seconds with playbackRate=speed, audio is at
+      // startOffset + T*speed seconds, and this formula matches exactly.
+      // When paused, audioSourceRef is null so currentMsRef stays frozen.
       if (isPlayingRef.current) {
-        // Deterministic wall-clock accumulator for ALL modes
-        if (!showChapterCardRef.current) {
-          const next = currentMsRef.current + dt * speedRef.current;
+        if (!showChapterCardRef.current && audioCtxRef.current) {
+          const elapsed = audioCtxRef.current.currentTime - audioStartContextTimeRef.current;
+          const next = elapsed * speedRef.current * 1000;
           if (next >= totMs) {
             currentMsRef.current = totMs;
             setIsPlaying(false);
             setIsEnded(true);
-          } else {
+          } else if (next >= 0) {
             currentMsRef.current = next;
           }
         }
@@ -1048,9 +1048,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // ── Controls ───────────────────────────────────────────────────────────────
   const handleTogglePlay = useCallback(() => {
     if (isEnded) {
-      // Restart
+      // Restart from beginning — safePlayAudio(0) will set audioStartContextTimeRef
       currentMsRef.current = 0;
-      lastTickRef.current  = performance.now();
       currentIdxRef.current = 0;
       setCurrentIndex(0);
       setIsEnded(false);
@@ -1075,8 +1074,12 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
     console.log('[CinematicPlayer] scrubTo', Math.round(ms), 'ms | currentIdxRef:', currentIdxRef.current);
     const clamped = Math.max(0, Math.min(ms, totalMsRef.current));
-    currentMsRef.current  = clamped;
-    lastTickRef.current   = performance.now();
+    currentMsRef.current = clamped;
+    // Rebase the clock reference so (ctx.currentTime - ref) * speed * 1000 = clamped
+    if (audioCtxRef.current) {
+      audioStartContextTimeRef.current =
+        audioCtxRef.current.currentTime - clamped / (speedRef.current * 1000);
+    }
     setIsEnded(false);
 
     const { stepIndex: newIdx } = getSegmentAt(clamped, segmentsRef.current);
