@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { SessionEnvelope, Step } from '../../../shared/types/session';
 import { apiClient, type CommentItem, type NotificationItem } from '../lib/apiClient';
+import { showToast } from '../components/GlobalToast';
 
 let pipelinePollInterval: ReturnType<typeof setInterval> | null = null;
 let audioPollInterval: ReturnType<typeof setInterval> | null = null;
@@ -244,7 +245,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           ? `${data.sessionJsonUrl}&_cb=${Date.now()}`
           : `${data.sessionJsonUrl}${cacheBust}`;
         console.log('[fetchSession] Fetching full JSON from R2 (cache-busted):', freshUrl);
-        const jsonContent = await apiClient.get<any>(freshUrl);
+        const jsonContent = await apiClient.get<any>(freshUrl, { cache: 'no-store' });
         if (jsonContent) {
           // ── Preserve D1 stepOverrides before R2 spread ───────────────────
           // D1 metadata arrives as a JSON string here — parse it first so we
@@ -518,10 +519,16 @@ export const useStudioStore = create<StudioState>((set, get) => ({
         }
       } else {
         if (status === 'ready' || status === 'failed' || status === 'credit_exhausted') {
-          if (pipelinePollInterval) {
+          const wasPolling = !!pipelinePollInterval;
+          if (wasPolling) {
             get().stopPipelinePolling();
           } else {
             set({ isAiProcessing: false });
+          }
+          if (wasPolling && status === 'failed') {
+            showToast('error', 'AI generation failed — please try again');
+          } else if (wasPolling && status === 'credit_exhausted') {
+            showToast('error', 'Not enough credits to generate AI content');
           }
         }
       }
@@ -969,7 +976,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     try {
       const payload = {
         sessionId,
-        requestedOutputs: { sop: true, demo: true },
+        requestedOutputs: { sop: true },
       };
       console.log('[useStudioStore][triggerPipeline] Sending POST to /pipeline/trigger with payload:', payload);
       await apiClient.post('/pipeline/trigger', payload);

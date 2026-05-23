@@ -8,6 +8,7 @@ import {
 import type { Step } from '../../../../shared/types/session';
 import { apiClient } from '../../lib/apiClient';
 import { displayText } from '../../lib/textUtils';
+import { showToast } from '../GlobalToast';
 
 
 // ─── Script panel ──────────────────────────────────────────────────────
@@ -61,8 +62,9 @@ export const ScriptPanel: React.FC = () => {
               console.log('[ScriptPanel][Regenerate all] Button clicked.');
               try {
                 await triggerPipeline();
-              } catch (err) {
+              } catch (err: any) {
                 console.error('[ScriptPanel][Regenerate all] triggerPipeline failed!', err);
+                showToast('error', err?.message || 'AI generation failed');
               }
             }}
             className="text-[11px] text-primary font-semibold inline-flex items-center gap-1 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"

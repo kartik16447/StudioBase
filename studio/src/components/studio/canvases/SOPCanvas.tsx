@@ -7,6 +7,7 @@ import { SummaryCallout, StepCard, ChapterBreak } from '../../../components/stud
 import { RenderConstants } from '../../../modules/render-engine/RenderConstants';
 import type { Step, ChapterBreak as IChapterBreak } from '../../../../../shared/types/session';
 import { displayText } from '../../../lib/textUtils';
+import { showToast } from '../../GlobalToast';
 import { CommentPanel } from '../panels/CommentPanel';
 import { EmbedModal } from '../panels/EmbedModal';
 
@@ -198,8 +199,10 @@ export const SOPCanvas: React.FC = () => {
               console.log(`[SOPCanvas][Generate AI Content] Starting processing for sessionId: ${session.sessionId}`);
               try {
                 await triggerPipeline();
-              } catch (err) {
+              } catch (err: any) {
                 console.error('[SOPCanvas][Generate AI Content] triggerPipeline failed!', err);
+                const msg = err?.message || 'Failed to start AI generation';
+                showToast('error', msg.startsWith('Need ') || msg.includes('credits') ? msg : 'AI generation failed — check console for details');
               }
             }}
           >
