@@ -273,12 +273,14 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   );
 
   // ── Playback state ─────────────────────────────────────────────────────────
-  const [isPlaying,    setIsPlaying]    = useState(false);
-  const [speed,        setSpeed]        = useState(1);
-  const [isMuted,      setIsMuted]      = useState(false);
-  const [isEnded,      setIsEnded]      = useState(false);
-  const [showControls, setShowControls] = useState(true);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPlaying,       setIsPlaying]       = useState(false);
+  const [speed,           setSpeed]           = useState(1);
+  const [isMuted,         setIsMuted]         = useState(false);
+  const [isEnded,         setIsEnded]         = useState(false);
+  const [showControls,    setShowControls]    = useState(true);
+  const [isFullscreen,    setIsFullscreen]    = useState(false);
+  // True while decodeAudioData is running — blocks play button so first press is never silent.
+  const [isDecodingAudio, setIsDecodingAudio] = useState(false);
 
   // Step index — derived from playhead, but kept as state to trigger effects
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -792,8 +794,13 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = speed;
-    if (audioSourceRef.current) audioSourceRef.current.playbackRate.value = speed;
-  }, [speed]);
+    // Restart the source node at current position so audioStartContextTimeRef
+    // stays valid for the Step 2 clock formula: (ctx.currentTime - ref) * speed * 1000.
+    // A live playbackRate mutation alone would corrupt the reference point.
+    if (isPlayingRef.current) {
+      safePlayAudio();
+    }
+  }, [speed, safePlayAudio]);
 
   useEffect(() => {
     if (audioGainRef.current) audioGainRef.current.gain.value = isMuted ? 0 : 1;
@@ -910,10 +917,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // ── Master Audio Decode Effect ─────────────────────────────────────────────
   // Decodes the compiled WAV blob into an AudioBuffer so AudioBufferSourceNode
   // can play it on the hardware-backed AudioContext clock.
+  // Blocks the play button (isDecodingAudio) until the buffer is ready so the
+  // first play press is never silently dropped.
   useEffect(() => {
     if (!masterAudioUrl) {
       audioBufferRef.current = null;
-      // Stop any currently playing source
       if (audioSourceRef.current) {
         try { audioSourceRef.current.stop(); } catch (_) {}
         audioSourceRef.current = null;
@@ -923,6 +931,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
     const audioCtx = getOrCreateAudioCtx();
     console.log('[CinematicPlayer] Decoding master audio blob:', masterAudioUrl);
+    setIsDecodingAudio(true);
 
     fetch(masterAudioUrl)
       .then(r => r.arrayBuffer())
@@ -930,16 +939,31 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       .then(buffer => {
         if (!isMountedRef.current) return;
         audioBufferRef.current = buffer;
+        setIsDecodingAudio(false);
         console.log('[CinematicPlayer] Master AudioBuffer decoded. Duration:', buffer.duration.toFixed(2), 's');
-        // If already playing, restart from current position with new buffer
+        // If play was pressed while decoding, start now that the buffer is ready
         if (isPlayingRef.current && !isTransitioningRef.current) {
           safePlayAudio();
         }
       })
       .catch(err => {
+        setIsDecodingAudio(false);
         console.error('[CinematicPlayer] Failed to decode master audio:', err);
       });
   }, [masterAudioUrl, getOrCreateAudioCtx, safePlayAudio]);
+
+  // ── Tab visibility — resume suspended AudioContext ─────────────────────────
+  // Browsers may auto-suspend AudioContext when the tab backgrounds. Resume it
+  // when the user returns so the hardware clock keeps running.
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && audioCtxRef.current?.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
 
   // SEPARATE CLEANUP EFFECT
   useEffect(() => {
@@ -1327,11 +1351,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 {/* Play/Pause */}
                 <button
                   onClick={handleTogglePlay}
-                  disabled={isCompilingAudio}
+                  disabled={isCompilingAudio || isDecodingAudio}
                   className="w-9 h-9 rounded-full bg-white flex items-center justify-center hover:bg-white/90 active:scale-95 disabled:opacity-50 flex-shrink-0 transition-all shadow"
-                  title={isCompilingAudio ? 'Compiling audio...' : isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+                  title={isCompilingAudio ? 'Compiling audio...' : isDecodingAudio ? 'Loading audio...' : isPlaying ? 'Pause (Space)' : 'Play (Space)'}
                 >
-                  {isCompilingAudio ? (
+                  {isCompilingAudio || isDecodingAudio ? (
                     <I.Loader size={15} className="text-black animate-spin" />
                   ) : isPlaying ? (
                     <I.Pause size={15} className="text-black" />
