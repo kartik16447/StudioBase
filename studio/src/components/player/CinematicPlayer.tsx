@@ -367,16 +367,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const transitionStartRef= useRef<number>(-Infinity);
   const leavingStepRef    = useRef<PlayerStep | null>(null);
   const previousIdxRef    = useRef<number>(0);
-  // Offscreen canvas snapshot taken right before chapter transitions.
-  // We store actual pixel data (not a live element reference) so we always
-  // have a valid frame even when the video seeks to a new position.
-  const snapshotCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  // Last-good-frame buffer: after every successful renderer.render() call we
-  // copy the canvas into this offscreen canvas.  When masterFrame is null
-  // (video paused in hold clip, screenshot not yet loaded), we draw from here
-  // instead of showing black.  This is the primary fix for the hold-clip
-  // black screen — it ensures we ALWAYS have a pixel buffer to display.
-  const lastGoodFrameRef  = useRef<HTMLCanvasElement | null>(null);
 
   // Playback clock
   const currentMsRef   = useRef<number>(0);
@@ -511,13 +501,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // effect needed.  The springs handle all easing between phase transitions.
 
   // ── Eager upfront screenshot preload ─────────────────────────────────────
-  // Fire-and-forget: preload ALL step screenshots as soon as assets are known.
-  // This warms the browser's image cache so that when the per-step effect
-  // (below) creates a new Image for the current step, the onload fires almost
-  // instantly instead of racing against network latency.
-  // Critical for step-0: without this, the 1031ms action clip isn't enough
-  // time to load the screenshot before the multi-second hold clip begins,
-  // resulting in a black screen during the hold.
+  // Warm the browser cache for ALL step screenshots as soon as asset URLs are
+  // available. This ensures that when a hold clip starts (video paused, audio
+  // still narrating), the current step's screenshot is already decoded and
+  // ready — avoiding the race where a 1-2 s action clip isn't long enough to
+  // fetch the image before the 3-4 s hold clip begins.
   useEffect(() => {
     if (!steps.length || !Object.keys(assets).length) return;
     steps.forEach(step => {
@@ -679,20 +667,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         if (chapter && isPlayingRef.current && !isTransitioningRef.current) {
           console.log('[CinematicPlayer] Chapter transition triggered for:', chapter.chapterTitle);
           isTransitioningRef.current = true;
-
-          // ── Snapshot current canvas pixels before we change anything ─────
-          // We store actual pixel data (not a live element reference), so the
-          // canvas continues to show the last good frame during the card and
-          // the few rAF frames after it exits (when the video is still seeking).
-          if (canvas) {
-            if (!snapshotCanvasRef.current) snapshotCanvasRef.current = document.createElement('canvas');
-            const snap = snapshotCanvasRef.current;
-            if (snap.width !== canvas.width || snap.height !== canvas.height) {
-              snap.width = canvas.width; snap.height = canvas.height;
-            }
-            snap.getContext('2d')?.drawImage(canvas, 0, 0);
-          }
-
           setShowChapterCard(chapter.chapterTitle);
 
           // Pause backing media immediately during overlay
@@ -709,9 +683,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             console.log('[CinematicPlayer] Chapter transition completed.');
             isTransitioningRef.current = false;
             setShowChapterCard(null);
-            // Clear snapshot after a short post-card window so normal rendering takes over
-            setTimeout(() => { snapshotCanvasRef.current = null; }, 600);
-          }, 800); // 0.8 s — enough to read the title, short enough to feel fluid
+          }, 1500); // 1.5 seconds transition duration
         } else {
           console.log('[CinematicPlayer] step advance', currentIdxRef.current, '→', newIdx, '| currentMs:', Math.round(currentMsRef.current), '| totalMs:', Math.round(totMs));
           currentIdxRef.current = newIdx;
@@ -782,36 +754,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             masterFrame = slideImageRef.current;
           }
 
-          // ── Fallback frame chain ────────────────────────────────────────────
-          // Priority (highest → lowest):
-          //   1. masterFrame — live video / loaded screenshot / blend canvas
-          //   2. snapshotCanvasRef — pixel snapshot before chapter transitions
-          //   3. lastGoodFrameRef — copy of canvas after last successful render
-          //      (THE primary fix: ensures hold clips never show black even when
-          //       the screenshot hasn't loaded and the video is paused)
-          //   4. prevSlideImageRef — previous step's screenshot
-          //
-          // CanvasRenderer.render() always calls drawBackground() first, which
-          // fills the canvas with the dark gradient.  When masterFrame is null
-          // (video paused during hold clip, screenshot not yet loaded), calling
-          // render() with a null frame produces a black/dark screen.
-          //
-          // The old "skip render" approach relied on canvas *retaining* its last
-          // content, but that breaks whenever canvas dimensions are reset on the
-          // first tick (which clears the canvas).  Using lastGoodFrameRef as an
-          // explicit pixel buffer guarantees we always have something valid to draw.
-          const safeFrame = masterFrame
-            ?? snapshotCanvasRef.current
-            ?? lastGoodFrameRef.current
-            ?? prevSlideImageRef.current;
-
-          if (!safeFrame) {
-            // No frame whatsoever — player hasn't rendered a single good frame yet
-            // (very first few ticks before video/screenshot loads).  Skip render
-            // so canvas stays transparent rather than showing the dark background.
-            rafId = requestAnimationFrame(tick);
-            return;
-          }
+          // During hold clips the video is paused and the screenshot may not
+          // have loaded yet (race condition on step-0 / slow networks).
+          // Fall back to the previous step's screenshot so we never pass null
+          // to renderer.render() and show a dark background instead of content.
+          if (!masterFrame) masterFrame = prevSlideImageRef.current;
 
           // Cursor lerp (smooth cursor transition between steps)
           const leaving = leavingStepRef.current;
@@ -823,6 +770,10 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                   y: lerp(leaving.coordinates.y, step.coordinates.y, tEased),
                 }}
               : step;
+
+          // Show click ripple for click/input steps so viewers can always see where
+          // the action happened, especially when the cursor moves quickly.
+          const showClickRipple = !!(step?.action && ['click', 'input'].includes(step.action));
 
           renderer.render(
             ctx,
@@ -839,26 +790,10 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 scale: camScale.get(),
               },
               timeMs: now,
-              // Video already has its own cursor in the frames; our overlay would create
-              // a second phantom cursor slightly offset from the real one.
-              showCursor: !hasVideo,
+              showCursor: showClickRipple,
             },
-            safeFrame,
+            masterFrame,
           );
-
-          // ── Capture last-good-frame after every successful render ───────────
-          // This is what makes the fallback chain above work: we copy the freshly
-          // painted canvas into lastGoodFrameRef so that on the NEXT frame, if
-          // masterFrame becomes null (hold clip, slow network), we can draw this
-          // pixel buffer instead of showing black.
-          // We skip the copy when safeFrame already IS lastGoodFrameRef to avoid
-          // a pointless copy of itself.
-          if (safeFrame !== lastGoodFrameRef.current) {
-            if (!lastGoodFrameRef.current) lastGoodFrameRef.current = document.createElement('canvas');
-            const lgf = lastGoodFrameRef.current;
-            if (lgf.width !== cW || lgf.height !== cH) { lgf.width = cW; lgf.height = cH; }
-            lgf.getContext('2d')?.drawImage(canvas, 0, 0);
-          }
         }
       }
 
@@ -1083,7 +1018,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             console.log(`[CinematicPlayer][ResumedChapterTransition] Calling safePlayAudio() for src: ${audioRef.current.src}`);
             safePlayAudio();
           }
-        }, 800);
+        }, 1500);
       }
     }
   }, [isPlaying, showChapterCard, renderMode]);
