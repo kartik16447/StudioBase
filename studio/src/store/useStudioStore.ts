@@ -963,7 +963,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const { session, startPipelinePolling } = get();
     if (!session) return;
     const sessionId = session.sessionId;
-    set({ isAiProcessing: true });
+    // Reset status to 'processing' immediately so the poll loop doesn't see
+    // the previous 'ready' status and stop on the very first tick.
+    set({ isAiProcessing: true, sessionStatus: 'processing' });
     try {
       const payload = {
         sessionId,
@@ -975,7 +977,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       startPipelinePolling(sessionId);
     } catch (err) {
       console.error('[useStudioStore][triggerPipeline] Pipeline trigger failed:', err);
-      set({ isAiProcessing: false });
+      set({ isAiProcessing: false, sessionStatus: null });
       throw err;
     }
   },
