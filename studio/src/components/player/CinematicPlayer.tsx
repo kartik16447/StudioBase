@@ -743,10 +743,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 }}
               : step;
 
-          // Show click ripple for click/input steps so viewers can always see where
-          // the action happened, especially when the cursor moves quickly.
-          const showClickRipple = !!(step?.action && ['click', 'input'].includes(step.action));
-
           renderer.render(
             ctx,
             {
@@ -762,7 +758,9 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 scale: camScale.get(),
               },
               timeMs: now,
-              showCursor: showClickRipple,
+              // Video already has its own cursor in the frames; our overlay would create
+              // a second phantom cursor slightly offset from the real one.
+              showCursor: !hasVideo,
             },
             masterFrame,
           );
