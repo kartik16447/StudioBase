@@ -38,6 +38,7 @@ import {
 } from '../../modules/render-engine/PlayerTimeline';
 import { compileAudioTrack, type AudioTrackItem } from '../../modules/render-engine/AudioTrackCompiler';
 import { useStudioStore } from '../../store/useStudioStore';
+import { WorkerExtractor } from '../../services/WorkerExtractor';
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -313,21 +314,15 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         audioCtxRef.current = null;
       }
 
-      const video = videoRef.current;
-      if (video) {
-        video.pause();
-        video.removeAttribute('src');
-        try {
-          video.load();
-        } catch (_) {}
-      }
+      // Release last decoded video frame
+      masterFrameRef.current?.close();
+      masterFrameRef.current = null;
     };
   }, []);
 
   // ── Refs (avoid stale closures in rAF) ────────────────────────────────────
   const containerRef       = useRef<HTMLDivElement>(null);
   const canvasRef          = useRef<HTMLCanvasElement>(null);
-  const videoRef           = useRef<HTMLVideoElement>(null);
   const progressBarRef     = useRef<HTMLDivElement>(null);
   const playheadThumbRef   = useRef<HTMLDivElement>(null);
   const timeDisplayRef     = useRef<HTMLSpanElement>(null);
@@ -395,6 +390,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   }, []);
 
 
+  // ── WorkerExtractor — hybrid mode frame pull ──────────────────────────────
+  const extractorRef    = useRef<WorkerExtractor | null>(null);
+  const pendingFrameRef = useRef<boolean>(false);          // backpressure: skip if decode in flight
+  const masterFrameRef  = useRef<ImageBitmap | null>(null); // latest decoded video frame
+
   // Rendering state
   const slideImageRef     = useRef<HTMLImageElement | null>(null);
   const prevSlideImageRef = useRef<HTMLImageElement | null>(null);
@@ -442,6 +442,23 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   }, [totalMs]);
 
 
+  // ── WorkerExtractor lifecycle — hybrid mode only ─────────────────────────
+  useEffect(() => {
+    if (!videoUrl || renderMode !== 'hybrid') return;
+    const extractor = new WorkerExtractor();
+    extractorRef.current = extractor;
+    extractor.init(videoUrl).catch(err =>
+      console.error('[CinematicPlayer] WorkerExtractor init failed:', err)
+    );
+    return () => {
+      extractor.destroy().catch(() => {});
+      extractorRef.current = null;
+      masterFrameRef.current?.close();
+      masterFrameRef.current = null;
+      pendingFrameRef.current = false;
+    };
+  }, [videoUrl, renderMode]);
+
   // Deletion/Rename self-healing effect
   useEffect(() => {
     if (showChapterCard) {
@@ -457,9 +474,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
         // Resume backing media if supposed to be playing
         if (isPlayingRef.current) {
-          if (videoRef.current && videoUrlRef.current && renderMode === 'hybrid') {
-            videoRef.current.play().catch(() => {});
-          }
           safePlayAudio();
         }
       }
@@ -530,8 +544,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       const canvas    = canvasRef.current;
       const segs      = segmentsRef.current;
       const totMs     = totalMsRef.current;
-      const hasVideo  = !!(videoUrlRef.current && videoRef.current);
-      const video     = videoRef.current;
+      const hasVideo  = !!(videoUrlRef.current && extractorRef.current);
 
       // ── Advance playhead — driven by AudioContext hardware clock ─────────
       // Formula: (ctx.currentTime - startRef) * speed * 1000
@@ -564,40 +577,30 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           timeDisplayRef.current.textContent = `${fmtTime(currentMsRef.current)} / ${fmtTime(totMs)}`;
         }
 
-        // Media Latching & Sync (The Magic)
-        if (hasVideo && video && timelineRef.current.videoTrack) {
+        // ── WorkerExtractor frame pull (hybrid mode) ────────────────────────
+        // Fire-and-forget with pendingFrameRef backpressure so we never queue
+        // up more decode requests than the worker can handle.
+        if (hasVideo && extractorRef.current && timelineRef.current.videoTrack && !pendingFrameRef.current) {
           const ms = currentMsRef.current;
           const clips = timelineRef.current.videoTrack.clips;
           let vClip = clips[0];
-          // Find the active clip (linear search is extremely fast for <100 items)
           for (let i = 0; i < clips.length; i++) {
             if (ms >= clips[i].logicalStartMs) vClip = clips[i];
             else break;
           }
-
           if (vClip) {
-            if (vClip.type === 'hold') {
-              // Pause the video exactly at the hold frame
-              if (!video.paused) video.pause();
-              const targetSec = vClip.sourceStartMs / 1000;
-              if (Math.abs(video.currentTime - targetSec) > 0.05) {
-                video.currentTime = targetSec;
-              }
-            } else {
-              // Action clip: ensure playing and soft-sync
-              if (video.paused && !showChapterCardRef.current) {
-                video.play().catch(() => {});
-              }
-              const clipRate = vClip.playbackRate ?? 1.0;
-              const expectedRate = clipRate * speedRef.current;
-              if (Math.abs(video.playbackRate - expectedRate) > 0.05) {
-                video.playbackRate = expectedRate;
-              }
-              const targetSec = (vClip.sourceStartMs + (ms - vClip.logicalStartMs) * clipRate) / 1000;
-              if (Math.abs(video.currentTime - targetSec) > 0.25) {
-                video.currentTime = targetSec; // soft sync
-              }
+            let targetSourceMs = vClip.sourceStartMs;
+            if (vClip.type === 'action') {
+              targetSourceMs += (ms - vClip.logicalStartMs) * (vClip.playbackRate ?? 1.0);
             }
+            pendingFrameRef.current = true;
+            extractorRef.current.getFrame(targetSourceMs).then(frame => {
+              if (frame) {
+                masterFrameRef.current?.close();
+                masterFrameRef.current = frame;
+              }
+              pendingFrameRef.current = false;
+            }).catch(() => { pendingFrameRef.current = false; });
           }
         }
       }
@@ -622,7 +625,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           setShowChapterCard(chapter.chapterTitle);
 
           // Pause backing media immediately during overlay
-          if (videoRef.current) videoRef.current.pause();
           safePauseAudio();
 
           // Advance indices so the next step's visual screen loads behind the card immediately
@@ -682,10 +684,10 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           const tEased = easeInOut(tRaw);
           const newReady = !!slideImageRef.current;
 
-          let masterFrame: HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | null = null;
+          let masterFrame: ImageBitmap | HTMLImageElement | HTMLCanvasElement | null = null;
 
-          if (hasVideo && video && !video.paused && !video.ended) {
-            masterFrame = video;
+          if (hasVideo && masterFrameRef.current) {
+            masterFrame = masterFrameRef.current;
           } else if (!newReady && prevSlideImageRef.current) {
             masterFrame = prevSlideImageRef.current;
           } else if (tRaw < 1 && prevSlideImageRef.current && newReady) {
@@ -761,7 +763,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // via the videoTrack clip map (action vs hold clips).
 
   useEffect(() => {
-    if (videoRef.current) videoRef.current.playbackRate = speed;
     // Restart the source node at current position so audioStartContextTimeRef
     // stays valid for the Step 2 clock formula: (ctx.currentTime - ref) * speed * 1000.
     // A live playbackRate mutation alone would corrupt the reference point.
@@ -772,7 +773,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
 
   useEffect(() => {
     if (audioGainRef.current) audioGainRef.current.gain.value = isMuted ? 0 : 1;
-    if (videoRef.current) videoRef.current.muted = isMuted;
   }, [isMuted]);
 
 
@@ -971,10 +971,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
           isTransitioningRef.current = false;
           setShowChapterCard(null);
 
-          // Resume playback of backing media
-          if (videoRef.current && videoUrlRef.current && renderMode === 'hybrid') {
-            videoRef.current.play().catch(() => {});
-          }
           if (audioBufferRef.current) {
             safePlayAudio();
           }
@@ -1022,10 +1018,6 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       setCurrentIndex(0);
       setIsEnded(false);
       setIsPlaying(true);
-      if (videoRef.current) {
-        videoRef.current.currentTime = 0;
-        videoRef.current.play().catch(() => {});
-      }
       return;
     }
     setIsPlaying(p => !p);
@@ -1056,23 +1048,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       setCurrentIndex(newIdx);
     }
 
-    // Seek video if hybrid, using playbackRate mapping from compiled timeline
-    if (videoRef.current && videoUrlRef.current && timelineRef.current.videoTrack) {
-      const clips = timelineRef.current.videoTrack.clips;
-      let vClip = clips[0];
-      for (let i = 0; i < clips.length; i++) {
-        if (clamped >= clips[i].logicalStartMs) vClip = clips[i];
-        else break;
-      }
-      if (vClip) {
-        let targetSec = vClip.sourceStartMs / 1000;
-        if (vClip.type === 'action') {
-          const clipRate = vClip.playbackRate ?? 1.0;
-          targetSec = (vClip.sourceStartMs + (clamped - vClip.logicalStartMs) * clipRate) / 1000;
-        }
-        videoRef.current.currentTime = targetSec;
-      }
-    }
+    // WorkerExtractor seeks implicitly — the next rAF tick will request
+    // the frame at the new clamped position via the videoTrack clip map.
 
     // Restart audio from new position if currently playing
     if (isPlayingRef.current && audioBufferRef.current) {
@@ -1159,18 +1136,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
         overscrollBehavior: 'contain',
       }}
     >
-      {/* Hidden video element — hybrid mode only */}
-      {videoUrl && renderMode === 'hybrid' && (
-        <video
-          ref={videoRef}
-          src={videoUrl}
-          crossOrigin="anonymous"
-          className="hidden"
-          playsInline
-          muted={true}
-          preload="auto"
-        />
-      )}
+      {/* Hybrid mode uses WorkerExtractor (WebCodecs) — no <video> element needed */}
 
       {/* Player shell */}
       <div
