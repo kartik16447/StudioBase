@@ -48,10 +48,10 @@ export const RenderConstants = {
   // Hard zoom scale limits — keeps the view readable, prevents tunnel-vision
   CAMERA_SCALE_LIMITS: {
     min:   1.0,   // full overview — whole screenshot visible
-    near:  1.06,  // subtle nudge — barely perceptible
-    mid:   1.12,  // comfortable mid-range
-    far:   1.20,  // cross-page moves need more context; was 1.28 (too much)
+    near:  1.04,  // subtle nudge — barely perceptible
+    mid:   1.08,  // comfortable mid-range
+    far:   1.14,  // cross-page moves need more context
     max:   1.40,  // Clamped to 1.40 to restrict manual zoom scale limits
-    event: 1.10,  // Default cinematic zoom; was 1.15 — gentler, keeps more context
+    event: 1.0,   // Fullscreen-first: no zoom during event phase; click ripple shows focus
   },
 };

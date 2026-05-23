@@ -743,13 +743,17 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 }}
               : step;
 
+          // Show click ripple for click/input steps so viewers can always see where
+          // the action happened, especially when the cursor moves quickly.
+          const showClickRipple = !!(step?.action && ['click', 'input'].includes(step.action));
+
           renderer.render(
             ctx,
             {
               dimensions: { width: cW, height: cH },
               step:        renderStep,
               prevStep:    stepsRef.current[currentIdxRef.current - 1] ?? null,
-              progress:    1.0,
+              progress:    stepProgress,
               theme:       { primaryColor },
               renderMode:  hasVideo ? 'hybrid' : 'slideshow',
               camera: {
@@ -758,7 +762,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
                 scale: camScale.get(),
               },
               timeMs: now,
-              showCursor: false,  // camera pan communicates focus point; dot creates confusing 2nd cursor
+              showCursor: showClickRipple,
             },
             masterFrame,
           );

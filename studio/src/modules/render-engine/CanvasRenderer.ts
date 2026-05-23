@@ -256,27 +256,54 @@ export class CanvasRenderer implements IRenderer {
     const cx = drawX + (coords.x / worldW) * drawW;
     const cy = drawY + (coords.y / worldH) * drawH;
 
-    // Ripple ring — expands outward as progress 0→1
-    const rippleRadius = 14 + progress * 28;
-    const rippleAlpha  = Math.max(0, (1 - progress) * 0.7);
+    // Burst phase: first 30% of step is the high-visibility burst window
+    const burstT = Math.min(1, progress / 0.30);
+
+    // Outer ring — large, fast expand, fades quickly
+    const outerRadius = 8 + burstT * 52;
+    const outerAlpha  = Math.max(0, (1 - burstT) * 0.85);
     ctx.save();
-    ctx.globalAlpha  = rippleAlpha;
-    ctx.strokeStyle  = color;
-    ctx.lineWidth    = 2;
+    ctx.globalAlpha = outerAlpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 2.5;
+    ctx.shadowColor = color;
+    ctx.shadowBlur  = 8;
     ctx.beginPath();
-    ctx.arc(cx, cy, rippleRadius, 0, Math.PI * 2);
+    ctx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
 
-    // Solid dot — fades in quickly then stays
-    const dotAlpha = Math.min(1, progress * 4);
+    // Inner ring — smaller, slightly delayed, holds longer
+    const innerT      = Math.min(1, Math.max(0, (progress - 0.05) / 0.50));
+    const innerRadius = 6 + innerT * 22;
+    const innerAlpha  = Math.max(0, (1 - innerT) * 0.6);
+    ctx.save();
+    ctx.globalAlpha = innerAlpha;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Solid center dot — always visible throughout the step
+    const dotAlpha = progress < 0.05
+      ? progress / 0.05          // snap in fast
+      : Math.max(0.25, 1 - (progress - 0.05) / 0.95); // hold then gentle fade
     ctx.save();
     ctx.globalAlpha = dotAlpha;
-    ctx.fillStyle   = '#fff';
+    ctx.fillStyle   = '#ffffff';
     ctx.shadowColor = color;
-    ctx.shadowBlur  = 12;
+    ctx.shadowBlur  = 16;
     ctx.beginPath();
-    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
+    ctx.fill();
+    // Colored core
+    ctx.globalAlpha = dotAlpha * 0.6;
+    ctx.fillStyle   = color;
+    ctx.shadowBlur  = 0;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
