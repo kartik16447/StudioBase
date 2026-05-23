@@ -352,10 +352,13 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
     const resolvedOffsetMs = offsetMs ?? currentMsRef.current;
     const startOffsetSec   = resolvedOffsetMs / 1000;
 
-    // Always rebase the clock reference — this is what drives currentMsRef
-    // in the rAF tick regardless of whether there is audio.
+    // Rebase the clock reference from NOW (not from scheduledAt).
+    // Audio is scheduled 50ms ahead for a smooth start, but the visual clock
+    // must start at exactly startOffsetSec immediately — otherwise the 50ms
+    // dip causes the playhead to land behind a chapter boundary and re-trigger
+    // the chapter break on the very next rAF tick (the looping bug).
     const scheduledAt = audioCtx.currentTime + 0.05;
-    audioStartContextTimeRef.current = scheduledAt - startOffsetSec / speedRef.current;
+    audioStartContextTimeRef.current = audioCtx.currentTime - startOffsetSec / speedRef.current;
 
     const buffer = audioBufferRef.current;
     if (!buffer) {
