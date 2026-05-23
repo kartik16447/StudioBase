@@ -1058,8 +1058,29 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
       setCurrentIndex(newIdx);
     }
 
-    // WorkerExtractor seeks implicitly — the next rAF tick will request
-    // the frame at the new clamped position via the videoTrack clip map.
+    // Prime the frame cache immediately on scrub so there's no stale frame
+    // visible on the first rAF tick after the seek (Step 5).
+    if (videoUrlRef.current && extractorRef.current && !pendingFrameRef.current) {
+      const clips = timelineRef.current.videoTrack?.clips;
+      if (clips?.length) {
+        let vClip = clips[0];
+        for (let i = 0; i < clips.length; i++) {
+          if (clamped >= clips[i].logicalStartMs) vClip = clips[i];
+          else break;
+        }
+        if (vClip) {
+          let targetSourceMs = vClip.sourceStartMs;
+          if (vClip.type === 'action') {
+            targetSourceMs += (clamped - vClip.logicalStartMs) * (vClip.playbackRate ?? 1.0);
+          }
+          pendingFrameRef.current = true;
+          extractorRef.current.getFrame(targetSourceMs).then(frame => {
+            if (frame) { masterFrameRef.current?.close(); masterFrameRef.current = frame; }
+            pendingFrameRef.current = false;
+          }).catch(() => { pendingFrameRef.current = false; });
+        }
+      }
+    }
 
     // Restart audio from new position if currently playing
     if (isPlayingRef.current && audioBufferRef.current) {
