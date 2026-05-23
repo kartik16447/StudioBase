@@ -519,20 +519,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIndex, currentStep?.id, currentStep?.screenshotKey]);
 
-  // ── Video seek on step change ──────────────────────────────────────────────
-  useEffect(() => {
-    if (isPlayingRef.current) return;
-    if (!videoRef.current || !videoUrl || !currentStep?.timestamp) return;
-    const EPOCH_FLOOR = 1_000_000_000_000;
-    const rawTs = currentStep.timestamp;
-    const relMs = rawTs > EPOCH_FLOOR ? Math.max(0, rawTs - sessionStartMs) : rawTs;
-    const relSec = relMs / 1000;
-
-    if (Math.abs(videoRef.current.currentTime - relSec) > 0.2) {
-      videoRef.current.currentTime = relSec;
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex]);
+  // Video seeking on step change is handled inside the rAF tick via the
+  // videoTrack clip map — no separate effect needed.
 
   // ── rAF render + clock loop ────────────────────────────────────────────────
   useEffect(() => {
@@ -769,28 +757,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally empty — all reads via refs
 
-  // ── Video play/pause ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v || !videoUrl) return;
-    if (isPlaying && !isTransitioningRef.current) {
-      // Don't play if we are inside a hold clip!
-      const ms = currentMsRef.current;
-      const clips = timeline.videoTrack?.clips || [];
-      let vClip = clips[0];
-      for (let i = 0; i < clips.length; i++) {
-        if (ms >= clips[i].logicalStartMs) vClip = clips[i];
-        else break;
-      }
-      if (vClip?.type === 'hold') {
-        v.pause();
-      } else {
-        v.play().catch(() => {});
-      }
-    } else {
-      v.pause();
-    }
-  }, [isPlaying, videoUrl, showChapterCard, timeline]);
+  // Video play/pause for hybrid mode is managed inside the rAF tick
+  // via the videoTrack clip map (action vs hold clips).
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = speed;
