@@ -58,7 +58,7 @@ Output fields:
 - steps: For each input step produce:
     - stepTitle: A short noun phrase naming the goal of this step.
     - generatedText: The narration script. See all rules below.
-- chapterBreaks: Group steps into logical workflow phases using afterStepId.
+- chapterBreaks: Group steps into logical workflow phases using afterStepId. STRICT RULES: (1) Never place a chapter break after step 1 or step 2. (2) Require at least 4 steps between chapter breaks. (3) Only break when the workflow phase genuinely changes (e.g. setup → configuration → launch). Fewer chapters is always better — if in doubt, omit the break. For sessions under 8 steps, 0–1 chapter breaks is appropriate.
 
 **PUNCTUATION AS SPEECH RHYTHM:**
 Deepgram Aura interprets punctuation as natural pacing. Use deliberately:

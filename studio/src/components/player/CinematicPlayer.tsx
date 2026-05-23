@@ -367,6 +367,8 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
   const transitionStartRef= useRef<number>(-Infinity);
   const leavingStepRef    = useRef<PlayerStep | null>(null);
   const previousIdxRef    = useRef<number>(0);
+  // Last non-null rendered frame — prevents black screen during video seek / screenshot load gaps
+  const lastFrameRef      = useRef<HTMLVideoElement | HTMLImageElement | HTMLCanvasElement | null>(null);
 
   // Playback clock
   const currentMsRef   = useRef<number>(0);
@@ -734,6 +736,11 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
             masterFrame = slideImageRef.current;
           }
 
+          // Cache the last valid frame so we never draw black during
+          // transient gaps (video seek after chapter card, screenshot still loading)
+          if (masterFrame) lastFrameRef.current = masterFrame;
+          const safeFrame = masterFrame ?? lastFrameRef.current;
+
           // Cursor lerp (smooth cursor transition between steps)
           const leaving = leavingStepRef.current;
           const renderStep =
@@ -764,7 +771,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
               // a second phantom cursor slightly offset from the real one.
               showCursor: !hasVideo,
             },
-            masterFrame,
+            safeFrame,
           );
         }
       }
