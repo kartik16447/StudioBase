@@ -149,7 +149,7 @@ export const AnnotationCanvas: React.FC<{
   const draftH = Math.abs(currentPct.y - startPct.y);
 
   return (
-    <div className="absolute inset-0 z-10">
+    <div className={`absolute inset-0 z-10 ${isActive ? '' : 'pointer-events-none'}`}>
       <svg
         ref={svgRef}
         className="absolute inset-0 w-full h-full"
@@ -341,7 +341,7 @@ export const StepCard: React.FC<{
           onClear={() => updateStep(step.id, { annotations: [] })}
         />
         {/* Hover toolbar — top-right of screenshot */}
-        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-white/90 rounded-lg px-1 py-1 shadow-sm">
+        <div className="absolute top-2 right-2 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-white/90 rounded-lg px-1 py-1 shadow-sm">
           <Tooltip content="Annotate (highlight, blur, shapes)" side="top">
             <IconButton icon={I.Wand} label="Annotate" onClick={(e) => { e.stopPropagation(); onAnnotate?.(step); }} size={28} />
           </Tooltip>
