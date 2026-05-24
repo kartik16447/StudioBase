@@ -332,25 +332,34 @@ export default {
           console.log(`[PIPELINE] Calling Workers AI — filtered:${payload.length}/${steps.length} steps inputChars:${JSON.stringify(payload).length}`);
 
           const aiResponse = await (env.AI.run as any)(
-            "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "@cf/meta/llama-3.1-8b-instruct",
             {
               messages: [
                 { role: "system", content: SYSTEM_PROMPT },
                 { role: "user", content: JSON.stringify(payload) },
               ],
-              response_format: { type: "json_schema", json_schema: SOP_JSON_SCHEMA },
+              response_format: { type: "json_object" },
               max_tokens: 8192,
             }
           ) as { response: string | object };
 
           const rawResponse = aiResponse?.response;
-          const generated = (typeof rawResponse === 'string' ? JSON.parse(rawResponse) : rawResponse) as {
+          let generated: {
             title: string;
             summary: string;
             tags: string[];
             steps: { id: string; stepTitle: string; generatedText: string }[];
             chapterBreaks: { afterStepId: string; chapterTitle: string }[];
           };
+          try {
+            generated = (typeof rawResponse === 'string' ? JSON.parse(rawResponse) : rawResponse) as typeof generated;
+            if (!generated?.steps || !Array.isArray(generated.steps)) {
+              throw new Error('AI response missing steps array');
+            }
+          } catch (parseErr: any) {
+            console.error(`[PIPELINE] AI JSON parse failed: ${parseErr.message} | raw: ${String(rawResponse).slice(0, 200)}`);
+            throw new Error(`AI returned invalid JSON: ${parseErr.message}`);
+          }
 
           const FALLBACK_PHRASES = new Set(['completed action', 'other', 'find…', 'find...']);
 
