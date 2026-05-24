@@ -28,6 +28,15 @@ export const SOPCanvas: React.FC = () => {
   // Annotation + step management
   const setActiveTool = useStudioStore(state => state.setActiveTool);
   const deleteStep = useStudioStore(state => state.deleteStep);
+  const saveAnnotations = useStudioStore(state => state.saveAnnotations);
+
+  // Which step is currently in annotation mode (null = none)
+  const [annotatingStepId, setAnnotatingStepId] = useState<string | null>(null);
+
+  const exitAnnotation = React.useCallback(() => {
+    setAnnotatingStepId(null);
+    setActiveTool('cursor');
+  }, [setActiveTool]);
 
   // Phase 6 — Comments
   const comments = useStudioStore(state => state.comments);
@@ -230,14 +239,13 @@ export const SOPCanvas: React.FC = () => {
                       setStepIndex(it.idx);
                     }}
                     onAnnotate={(step) => {
-                      // Focus the step, then activate highlight tool so user can draw immediately
                       setFocusStep(step.id);
                       setStepIndex(it.idx);
                       triggerScroll();
-                      setActiveTool('highlight');
+                      setAnnotatingStepId(step.id);
+                      // AnnotationCanvas sets the tool itself when isAnnotating flips true
                     }}
                     onEdit={(step) => {
-                      // Scroll to step; StepCard handles textarea focus internally
                       setFocusStep(step.id);
                       setStepIndex(it.idx);
                       triggerScroll();
@@ -248,6 +256,9 @@ export const SOPCanvas: React.FC = () => {
                         deleteStep(step.id);
                       }
                     }}
+                    isAnnotating={annotatingStepId === it.step.id}
+                    onAnnotationsChange={(annos) => saveAnnotations(it.step.id, annos)}
+                    onExit={exitAnnotation}
                   />
                 </div>
               ) : (

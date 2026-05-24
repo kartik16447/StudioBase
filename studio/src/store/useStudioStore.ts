@@ -5,6 +5,8 @@ import { showToast } from '../components/GlobalToast';
 
 let pipelinePollInterval: ReturnType<typeof setInterval> | null = null;
 let audioPollInterval: ReturnType<typeof setInterval> | null = null;
+// Per-step debounce timers for annotation backend writes
+const annoSaveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
 export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'player' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team' | 'analytics';
 
@@ -91,6 +93,7 @@ interface StudioState {
   sopStatus: 'draft' | 'review' | 'published' | null;
   setSopStatus: (status: 'draft' | 'review' | 'published' | null) => void;
   saveStep: (stepId: string, updates: { textOverride?: string; annotations?: any[] }) => Promise<void>;
+  saveAnnotations: (stepId: string, annotations: any[]) => void;
   saveAnimationTarget: (stepId: string, animationTarget: any) => Promise<void>;
   saveChapterBreaks: (chapterBreaks: { afterStepId: string; chapterTitle: string }[]) => Promise<void>;
   publishSOP: (sopId: string, status: 'review' | 'published') => Promise<void>;
@@ -694,6 +697,30 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
     // Optimistic update in local store
     updateStep(stepId, updates);
+  },
+
+  saveAnnotations: (stepId, annotations) => {
+    // Immediate local update
+    get().updateStep(stepId, { annotations });
+
+    // Debounced backend write — 500ms after last stroke
+    clearTimeout(annoSaveTimers[stepId]);
+    annoSaveTimers[stepId] = setTimeout(async () => {
+      const { session } = get();
+      if (!session) return;
+      const sopId = (session as any).sopId;
+      const workspaceId = (session as any).workspaceId;
+      if (!sopId || !workspaceId) return; // no SOP yet — skip, ephemeral until pipeline runs
+      try {
+        await apiClient.request(`/workspaces/${workspaceId}/sops/${sopId}/steps/${stepId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ annotations }),
+        });
+      } catch (err) {
+        console.warn('[saveAnnotations] backend write failed:', err);
+      }
+    }, 500);
   },
 
   saveAnimationTarget: async (stepId, animationTarget) => {

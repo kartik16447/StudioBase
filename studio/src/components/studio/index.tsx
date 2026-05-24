@@ -57,22 +57,147 @@ const CopyLinkButton: React.FC<{ url: string }> = ({ url }) => {
   );
 };
 
+// ─── AnnotationToolbar ────────────────────────────────────────────────────────
+
+const ANNO_TOOLS: { id: string; icon: React.ElementType; label: string }[] = [
+  { id: 'arrow',     icon: I.ArrowUpRight, label: 'Arrow'     },
+  { id: 'highlight', icon: I.Highlighter,  label: 'Highlight' },
+  { id: 'box',       icon: I.Square,       label: 'Box'       },
+  { id: 'circle',    icon: I.Circle,       label: 'Circle'    },
+  { id: 'blur',      icon: I.EyeOff,       label: 'Blur / Redact' },
+  { id: 'text',      icon: I.Type,         label: 'Text label'},
+];
+
+const AnnotationToolbar: React.FC<{
+  activeTool: string;
+  onToolChange: (tool: string) => void;
+  canUndo: boolean;
+  onUndo: () => void;
+  annotationCount: number;
+  onClear: () => void;
+  onExit: () => void;
+}> = ({ activeTool, onToolChange, canUndo, onUndo, annotationCount, onClear, onExit }) => (
+  <div
+    className="absolute top-2 left-1/2 -translate-x-1/2 z-30 flex items-center gap-0.5 px-1.5 py-1 rounded-xl shadow-xl"
+    style={{ background: 'rgba(15,15,24,0.93)', border: '1px solid rgba(255,255,255,0.11)', backdropFilter: 'blur(16px)', whiteSpace: 'nowrap' }}
+    onClick={e => e.stopPropagation()}
+    onMouseDown={e => e.stopPropagation()}
+  >
+    {ANNO_TOOLS.map(t => (
+      <button
+        key={t.id}
+        title={t.label}
+        onClick={() => onToolChange(t.id)}
+        className={cn(
+          'w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-100',
+          activeTool === t.id
+            ? 'bg-white/20 text-white shadow-inner'
+            : 'text-white/45 hover:text-white hover:bg-white/10',
+        )}
+      >
+        <t.icon size={13} />
+      </button>
+    ))}
+
+    <div className="w-px h-4 bg-white/12 mx-1" />
+
+    <button
+      title="Undo (Ctrl+Z)"
+      disabled={!canUndo}
+      onClick={onUndo}
+      className={cn(
+        'w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-100',
+        canUndo ? 'text-white/45 hover:text-white hover:bg-white/10' : 'text-white/15 cursor-not-allowed',
+      )}
+    >
+      <I.RotateCcw size={13} />
+    </button>
+
+    <button
+      title="Clear all"
+      disabled={annotationCount === 0}
+      onClick={onClear}
+      className={cn(
+        'w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-100',
+        annotationCount > 0 ? 'text-white/45 hover:text-red-400 hover:bg-white/10' : 'text-white/15 cursor-not-allowed',
+      )}
+    >
+      <I.Trash2 size={13} />
+    </button>
+
+    <div className="w-px h-4 bg-white/12 mx-1" />
+
+    <button
+      title="Done (Esc)"
+      onClick={onExit}
+      className="h-7 px-2.5 rounded-lg flex items-center gap-1 text-[11px] font-semibold text-white bg-white/12 hover:bg-white/22 transition-all duration-100"
+    >
+      <I.Check size={11} /> Done
+    </button>
+  </div>
+);
+
+// ─── AnnotationCanvas ────────────────────────────────────────────────────────
+
 export const AnnotationCanvas: React.FC<{
   step: Step;
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  onSave: (annotation: NonNullable<Step['annotations']>[number]) => void;
-  onClear: () => void;
-}> = ({ step, containerRef: _containerRef, onSave, onClear }) => {
+  isAnnotating: boolean;
+  onAnnotationsChange: (annotations: Annotation[]) => void;
+  onExit: () => void;
+}> = ({ step, isAnnotating, onAnnotationsChange, onExit }) => {
   const activeTool = useStudioStore(state => state.activeTool);
+  const setActiveTool = useStudioStore(state => state.setActiveTool);
+
   const [drawing, setDrawing] = React.useState(false);
   const [startPct, setStartPct] = React.useState({ x: 0, y: 0 });
   const [currentPct, setCurrentPct] = React.useState({ x: 0, y: 0 });
   const [textInput, setTextInput] = React.useState<{ x: number; y: number } | null>(null);
   const [textValue, setTextValue] = React.useState('');
+
+  // Per-step undo history: each entry is a full annotations snapshot
+  const [history, setHistory] = React.useState<Annotation[][]>([]);
   const svgRef = React.useRef<SVGSVGElement>(null);
 
-  const isActive = activeTool !== 'cursor' && activeTool !== 'zoom' && activeTool !== 'move' && activeTool !== 'spotlight';
-  const annotations = step.annotations || [];
+  // Snapshot current annotations when entering annotation mode
+  React.useEffect(() => {
+    if (isAnnotating) {
+      setHistory([step.annotations ?? []]);
+      // Default to highlight if coming from cursor
+      if (activeTool === 'cursor') setActiveTool('highlight');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAnnotating]);
+
+  // Ctrl+Z undo while annotating this step
+  React.useEffect(() => {
+    if (!isAnnotating) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      }
+      if (e.key === 'Escape') onExit();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAnnotating, history]);
+
+  const annotations = step.annotations ?? [];
+
+  const pushAnnotations = (next: Annotation[]) => {
+    setHistory(h => [...h, next]);
+    onAnnotationsChange(next);
+  };
+
+  const handleUndo = () => {
+    if (history.length <= 1) return;
+    const prev = history[history.length - 2];
+    setHistory(h => h.slice(0, -1));
+    onAnnotationsChange(prev);
+  };
+
+  const handleClear = () => pushAnnotations([]);
 
   const getPct = (e: React.MouseEvent) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -83,11 +208,12 @@ export const AnnotationCanvas: React.FC<{
     };
   };
 
+  const drawingActive = isAnnotating && activeTool !== 'cursor' && activeTool !== 'zoom' && activeTool !== 'move' && activeTool !== 'spotlight';
+
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!isActive) return;
+    if (!drawingActive) return;
     if (activeTool === 'text') {
-      const pct = getPct(e);
-      setTextInput(pct);
+      setTextInput(getPct(e));
       setTextValue('');
       return;
     }
@@ -111,34 +237,25 @@ export const AnnotationCanvas: React.FC<{
     const w = Math.abs(currentPct.x - startPct.x);
     const h = Math.abs(currentPct.y - startPct.y);
     if (w < 1 && h < 1) return;
-    const shape = activeTool === 'highlight' ? 'box'
+    const shape: AnnotationShape = activeTool === 'highlight' ? 'box'
       : activeTool === 'blur' ? 'blur'
-      : activeTool === 'circle' ? 'circle'
       : activeTool as AnnotationShape;
     const color = activeTool === 'highlight' ? '#FFC107'
-      : activeTool === 'blur' ? 'blur'
-      : 'var(--color-primary, #5E5CE6)';
-    onSave({
-      id: `anno-${Date.now()}`,
-      shape,
-      x,
-      y,
-      width: w,
-      height: h,
-      color,
-    });
+      : activeTool === 'blur' ? '#000'
+      : 'var(--color-primary,#5E5CE6)';
+    pushAnnotations([...annotations, { id: `anno-${Date.now()}`, shape, x, y, width: w, height: h, color }]);
   };
 
   const handleTextSubmit = () => {
     if (!textInput || !textValue.trim()) { setTextInput(null); return; }
-    onSave({
+    pushAnnotations([...annotations, {
       id: `anno-${Date.now()}`,
       shape: 'text',
       x: textInput.x,
       y: textInput.y,
       text: textValue.trim(),
-      color: 'var(--color-primary, #5E5CE6)',
-    });
+      color: 'var(--color-primary,#5E5CE6)',
+    }]);
     setTextInput(null);
     setTextValue('');
   };
@@ -149,31 +266,44 @@ export const AnnotationCanvas: React.FC<{
   const draftH = Math.abs(currentPct.y - startPct.y);
 
   return (
-    <div className={`absolute inset-0 z-10 ${isActive ? '' : 'pointer-events-none'}`}>
+    <div className={cn('absolute inset-0 z-10', !isAnnotating && 'pointer-events-none')}>
+
+      {/* ── Inline annotation toolbar ── */}
+      {isAnnotating && (
+        <AnnotationToolbar
+          activeTool={activeTool}
+          onToolChange={setActiveTool}
+          canUndo={history.length > 1}
+          onUndo={handleUndo}
+          annotationCount={annotations.length}
+          onClear={handleClear}
+          onExit={onExit}
+        />
+      )}
+
+      {/* ── SVG drawing layer ── */}
       <svg
         ref={svgRef}
         className="absolute inset-0 w-full h-full"
-        style={{ cursor: isActive ? 'crosshair' : 'default', pointerEvents: isActive ? 'all' : 'none' }}
+        style={{ cursor: drawingActive ? 'crosshair' : 'default', pointerEvents: drawingActive ? 'all' : 'none' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={() => setDrawing(false)}
       >
-        {/* Saved annotations */}
         {annotations.map((a: Annotation) => {
           if (a.shape === 'blur') return null;
           if (a.shape === 'box') return (
             <rect key={a.id}
-              x={`${a.x}%`} y={`${a.y}%`}
-              width={`${a.width}%`} height={`${a.height}%`}
-              fill={a.color === '#FFC107' ? 'rgba(255,193,7,0.25)' : 'none'}
+              x={`${a.x}%`} y={`${a.y}%`} width={`${a.width}%`} height={`${a.height}%`}
+              fill={a.color === '#FFC107' ? 'rgba(255,193,7,0.25)' : 'rgba(94,92,230,0.08)'}
               stroke={a.color === '#FFC107' ? '#FFC107' : 'var(--color-primary,#5E5CE6)'}
               strokeWidth="2" rx="3"
             />
           );
           if (a.shape === 'arrow') {
-            const x1 = a.x; const y1 = a.y;
-            const x2 = (a.x + (a.width ?? 10)); const y2 = (a.y + (a.height ?? 10));
+            const x2 = a.x + (a.width ?? 10);
+            const y2 = a.y + (a.height ?? 10);
             return (
               <g key={a.id}>
                 <defs>
@@ -181,27 +311,23 @@ export const AnnotationCanvas: React.FC<{
                     <path d="M0,0 L0,6 L8,3 z" fill="var(--color-primary,#5E5CE6)" />
                   </marker>
                 </defs>
-                <line x1={`${x1}%`} y1={`${y1}%`} x2={`${x2}%`} y2={`${y2}%`}
+                <line x1={`${a.x}%`} y1={`${a.y}%`} x2={`${x2}%`} y2={`${y2}%`}
                   stroke="var(--color-primary,#5E5CE6)" strokeWidth="2.5"
                   markerEnd={`url(#ah-${a.id})`} />
               </g>
             );
           }
           if (a.shape === 'circle') return (
-            <ellipse
-              key={a.id}
-              cx={`${a.x + (a.width ?? 10) / 2}%`}
-              cy={`${a.y + (a.height ?? 10) / 2}%`}
-              rx={`${(a.width ?? 10) / 2}%`}
-              ry={`${(a.height ?? 10) / 2}%`}
-              fill="none"
-              stroke="var(--color-primary,#5E5CE6)"
-              strokeWidth="2"
+            <ellipse key={a.id}
+              cx={`${a.x + (a.width ?? 10) / 2}%`} cy={`${a.y + (a.height ?? 10) / 2}%`}
+              rx={`${(a.width ?? 10) / 2}%`} ry={`${(a.height ?? 10) / 2}%`}
+              fill="none" stroke="var(--color-primary,#5E5CE6)" strokeWidth="2"
             />
           );
           if (a.shape === 'text') return (
             <foreignObject key={a.id} x={`${a.x}%`} y={`${a.y}%`} width="200" height="40">
-              <div className="bg-primary text-white text-[12px] font-bold px-2 py-1 rounded shadow-lg whitespace-nowrap" style={{ background: 'var(--color-primary,#5E5CE6)' }}>
+              <div style={{ background: 'var(--color-primary,#5E5CE6)' }}
+                className="text-white text-[12px] font-bold px-2 py-1 rounded shadow-lg whitespace-nowrap inline-block">
                 {a.text}
               </div>
             </foreignObject>
@@ -209,50 +335,44 @@ export const AnnotationCanvas: React.FC<{
           return null;
         })}
 
-        {/* Draft shape while drawing */}
+        {/* Draft preview while dragging */}
         {drawing && (activeTool === 'box' || activeTool === 'highlight' || activeTool === 'blur') && (
-          <rect
-            x={`${draftX}%`} y={`${draftY}%`}
-            width={`${draftW}%`} height={`${draftH}%`}
-            fill={activeTool === 'highlight' ? 'rgba(255,193,7,0.2)' : activeTool === 'blur' ? 'rgba(0,0,0,0.2)' : 'none'}
-            stroke={activeTool === 'highlight' ? '#FFC107' : activeTool === 'blur' ? '#888' : 'var(--color-primary,#5E5CE6)'}
+          <rect x={`${draftX}%`} y={`${draftY}%`} width={`${draftW}%`} height={`${draftH}%`}
+            fill={activeTool === 'highlight' ? 'rgba(255,193,7,0.2)' : activeTool === 'blur' ? 'rgba(0,0,0,0.25)' : 'rgba(94,92,230,0.1)'}
+            stroke={activeTool === 'highlight' ? '#FFC107' : activeTool === 'blur' ? '#555' : 'var(--color-primary,#5E5CE6)'}
             strokeWidth="2" strokeDasharray="4 2" rx="3"
           />
         )}
         {drawing && activeTool === 'circle' && (
           <ellipse
-            cx={`${draftX + draftW / 2}%`}
-            cy={`${draftY + draftH / 2}%`}
-            rx={`${draftW / 2}%`}
-            ry={`${draftH / 2}%`}
-            fill="none"
-            stroke="var(--color-primary,#5E5CE6)"
-            strokeWidth="2" strokeDasharray="4 2"
+            cx={`${draftX + draftW / 2}%`} cy={`${draftY + draftH / 2}%`}
+            rx={`${draftW / 2}%`} ry={`${draftH / 2}%`}
+            fill="none" stroke="var(--color-primary,#5E5CE6)" strokeWidth="2" strokeDasharray="4 2"
           />
         )}
         {drawing && activeTool === 'arrow' && (
-          <line x1={`${startPct.x}%`} y1={`${startPct.y}%`}
-            x2={`${currentPct.x}%`} y2={`${currentPct.y}%`}
-            stroke="var(--color-primary,#5E5CE6)" strokeWidth="2.5" strokeDasharray="4 2" />
+          <line x1={`${startPct.x}%`} y1={`${startPct.y}%`} x2={`${currentPct.x}%`} y2={`${currentPct.y}%`}
+            stroke="var(--color-primary,#5E5CE6)" strokeWidth="2.5" strokeDasharray="4 2"
+          />
         )}
       </svg>
 
-      {/* Blur annotations as DOM divs (backdrop-filter) */}
+      {/* Blur annotations — DOM divs for backdrop-filter */}
       {annotations.filter((a: Annotation) => a.shape === 'blur').map((a: Annotation) => (
-        <div key={a.id}
-          className="absolute pointer-events-none"
+        <div key={a.id} className="absolute pointer-events-none"
           style={{
             left: `${a.x}%`, top: `${a.y}%`,
             width: `${a.width}%`, height: `${a.height}%`,
-            backdropFilter: 'blur(12px)',
-            background: 'rgba(0,0,0,0.3)',
+            backdropFilter: 'blur(14px)',
+            background: 'rgba(0,0,0,0.18)',
           }}
         />
       ))}
 
-      {/* Text input popover */}
+      {/* Text placement input */}
       {textInput && (
-        <div className="absolute z-20" style={{ left: `${textInput.x}%`, top: `${textInput.y}%` }}>
+        <div className="absolute z-30" style={{ left: `${textInput.x}%`, top: `${textInput.y}%` }}
+          onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
           <input
             autoFocus
             value={textValue}
@@ -260,19 +380,16 @@ export const AnnotationCanvas: React.FC<{
             onKeyDown={e => { if (e.key === 'Enter') handleTextSubmit(); if (e.key === 'Escape') setTextInput(null); }}
             onBlur={handleTextSubmit}
             placeholder="Type label…"
-            className="bg-white border-2 border-primary rounded px-2 py-1 text-[13px] outline-none shadow-card-lifted min-w-[120px]"
+            className="border-2 border-primary rounded px-2 py-1 text-[13px] outline-none shadow-card-lifted min-w-[120px] bg-white"
           />
         </div>
       )}
 
-      {/* Clear button */}
-      {annotations.length > 0 && !isActive && (
-        <button
-          onClick={onClear}
-          className="absolute top-2 right-2 z-20 h-6 px-2 rounded-pill bg-surface/90 text-[11px] font-semibold text-text-2 hover:text-danger hover:bg-surface transition-colors shadow-card flex items-center gap-1"
-        >
-          <I.X size={10} /> Clear
-        </button>
+      {/* Annotation count badge — shown when not in annotation mode but annotations exist */}
+      {!isAnnotating && annotations.length > 0 && (
+        <div className="absolute bottom-2 left-2 z-20 h-5 px-1.5 rounded-full bg-primary text-white text-[10px] font-bold flex items-center gap-1 pointer-events-none shadow">
+          <I.Wand size={9} /> {annotations.length}
+        </div>
       )}
     </div>
   );
@@ -304,7 +421,10 @@ export const StepCard: React.FC<{
   onDelete?: (step: Step) => void;
   focused?: boolean;
   onFocus?: () => void;
-}> = ({ step, hue = 244, onEdit, onAnnotate, onDelete, focused, onFocus }) => {
+  isAnnotating?: boolean;
+  onAnnotationsChange?: (annotations: Annotation[]) => void;
+  onExit?: () => void;
+}> = ({ step, hue = 244, onEdit, onAnnotate, onDelete, focused, onFocus, isAnnotating = false, onAnnotationsChange, onExit }) => {
   const session = useStudioStore(state => state.session);
   const updateStep = useStudioStore(state => state.updateStep);
   const sopStatus = useStudioStore(state => state.sopStatus);
@@ -333,12 +453,9 @@ export const StepCard: React.FC<{
         <ScreenshotPlaceholder step={step} session={session} mode="blueprint" hue={hue} rounded="" className="rounded-none" />
         <AnnotationCanvas
           step={step}
-          containerRef={React.useRef<HTMLDivElement>(null)}
-          onSave={(anno) => {
-            const existing = step.annotations || [];
-            updateStep(step.id, { annotations: [...existing, anno] });
-          }}
-          onClear={() => updateStep(step.id, { annotations: [] })}
+          isAnnotating={isAnnotating}
+          onAnnotationsChange={onAnnotationsChange ?? ((annos) => updateStep(step.id, { annotations: annos }))}
+          onExit={onExit ?? (() => {})}
         />
         {/* Hover toolbar — top-right of screenshot */}
         <div className="absolute top-2 right-2 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-white/90 rounded-lg px-1 py-1 shadow-sm">
