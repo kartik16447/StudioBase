@@ -12,6 +12,7 @@ import { WorkspaceSettingsPage } from './pages/WorkspaceSettingsPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { AdminDiagnosticsPage } from './pages/AdminDiagnosticsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import { DocsPage } from './pages/DocsPage';
 import { LoginPage } from './pages/LoginPage';
 import { CommandPalette } from './components/CommandPalette';
 import { GlobalToastContainer } from './components/GlobalToast';
@@ -254,6 +255,7 @@ function App() {
         case 'audit-logs' as any: return <AuditLogPage />;
         case 'admin' as any: return <AdminDiagnosticsPage />;
         case 'analytics': return <AnalyticsPage />;
+        case 'docs': return <DocsPage />;
         default: return <HomePage />;
       }
     } catch (e: any) {

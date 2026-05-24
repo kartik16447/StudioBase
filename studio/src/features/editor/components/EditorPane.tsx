@@ -1,0 +1,84 @@
+import React from 'react';
+import type { JSONContent } from '@tiptap/react';
+import { I } from '../../../components/icons';
+import { TiptapEditor } from './TiptapEditor';
+import { ExportMenuDropdown } from './ExportMenuDropdown';
+import type { DocRecord, DocBlock } from '../types';
+
+interface EditorPaneProps {
+  doc: DocRecord;
+  title: string;
+  onTitleChange: (v: string) => void;
+  emoji: string | null;
+  onPickEmoji: () => void;
+  dirty: boolean;
+  exportOpen: boolean;
+  onOpenExport: (e: React.MouseEvent) => void;
+  onCloseExport: () => void;
+  initialBlocks: DocBlock[];
+  onContentChange: (json: JSONContent) => void;
+  onShare: () => void;
+  onMore: () => void;
+}
+
+export const EditorPane: React.FC<EditorPaneProps> = ({
+  doc, title, onTitleChange, emoji, onPickEmoji, dirty,
+  exportOpen, onOpenExport, onCloseExport,
+  initialBlocks, onContentChange,
+  onShare, onMore,
+}) => (
+  <div className="doc-editor">
+    {/* Breadcrumb */}
+    <div className="doc-breadcrumb">
+      <span className="doc-breadcrumb-item">
+        <I.BookOpen size={12} />
+        <span>Docs</span>
+      </span>
+      {doc.path.slice(1, -1).map((p, i) => (
+        <React.Fragment key={i}>
+          <span className="doc-breadcrumb-sep">/</span>
+          <span className="doc-breadcrumb-item">{p}</span>
+        </React.Fragment>
+      ))}
+      <span className="doc-breadcrumb-sep">/</span>
+      <span className="doc-breadcrumb-item current">{doc.path[doc.path.length - 1]}</span>
+    </div>
+
+    {/* Page header */}
+    <div className="doc-page-header">
+      <button
+        className={`doc-page-icon-btn ${emoji ? '' : 'empty'}`}
+        onClick={onPickEmoji}
+        title="Change icon"
+      >
+        {emoji || <I.File size={20} />}
+      </button>
+      <input
+        className="doc-page-title-input"
+        value={title}
+        placeholder="Untitled"
+        onChange={(e) => onTitleChange(e.target.value)}
+      />
+      <div className="doc-page-meta">
+        <span className={`doc-save-status ${dirty ? 'dirty' : ''}`}>
+          {dirty ? '• Unsaved' : 'Saved ✓'}
+        </span>
+        <div style={{ position: 'relative' }}>
+          <button className="doc-btn doc-btn-ghost sm" onClick={onOpenExport}>
+            <I.FileDown size={14} /> Export
+          </button>
+          {exportOpen && <ExportMenuDropdown onClose={onCloseExport} />}
+        </div>
+        <button className="doc-btn doc-btn-ghost sm" onClick={onShare}>
+          <I.Share2 size={14} /> Share
+        </button>
+        <button className="doc-btn-icon" onClick={onMore}>
+          <I.MoreHorizontal size={16} />
+        </button>
+      </div>
+    </div>
+
+    {/* Tiptap canvas */}
+    <TiptapEditor initialBlocks={initialBlocks} onChange={onContentChange} />
+  </div>
+);

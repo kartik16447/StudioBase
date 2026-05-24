@@ -131,6 +131,7 @@ export const Sidebar: React.FC = () => {
           <div className={cn('space-y-0.5', collapsed && 'flex flex-col items-center')}>
             <SidebarItem collapsed={collapsed} id="studio" icon={I.Wand2} label="Smart Studio" active={active === 'studio'} onClick={() => navigate('studio')} shortcut="G S" />
             <SidebarItem collapsed={collapsed} id="templates" icon={I.Layers} label="Templates" active={active === 'templates'} onClick={() => navigate('templates')} />
+            <SidebarItem collapsed={collapsed} id="docs" icon={I.BookOpen} label="Docs" active={active === 'docs'} onClick={() => navigate('docs')} shortcut="G D" />
             <SidebarItem collapsed={collapsed} id="brand" icon={I.Palette} label="Brand Kit" active={active === 'brand'} onClick={() => navigate('brand')} shortcut="G B" />
           </div>
         </section>
