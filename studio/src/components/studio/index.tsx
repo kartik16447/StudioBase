@@ -157,6 +157,12 @@ export const AnnotationCanvas: React.FC<{
   // Per-step undo history: each entry is a full annotations snapshot
   const [history, setHistory] = React.useState<Annotation[][]>([]);
   const svgRef = React.useRef<SVGSVGElement>(null);
+  const textInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Focus text input after it mounts (autoFocus is unreliable mid-mousedown event)
+  React.useEffect(() => {
+    if (textInput) setTimeout(() => textInputRef.current?.focus(), 20);
+  }, [textInput]);
 
   // Snapshot current annotations when entering annotation mode
   React.useEffect(() => {
@@ -212,11 +218,8 @@ export const AnnotationCanvas: React.FC<{
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!drawingActive) return;
-    if (activeTool === 'text') {
-      setTextInput(getPct(e));
-      setTextValue('');
-      return;
-    }
+    // Text placement is handled on mouseup (click) to avoid focus conflicts
+    if (activeTool === 'text') return;
     e.preventDefault();
     const pct = getPct(e);
     setStartPct(pct);
@@ -229,20 +232,42 @@ export const AnnotationCanvas: React.FC<{
     setCurrentPct(getPct(e));
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: React.MouseEvent) => {
+    // Text tool: place on click (mouseup without drag)
+    if (drawingActive && activeTool === 'text' && !drawing) {
+      setTextInput(getPct(e));
+      setTextValue('');
+      return;
+    }
+
     if (!drawing) return;
     setDrawing(false);
-    const x = Math.min(startPct.x, currentPct.x);
-    const y = Math.min(startPct.y, currentPct.y);
-    const w = Math.abs(currentPct.x - startPct.x);
-    const h = Math.abs(currentPct.y - startPct.y);
-    if (w < 1 && h < 1) return;
+
     const shape: AnnotationShape = activeTool === 'highlight' ? 'box'
       : activeTool === 'blur' ? 'blur'
       : activeTool as AnnotationShape;
     const color = activeTool === 'highlight' ? '#FFC107'
       : activeTool === 'blur' ? '#000'
       : 'var(--color-primary,#5E5CE6)';
+
+    let x: number, y: number, w: number, h: number;
+    if (activeTool === 'arrow') {
+      // Preserve direction — store raw start + signed delta
+      x = startPct.x;
+      y = startPct.y;
+      w = currentPct.x - startPct.x;
+      h = currentPct.y - startPct.y;
+      // Need at least a 2% drag to register
+      if (Math.abs(w) < 2 && Math.abs(h) < 2) return;
+    } else {
+      // All other shapes use a normalised bounding box
+      x = Math.min(startPct.x, currentPct.x);
+      y = Math.min(startPct.y, currentPct.y);
+      w = Math.abs(currentPct.x - startPct.x);
+      h = Math.abs(currentPct.y - startPct.y);
+      if (w < 1 && h < 1) return;
+    }
+
     pushAnnotations([...annotations, { id: `anno-${Date.now()}`, shape, x, y, width: w, height: h, color }]);
   };
 
@@ -288,7 +313,7 @@ export const AnnotationCanvas: React.FC<{
         style={{ cursor: drawingActive ? 'crosshair' : 'default', pointerEvents: drawingActive ? 'all' : 'none' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
+        onMouseUp={(e) => handleMouseUp(e)}
         onMouseLeave={() => setDrawing(false)}
       >
         {annotations.map((a: Annotation) => {
@@ -351,34 +376,58 @@ export const AnnotationCanvas: React.FC<{
           />
         )}
         {drawing && activeTool === 'arrow' && (
-          <line x1={`${startPct.x}%`} y1={`${startPct.y}%`} x2={`${currentPct.x}%`} y2={`${currentPct.y}%`}
-            stroke="var(--color-primary,#5E5CE6)" strokeWidth="2.5" strokeDasharray="4 2"
-          />
+          <g>
+            <defs>
+              <marker id="draft-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L8,3 z" fill="var(--color-primary,#5E5CE6)" />
+              </marker>
+            </defs>
+            <line
+              x1={`${startPct.x}%`} y1={`${startPct.y}%`}
+              x2={`${currentPct.x}%`} y2={`${currentPct.y}%`}
+              stroke="var(--color-primary,#5E5CE6)" strokeWidth="2.5" strokeDasharray="4 2"
+              markerEnd="url(#draft-arrow)"
+            />
+          </g>
         )}
       </svg>
 
-      {/* Blur annotations — DOM divs for backdrop-filter */}
+      {/* Blur annotations — DOM divs for backdrop-filter (SVG can't do this) */}
       {annotations.filter((a: Annotation) => a.shape === 'blur').map((a: Annotation) => (
         <div key={a.id} className="absolute pointer-events-none"
           style={{
             left: `${a.x}%`, top: `${a.y}%`,
             width: `${a.width}%`, height: `${a.height}%`,
-            backdropFilter: 'blur(14px)',
-            background: 'rgba(0,0,0,0.18)',
+            backdropFilter: 'blur(16px) saturate(0.4)',
+            WebkitBackdropFilter: 'blur(16px) saturate(0.4)',
+            background: 'rgba(20,20,40,0.55)',
+            border: '1.5px solid rgba(255,255,255,0.15)',
+            borderRadius: '2px',
           }}
         />
       ))}
 
       {/* Text placement input */}
       {textInput && (
-        <div className="absolute z-30" style={{ left: `${textInput.x}%`, top: `${textInput.y}%` }}
-          onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
+        <div
+          className="absolute z-30"
+          style={{ left: `${Math.min(textInput.x, 75)}%`, top: `${Math.min(textInput.y, 85)}%` }}
+          onClick={e => e.stopPropagation()}
+          onMouseDown={e => { e.stopPropagation(); e.preventDefault(); }}
+        >
           <input
-            autoFocus
+            ref={textInputRef}
             value={textValue}
             onChange={e => setTextValue(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleTextSubmit(); if (e.key === 'Escape') setTextInput(null); }}
-            onBlur={handleTextSubmit}
+            onKeyDown={e => {
+              e.stopPropagation();
+              if (e.key === 'Enter') handleTextSubmit();
+              if (e.key === 'Escape') { setTextInput(null); setTextValue(''); }
+            }}
+            onBlur={() => {
+              // Small delay so Enter key path runs first before blur fires
+              setTimeout(handleTextSubmit, 100);
+            }}
             placeholder="Type label…"
             className="border-2 border-primary rounded px-2 py-1 text-[13px] outline-none shadow-card-lifted min-w-[120px] bg-white"
           />
