@@ -7,7 +7,10 @@ import TaskItem from '@tiptap/extension-task-item';
 import Link from '@tiptap/extension-link';
 import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
-import { FloatingToolbar } from './FloatingToolbar';
+import { TextStyle } from '@tiptap/extension-text-style';
+import { Color } from '@tiptap/extension-color';
+import Image from '@tiptap/extension-image';
+import { FloatingToolbar, ImageInsertPopover } from './FloatingToolbar';
 import { SlashMenu, getFilteredItems } from './SlashMenu';
 import { ToggleBlock } from './ToggleBlock';
 import type { ActiveFormats, DocBlock } from '../types';
@@ -29,6 +32,7 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
   const [tbTurnOpen, setTbTurnOpen] = useState(false);
   const [tbColorOpen, setTbColorOpen] = useState(false);
   const [tbLinkOpen, setTbLinkOpen] = useState(false);
+  const [imageInsert, setImageInsert] = useState<{ x: number; y: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Refs so keyboard extensions always have fresh state without re-creating them
@@ -136,6 +140,9 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
       Link.configure({ openOnClick: false, autolink: true }),
       Underline,
       Placeholder.configure({ placeholder: "Type '/' for commands…" }),
+      TextStyle,
+      Color,
+      Image.configure({ inline: false, allowBase64: false }),
       ToggleBlock,
       SlashNavExtension,
       KeyboardExtension,
@@ -201,6 +208,16 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
       case 'quote':    chain.toggleBlockquote().run(); break;
       case 'code':     chain.toggleCodeBlock().run(); break;
       case 'divider':  chain.setHorizontalRule().run(); break;
+      case 'image': {
+        // Show URL input popover at cursor position
+        const coords = editor.view.coordsAtPos(editor.state.selection.from);
+        const wrap = wrapRef.current;
+        if (wrap) {
+          const rect = wrap.getBoundingClientRect();
+          setImageInsert({ x: coords.left - rect.left, y: coords.bottom - rect.top + 6 });
+        }
+        break;
+      }
       case 'toggle': {
         // Replace the current empty paragraph with a toggleBlock in-place
         const { state } = editor;
@@ -257,6 +274,15 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
     editor.chain().focus().unsetLink().run();
   }, [editor]);
 
+  const handleColorPick = useCallback((hex: string) => {
+    if (!editor) return;
+    if (hex === '#1D1D1F') {
+      editor.chain().focus().unsetColor().run();
+    } else {
+      editor.chain().focus().setColor(hex).run();
+    }
+  }, [editor]);
+
   if (!editor) return null;
 
   const activeFormats: ActiveFormats = {
@@ -284,6 +310,8 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
     ? editor.getAttributes('link').href ?? ''
     : '';
 
+  const activeColor: string | undefined = editor.getAttributes('textStyle').color ?? undefined;
+
   return (
     <div className="tiptap-editor-wrap" ref={wrapRef}>
       <BubbleMenu
@@ -309,6 +337,8 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
           setShowLinkEditor={setTbLinkOpen}
           showColorPicker={tbColorOpen}
           setShowColorPicker={setTbColorOpen}
+          onColorPick={handleColorPick}
+          activeColor={activeColor}
         />
       </BubbleMenu>
 
@@ -320,6 +350,20 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
           query={slash.query}
           activeIdx={slash.activeIdx}
           onPick={handleSlashPick}
+        />
+      )}
+
+      {imageInsert && (
+        <ImageInsertPopover
+          position={imageInsert}
+          onSubmit={(url) => {
+            setImageInsert(null);
+            editor.chain().focus().setImage({ src: url }).run();
+          }}
+          onClose={() => {
+            setImageInsert(null);
+            editor.chain().focus().run();
+          }}
         />
       )}
     </div>

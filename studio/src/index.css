@@ -1259,3 +1259,49 @@
 .doc-toggle [data-node-view-wrapper] {
   display: contents;
 }
+
+/* ── Color swatch active indicator ──────────────────────── */
+.doc-color-dot.active {
+  outline: 2px solid var(--doc-text-1);
+  outline-offset: 2px;
+}
+
+/* ── Image insert popover ────────────────────────────────── */
+.doc-image-insert {
+  position: absolute;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--doc-surface);
+  border: 1px solid var(--doc-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  min-width: 280px;
+  animation: slash-spring-in 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.doc-image-insert input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--doc-text-1);
+  min-width: 0;
+}
+
+/* ── Image block ─────────────────────────────────────────── */
+.tiptap-editor-wrap img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+  margin: 8px 0;
+}
+
+.tiptap-editor-wrap img.ProseMirror-selectednode {
+  outline: 2px solid var(--doc-primary);
+  border-radius: 6px;
+}

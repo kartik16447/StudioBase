@@ -47,6 +47,8 @@ interface FloatingToolbarProps {
   setShowLinkEditor: (v: boolean) => void;
   showColorPicker: boolean;
   setShowColorPicker: (v: boolean) => void;
+  onColorPick?: (hex: string) => void;
+  activeColor?: string;
 }
 
 export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
@@ -55,6 +57,7 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
   showTurnDropdown, setShowTurnDropdown,
   showLinkEditor, setShowLinkEditor,
   showColorPicker, setShowColorPicker,
+  onColorPick, activeColor,
 }) => {
   if (!inline && !position) return null;
   const blockLabel = BLOCK_LABEL[blockType] ?? 'Paragraph';
@@ -134,8 +137,14 @@ export const FloatingToolbar: React.FC<FloatingToolbarProps> = ({
           className="doc-tb-btn"
           onMouseDown={(e) => { e.preventDefault(); setShowColorPicker(!showColorPicker); setShowLinkEditor(false); setShowTurnDropdown(false); }}
           title="Text color"
+          style={activeColor ? { borderBottom: `2px solid ${activeColor}` } : undefined}
         ><I.Baseline size={13} /></button>
-        {showColorPicker && <TextColorSwatches onPick={() => setShowColorPicker(false)} />}
+        {showColorPicker && (
+          <TextColorSwatches
+            active={activeColor}
+            onPick={(c) => { onColorPick?.(c.c); setShowColorPicker(false); }}
+          />
+        )}
       </div>
     </div>
   );
@@ -153,12 +162,15 @@ export const TurnIntoDropdown: React.FC<{ current: string; onPick: (t: string) =
   </div>
 );
 
-export const TextColorSwatches: React.FC<{ onPick: (c: typeof TEXT_COLORS[0]) => void }> = ({ onPick }) => (
+export const TextColorSwatches: React.FC<{
+  onPick: (c: typeof TEXT_COLORS[0]) => void;
+  active?: string;
+}> = ({ onPick, active }) => (
   <div className="doc-color-swatches">
     {TEXT_COLORS.map((c) => (
       <div
         key={c.name}
-        className="doc-color-dot"
+        className={`doc-color-dot${active === c.c ? ' active' : ''}`}
         style={{ background: c.c }}
         onMouseDown={(e) => { e.preventDefault(); onPick(c); }}
         title={c.name}
@@ -222,6 +234,61 @@ export const LinkEditPopover: React.FC<LinkEditPopoverProps> = ({ initialUrl, on
           <I.Unlink size={13} />
         </button>
       )}
+    </div>
+  );
+};
+
+interface ImageInsertPopoverProps {
+  position: { x: number; y: number };
+  onSubmit: (url: string) => void;
+  onClose: () => void;
+}
+
+export const ImageInsertPopover: React.FC<ImageInsertPopoverProps> = ({ position, onSubmit, onClose }) => {
+  const [url, setUrl] = useState('https://');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 10);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.doc-image-insert')) onClose();
+    };
+    setTimeout(() => document.addEventListener('mousedown', handler), 100);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  const handleSubmit = () => {
+    const trimmed = url.trim();
+    if (trimmed && trimmed !== 'https://') {
+      onSubmit(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
+    } else {
+      onClose();
+    }
+  };
+
+  return (
+    <div
+      className="doc-image-insert"
+      style={{ left: position.x, top: position.y }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <I.Image size={13} style={{ color: 'var(--doc-text-3)', flexShrink: 0 }} />
+      <input
+        ref={inputRef}
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="Paste image URL…"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); handleSubmit(); }
+          if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+        }}
+      />
+      <button className="doc-tb-btn" title="Insert image" onMouseDown={(e) => { e.preventDefault(); handleSubmit(); }}>
+        <I.Check size={13} />
+      </button>
     </div>
   );
 };
