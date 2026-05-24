@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { useEditor, EditorContent, Extension, type JSONContent } from '@tiptap/react';
+import { useEditor, EditorContent, Extension, type JSONContent, type Editor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
@@ -30,12 +30,23 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
   const [tbLinkOpen, setTbLinkOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  // Refs so keyboard extension always has fresh state without re-creating the extension
+  // Refs so keyboard extensions always have fresh state without re-creating them
   const slashRef = useRef<SlashState | null>(null);
   slashRef.current = slash;
   const setSlashRef = useRef(setSlash);
   setSlashRef.current = setSlash;
   const handleSlashPickRef = useRef<(type: string) => void>(() => {});
+
+  // editorRef lets KeyboardExtension access the editor without recreating the extension
+  const editorRef = useRef<Editor | null>(null);
+
+  // openLinkEditorRef: called by Mod-k to open the link popover in FloatingToolbar
+  const openLinkEditorRef = useRef<() => void>(() => {});
+  openLinkEditorRef.current = () => {
+    setTbLinkOpen(true);
+    setTbTurnOpen(false);
+    setTbColorOpen(false);
+  };
 
   // Slash keyboard navigation extension — created once, communicates via refs
   const SlashNavExtension = useMemo(() => Extension.create({
@@ -72,15 +83,60 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
     },
   }), []);
 
+  // Phase 2 keyboard feel — Tab indent, Mod-k link, Mod-Enter checklist, Mod-Shift-d duplicate
+  const KeyboardExtension = useMemo(() => Extension.create({
+    name: 'keyboardFeel',
+    addKeyboardShortcuts() {
+      return {
+        Tab: () => {
+          const e = editorRef.current;
+          if (!e) return false;
+          if (e.isActive('listItem')) return e.chain().focus().sinkListItem('listItem').run();
+          if (e.isActive('taskItem')) return e.chain().focus().sinkListItem('taskItem').run();
+          return false;
+        },
+        'Shift-Tab': () => {
+          const e = editorRef.current;
+          if (!e) return false;
+          if (e.isActive('listItem')) return e.chain().focus().liftListItem('listItem').run();
+          if (e.isActive('taskItem')) return e.chain().focus().liftListItem('taskItem').run();
+          return false;
+        },
+        'Mod-k': () => {
+          openLinkEditorRef.current();
+          return true;
+        },
+        'Mod-Enter': () => {
+          const e = editorRef.current;
+          if (!e || !e.isActive('taskItem')) return false;
+          return e.chain().focus().updateAttributes('taskItem', {
+            checked: !e.getAttributes('taskItem').checked,
+          }).run();
+        },
+        'Mod-Shift-d': () => {
+          const e = editorRef.current;
+          if (!e) return false;
+          const { state } = e;
+          const { $from } = state.selection;
+          // Duplicate the top-level block (depth 1 from doc root)
+          const node = $from.node(1);
+          const afterPos = $from.end(1) + 1;
+          return e.chain().focus().insertContentAt(afterPos, node.toJSON()).run();
+        },
+      };
+    },
+  }), []);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       TaskList,
-      TaskItem.configure({ nested: false }),
+      TaskItem.configure({ nested: true }),
       Link.configure({ openOnClick: false, autolink: true }),
       Underline,
       Placeholder.configure({ placeholder: "Type '/' for commands…" }),
       SlashNavExtension,
+      KeyboardExtension,
     ],
     content: docBlocksToTiptap(initialBlocks),
     editorProps: {
@@ -147,8 +203,9 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
     }
   }, [editor]);
 
-  // Keep ref fresh
+  // Keep refs fresh every render
   handleSlashPickRef.current = handleSlashPick;
+  if (editor) editorRef.current = editor;
 
   const handleFormat = useCallback((fmt: keyof ActiveFormats) => {
     if (!editor) return;
