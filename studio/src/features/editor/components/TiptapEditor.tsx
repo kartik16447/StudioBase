@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useEditor, EditorContent, type JSONContent } from '@tiptap/react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useEditor, EditorContent, Extension, type JSONContent } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
 import TaskList from '@tiptap/extension-task-list';
@@ -8,7 +8,7 @@ import Link from '@tiptap/extension-link';
 import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
 import { FloatingToolbar } from './FloatingToolbar';
-import { SlashMenu } from './SlashMenu';
+import { SlashMenu, getFilteredItems } from './SlashMenu';
 import type { ActiveFormats, DocBlock } from '../types';
 import { docBlocksToTiptap } from '../utils/docBlocks';
 
@@ -23,45 +23,84 @@ interface SlashState {
   activeIdx: number;
 }
 
-const SLASH_ITEMS = [
-  'p', 'h1', 'h2', 'h3',
-  'bullet', 'numbered', 'check', 'toggle',
-  'code', 'quote', 'divider',
-  'image', 'subpage',
-];
-
 export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onChange }) => {
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [tbTurnOpen, setTbTurnOpen] = useState(false);
   const [tbColorOpen, setTbColorOpen] = useState(false);
   const [tbLinkOpen, setTbLinkOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Refs so keyboard extension always has fresh state without re-creating the extension
   const slashRef = useRef<SlashState | null>(null);
   slashRef.current = slash;
+  const setSlashRef = useRef(setSlash);
+  setSlashRef.current = setSlash;
+  const handleSlashPickRef = useRef<(type: string) => void>(() => {});
+
+  // Slash keyboard navigation extension — created once, communicates via refs
+  const SlashNavExtension = useMemo(() => Extension.create({
+    name: 'slashNav',
+    addKeyboardShortcuts() {
+      return {
+        ArrowDown: () => {
+          if (!slashRef.current) return false;
+          const total = getFilteredItems(slashRef.current.query).length;
+          if (total === 0) return false;
+          setSlashRef.current((s) => s ? { ...s, activeIdx: (s.activeIdx + 1) % total } : s);
+          return true;
+        },
+        ArrowUp: () => {
+          if (!slashRef.current) return false;
+          const total = getFilteredItems(slashRef.current.query).length;
+          if (total === 0) return false;
+          setSlashRef.current((s) => s ? { ...s, activeIdx: (s.activeIdx - 1 + total) % total } : s);
+          return true;
+        },
+        Enter: () => {
+          if (!slashRef.current) return false;
+          const items = getFilteredItems(slashRef.current.query);
+          const picked = items[slashRef.current.activeIdx] ?? items[0];
+          if (picked) handleSlashPickRef.current(picked.id);
+          return true;
+        },
+        Escape: () => {
+          if (!slashRef.current) return false;
+          setSlashRef.current(null);
+          return true;
+        },
+      };
+    },
+  }), []);
 
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       TaskList,
       TaskItem.configure({ nested: false }),
-      Link.configure({ openOnClick: false }),
+      Link.configure({ openOnClick: false, autolink: true }),
       Underline,
       Placeholder.configure({ placeholder: "Type '/' for commands…" }),
+      SlashNavExtension,
     ],
     content: docBlocksToTiptap(initialBlocks),
+    editorProps: {
+      attributes: { spellcheck: 'true' },
+    },
     onUpdate: ({ editor: e }) => {
       const { $from } = e.state.selection;
       const text = $from.parent.textContent;
 
-      if (text.startsWith('/')) {
+      if (text.startsWith('/') && $from.parent.type.name !== 'codeBlock') {
         const coords = e.view.coordsAtPos(e.state.selection.from);
         const wrap = wrapRef.current;
         if (wrap) {
           const rect = wrap.getBoundingClientRect();
+          const query = text.slice(1);
+          const total = getFilteredItems(query).length;
           setSlash((prev) => ({
-            pos: { x: coords.left - rect.left, y: coords.bottom - rect.top + 4 },
-            query: text.slice(1),
-            activeIdx: prev?.activeIdx ?? 0,
+            pos: { x: coords.left - rect.left, y: coords.bottom - rect.top + 6 },
+            query,
+            activeIdx: Math.min(prev?.activeIdx ?? 0, Math.max(0, total - 1)),
           }));
         }
       } else {
@@ -70,42 +109,24 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
 
       onChange?.(e.getJSON());
     },
+    onSelectionUpdate: () => {
+      // Close slash menu if selection moves away
+      if (slashRef.current) {
+        const e = editor;
+        if (e) {
+          const text = e.state.selection.$from.parent.textContent;
+          if (!text.startsWith('/')) setSlash(null);
+        }
+      }
+    },
   });
-
-  // Keyboard nav for slash menu
-  useEffect(() => {
-    if (!slash || !editor) return;
-    const filtered = SLASH_ITEMS.filter((id) =>
-      id.includes(slash.query.toLowerCase())
-    );
-
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); setSlash(null); return; }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSlash((s) => s ? { ...s, activeIdx: (s.activeIdx + 1) % filtered.length } : s);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSlash((s) => s ? { ...s, activeIdx: (s.activeIdx - 1 + filtered.length) % filtered.length } : s);
-        return;
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const picked = filtered[slash.activeIdx] ?? filtered[0];
-        if (picked) handleSlashPick(picked);
-      }
-    };
-    window.addEventListener('keydown', handler, { capture: true });
-    return () => window.removeEventListener('keydown', handler, { capture: true });
-  }, [slash, editor]);
 
   const handleSlashPick = useCallback((type: string) => {
     if (!editor) return;
     setSlash(null);
+    setTbTurnOpen(false);
 
-    // Delete slash + query text
+    // Delete slash + query
     const { $from } = editor.state.selection;
     const blockStart = $from.start();
     editor.chain().focus().deleteRange({ from: blockStart, to: $from.pos }).run();
@@ -126,26 +147,18 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
     }
   }, [editor]);
 
-  const activeFormats: ActiveFormats = {
-    bold:      editor?.isActive('bold')      ?? false,
-    italic:    editor?.isActive('italic')    ?? false,
-    underline: editor?.isActive('underline') ?? false,
-    strike:    editor?.isActive('strike')    ?? false,
-    code:      editor?.isActive('code')      ?? false,
-    link:      editor?.isActive('link')      ?? false,
-  };
+  // Keep ref fresh
+  handleSlashPickRef.current = handleSlashPick;
 
   const handleFormat = useCallback((fmt: keyof ActiveFormats) => {
     if (!editor) return;
-    const chain = editor.chain().focus();
-    switch (fmt) {
-      case 'bold':      chain.toggleBold().run(); break;
-      case 'italic':    chain.toggleItalic().run(); break;
-      case 'underline': chain.toggleUnderline().run(); break;
-      case 'strike':    chain.toggleStrike().run(); break;
-      case 'code':      chain.toggleCode().run(); break;
-      case 'link':      setTbLinkOpen((v) => !v); break;
-    }
+    editor.chain().focus()[
+      fmt === 'bold'      ? 'toggleBold'      :
+      fmt === 'italic'    ? 'toggleItalic'    :
+      fmt === 'underline' ? 'toggleUnderline' :
+      fmt === 'strike'    ? 'toggleStrike'    :
+      fmt === 'code'      ? 'toggleCode'      : 'toggleBold'
+    ]().run();
   }, [editor]);
 
   const handleTurnInto = useCallback((type: string) => {
@@ -164,8 +177,28 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
     }
   }, [editor]);
 
+  const handleLinkSubmit = useCallback((url: string) => {
+    if (!editor) return;
+    editor.chain().focus().setLink({ href: url, target: '_blank' }).run();
+  }, [editor]);
+
+  const handleLinkUnset = useCallback(() => {
+    if (!editor) return;
+    editor.chain().focus().unsetLink().run();
+  }, [editor]);
+
+  if (!editor) return null;
+
+  const activeFormats: ActiveFormats = {
+    bold:      editor.isActive('bold'),
+    italic:    editor.isActive('italic'),
+    underline: editor.isActive('underline'),
+    strike:    editor.isActive('strike'),
+    code:      editor.isActive('code'),
+    link:      editor.isActive('link'),
+  };
+
   const currentBlockType = (): string => {
-    if (!editor) return 'p';
     if (editor.isActive('heading', { level: 1 })) return 'h1';
     if (editor.isActive('heading', { level: 2 })) return 'h2';
     if (editor.isActive('heading', { level: 3 })) return 'h3';
@@ -177,32 +210,37 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
     return 'p';
   };
 
+  const currentLinkUrl = editor.isActive('link')
+    ? editor.getAttributes('link').href ?? ''
+    : '';
+
   return (
     <div className="tiptap-editor-wrap" ref={wrapRef}>
-      {editor && (
-        <BubbleMenu
-          editor={editor}
-          options={{ placement: 'top-start' }}
-          shouldShow={({ from, to }: { from: number; to: number }) =>
-            from !== to && !editor.isActive('codeBlock')
-          }
-        >
-          <FloatingToolbar
-            position={null}
-            inline
-            activeFormats={activeFormats}
-            blockType={currentBlockType() as any}
-            onFormat={handleFormat}
-            onTurnInto={handleTurnInto}
-            showTurnDropdown={tbTurnOpen}
-            setShowTurnDropdown={setTbTurnOpen}
-            showLinkEditor={tbLinkOpen}
-            setShowLinkEditor={setTbLinkOpen}
-            showColorPicker={tbColorOpen}
-            setShowColorPicker={setTbColorOpen}
-          />
-        </BubbleMenu>
-      )}
+      <BubbleMenu
+        editor={editor}
+        options={{ placement: 'top', offset: 10 }}
+        shouldShow={({ from, to }: { from: number; to: number }) =>
+          from !== to && !editor.isActive('codeBlock') && !slash
+        }
+      >
+        <FloatingToolbar
+          position={null}
+          inline
+          activeFormats={activeFormats}
+          blockType={currentBlockType() as any}
+          onFormat={handleFormat}
+          onTurnInto={handleTurnInto}
+          currentLinkUrl={currentLinkUrl}
+          onLinkSubmit={handleLinkSubmit}
+          onLinkUnset={handleLinkUnset}
+          showTurnDropdown={tbTurnOpen}
+          setShowTurnDropdown={setTbTurnOpen}
+          showLinkEditor={tbLinkOpen}
+          setShowLinkEditor={setTbLinkOpen}
+          showColorPicker={tbColorOpen}
+          setShowColorPicker={setTbColorOpen}
+        />
+      </BubbleMenu>
 
       <EditorContent editor={editor} />
 

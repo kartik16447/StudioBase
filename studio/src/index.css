@@ -1068,3 +1068,134 @@
 /* BubbleMenu wrapper */
 .tippy-box[data-theme~="doc-bubble"] { background: transparent; box-shadow: none; padding: 0; }
 .tippy-box[data-theme~="doc-bubble"] .tippy-content { padding: 0; }
+
+/* ─── Buttery Editor Animations ─── */
+
+/* Floating toolbar — spring pop in */
+@keyframes tb-spring-in {
+  0%   { opacity: 0; transform: translateY(6px) scale(0.94); }
+  60%  { opacity: 1; transform: translateY(-2px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.doc-floating-tb {
+  animation: tb-spring-in 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+
+/* Slash menu — slide up with spring */
+@keyframes slash-spring-in {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.96); }
+  65%  { opacity: 1; transform: translateY(-2px) scale(1.005); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.doc-slash-menu {
+  animation: slash-spring-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+
+/* Dropdown menus */
+@keyframes dropdown-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.doc-turn-dropdown,
+.doc-color-swatches,
+.doc-link-edit,
+.doc-menu,
+.doc-emoji-picker {
+  animation: dropdown-in 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+/* Toolbar buttons — instant response */
+.doc-tb-btn {
+  transition: background 0.08s ease, color 0.08s ease, transform 0.08s ease;
+}
+.doc-tb-btn:hover  { transform: scale(1.05); }
+.doc-tb-btn:active { transform: scale(0.95); }
+.doc-tb-btn.active { background: rgba(94, 92, 230, 0.15); color: var(--doc-primary); }
+
+/* Slash menu items */
+.doc-slash-item {
+  transition: background 0.06s ease;
+}
+
+/* Block hover controls */
+.doc-block-hover {
+  transition: opacity 0.1s ease;
+}
+
+/* Turn dropdown items */
+.doc-turn-item {
+  transition: background 0.06s ease;
+}
+.doc-turn-item.active { background: var(--doc-primary-light); color: var(--doc-primary); }
+
+/* ProseMirror caret — vivid, no lag */
+.ProseMirror {
+  caret-color: var(--doc-primary);
+}
+
+/* Smooth focus-ring on editor */
+.ProseMirror:focus-visible { outline: none; }
+
+/* Link edit popover — updated layout */
+.doc-link-edit {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--doc-surface);
+  border: 1px solid var(--doc-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  min-width: 280px;
+  z-index: 1100;
+}
+
+.doc-link-edit input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--doc-text-1);
+  min-width: 0;
+}
+
+/* Slash empty state */
+.doc-slash-empty {
+  padding: 12px 14px;
+  font-size: 13px;
+  color: var(--doc-text-3);
+}
+
+/* Slash icon wrap */
+.doc-slash-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--doc-surface-2);
+  border-radius: 5px;
+  flex-shrink: 0;
+  color: var(--doc-text-2);
+}
+
+.doc-slash-item.active .doc-slash-icon-wrap {
+  background: var(--doc-primary);
+  color: #fff;
+}
+
+.doc-slash-label {
+  flex: 1;
+  font-size: 13.5px;
+}
