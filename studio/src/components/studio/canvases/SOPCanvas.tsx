@@ -25,6 +25,10 @@ export const SOPCanvas: React.FC = () => {
   const forkSOP = useStudioStore(state => state.forkSOP);
   const shareSession = useStudioStore(state => state.shareSession);
 
+  // Annotation + step management
+  const setActiveTool = useStudioStore(state => state.setActiveTool);
+  const deleteStep = useStudioStore(state => state.deleteStep);
+
   // Phase 6 — Comments
   const comments = useStudioStore(state => state.comments);
   const commentsPanelOpen = useStudioStore(state => state.commentsPanelOpen);
@@ -224,6 +228,25 @@ export const SOPCanvas: React.FC = () => {
                     onFocus={() => {
                       setFocusStep(it.step.id);
                       setStepIndex(it.idx);
+                    }}
+                    onAnnotate={(step) => {
+                      // Focus the step, then activate highlight tool so user can draw immediately
+                      setFocusStep(step.id);
+                      setStepIndex(it.idx);
+                      triggerScroll();
+                      setActiveTool('highlight');
+                    }}
+                    onEdit={(step) => {
+                      // Scroll to step; StepCard handles textarea focus internally
+                      setFocusStep(step.id);
+                      setStepIndex(it.idx);
+                      triggerScroll();
+                    }}
+                    onDelete={(step) => {
+                      const label = step.stepTitle || step.elementText || `Step ${it.idx + 1}`;
+                      if (window.confirm(`Delete "${label}"?\nThis cannot be undone.`)) {
+                        deleteStep(step.id);
+                      }
                     }}
                   />
                 </div>

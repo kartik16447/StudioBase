@@ -312,6 +312,7 @@ export const StepCard: React.FC<{
   const stepLabel = `Step ${step.sequence ?? (step as any).index + 1}`;
   const stepTitle = step.stepTitle || step.elementText || '';
 
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const [textValue, setTextValue] = React.useState(step.textOverride ?? step.generatedText ?? '');
 
   React.useEffect(() => {
@@ -341,17 +342,25 @@ export const StepCard: React.FC<{
         />
         {/* Hover toolbar — top-right of screenshot */}
         <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-white/90 rounded-lg px-1 py-1 shadow-sm">
-          <Tooltip content="Annotate" side="top">
+          <Tooltip content="Annotate (highlight, blur, shapes)" side="top">
             <IconButton icon={I.Wand} label="Annotate" onClick={(e) => { e.stopPropagation(); onAnnotate?.(step); }} size={28} />
           </Tooltip>
-          <Tooltip content="Edit text" side="top">
-            <IconButton icon={I.Edit2} label="Edit" onClick={(e) => { e.stopPropagation(); onEdit?.(step); }} size={28} />
+          <Tooltip content="Edit narration text" side="top">
+            <IconButton icon={I.Edit2} label="Edit" onClick={(e) => {
+              e.stopPropagation();
+              onEdit?.(step);
+              // Direct textarea focus — no prop threading needed
+              setTimeout(() => {
+                textareaRef.current?.focus();
+                textareaRef.current?.select();
+              }, 50);
+            }} size={28} />
           </Tooltip>
-          <Tooltip content="Translate" side="top">
-            <IconButton icon={I.Languages} label="Translate" size={28} />
+          <Tooltip content="Translate (coming soon)" side="top">
+            <IconButton icon={I.Languages} label="Translate" onClick={(e) => e.stopPropagation()} size={28} className="opacity-40 cursor-not-allowed" />
           </Tooltip>
           <Tooltip content="Delete step" side="top">
-            <IconButton icon={I.Trash2} label="Delete" onClick={(e) => { e.stopPropagation(); onDelete?.(step); }} size={28} />
+            <IconButton icon={I.Trash2} label="Delete" onClick={(e) => { e.stopPropagation(); onDelete?.(step); }} size={28} className="hover:text-red-500" />
           </Tooltip>
         </div>
       </div>
@@ -366,6 +375,7 @@ export const StepCard: React.FC<{
         {/* Step description — editable when draft, read-only when published */}
         {sopStatus !== 'published' ? (
           <textarea
+            ref={textareaRef}
             className="w-full bg-surface-2/60 border border-border rounded-sm p-3 text-[14px] resize-none focus:outline-none focus:border-primary/40 text-text-2 leading-[1.7] transition-colors"
             value={textValue}
             onChange={(e) => setTextValue(e.target.value)}
@@ -597,7 +607,21 @@ export const FloatingToolbar: React.FC = () => {
   const activeTool = useStudioStore(state => state.activeTool);
   const setActiveTool = useStudioStore(state => state.setActiveTool);
   const activeView = useStudioStore(state => state.activeView);
-  
+
+  // Keyboard shortcuts for annotation tools
+  React.useEffect(() => {
+    if (activeView !== 'sop') return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+      const map: Record<string, string> = { v: 'cursor', s: 'spotlight', b: 'highlight', c: 'circle', t: 'text', z: 'zoom', m: 'move', r: 'blur' };
+      if (e.key === 'Escape') { setActiveTool('cursor'); return; }
+      const tool = map[e.key.toLowerCase()];
+      if (tool) { e.preventDefault(); setActiveTool(tool); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [activeView, setActiveTool]);
+
   if (!isToolbarVisible || activeView !== 'sop') return null;
 
   const tools = [
@@ -626,10 +650,19 @@ export const FloatingToolbar: React.FC = () => {
             />
           </Tooltip>
         ))}
-        <div className="w-px h-6 bg-white/10 mx-1" />
-        <Tooltip content="More tools">
-          <IconButton icon={I.MoreHorizontal} label="More" dark size={38} />
-        </Tooltip>
+        {activeTool !== 'cursor' && (
+          <>
+            <div className="w-px h-6 bg-white/10 mx-1" />
+            <Tooltip content="Exit annotation mode (Esc)">
+              <button
+                onClick={() => setActiveTool('cursor')}
+                className="h-[38px] px-3 rounded-pill text-[11px] font-semibold text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center gap-1.5"
+              >
+                <I.X size={13} /> Done
+              </button>
+            </Tooltip>
+          </>
+        )}
       </GlassPanel>
     </div>
   );
