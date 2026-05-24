@@ -9,6 +9,7 @@ import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
 import { FloatingToolbar } from './FloatingToolbar';
 import { SlashMenu, getFilteredItems } from './SlashMenu';
+import { ToggleBlock } from './ToggleBlock';
 import type { ActiveFormats, DocBlock } from '../types';
 import { docBlocksToTiptap } from '../utils/docBlocks';
 
@@ -135,6 +136,7 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
       Link.configure({ openOnClick: false, autolink: true }),
       Underline,
       Placeholder.configure({ placeholder: "Type '/' for commands…" }),
+      ToggleBlock,
       SlashNavExtension,
       KeyboardExtension,
     ],
@@ -199,6 +201,17 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
       case 'quote':    chain.toggleBlockquote().run(); break;
       case 'code':     chain.toggleCodeBlock().run(); break;
       case 'divider':  chain.setHorizontalRule().run(); break;
+      case 'toggle': {
+        // Replace the current empty paragraph with a toggleBlock in-place
+        const { state } = editor;
+        const { $from } = state.selection;
+        const d = $from.depth;
+        const from = $from.before(d);
+        const to = $from.after(d);
+        const toggle = state.schema.nodes.toggleBlock?.createAndFill({ open: true });
+        if (toggle) editor.view.dispatch(state.tr.replaceWith(from, to, toggle).scrollIntoView());
+        break;
+      }
       default:         chain.setParagraph().run();
     }
   }, [editor]);

@@ -1199,3 +1199,63 @@
   flex: 1;
   font-size: 13.5px;
 }
+
+/* ── Toggle Block ───────────────────────────────────────── */
+.doc-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  margin: 2px 0;
+}
+
+.doc-toggle-chevron {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 1.6em;
+  margin-top: 2px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--doc-text-3);
+  padding: 0;
+  border-radius: 4px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.doc-toggle-chevron:hover {
+  background: var(--doc-hover);
+  color: var(--doc-text-1);
+}
+
+.doc-toggle-chevron svg {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.doc-toggle.open .doc-toggle-chevron svg {
+  transform: rotate(90deg);
+}
+
+.doc-toggle-content {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Body content (everything after title paragraph) hidden when closed */
+.doc-toggle:not(.open) .doc-toggle-content > *:not(:first-child) {
+  display: none;
+}
+
+/* Indent body content when open */
+.doc-toggle.open .doc-toggle-content > *:not(:first-child) {
+  padding-left: 16px;
+  border-left: 2px solid var(--doc-border);
+  margin-left: 4px;
+}
+
+/* NodeViewWrapper adds a div — make sure it doesn't add extra margin */
+.doc-toggle [data-node-view-wrapper] {
+  display: contents;
+}

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import Fuse from 'fuse.js';
 import { I } from '../../../components/icons';
 
 interface SlashMenuItem {
@@ -25,12 +26,16 @@ const ALL_ITEMS: SlashMenuItem[] = [
   { id: 'subpage',  label: 'Sub-page',    group: 'Navigation', Icon: I.FileText,     kbd: null },
 ];
 
+const fuse = new Fuse(ALL_ITEMS, {
+  keys: ['label', 'id'],
+  threshold: 0.4,
+  minMatchCharLength: 1,
+  includeScore: true,
+});
+
 export function getFilteredItems(query: string): SlashMenuItem[] {
   if (!query) return ALL_ITEMS;
-  const q = query.toLowerCase();
-  return ALL_ITEMS.filter(
-    (it) => it.label.toLowerCase().includes(q) || it.id.includes(q)
-  );
+  return fuse.search(query).map((r) => r.item);
 }
 
 interface SlashMenuProps {

@@ -58,13 +58,20 @@ export function docBlocksToTiptap(blocks: DocBlock[]): JSONContent {
         nodes.push({ type: 'codeBlock', attrs: {}, content: b.text ? [{ type: 'text', text: b.text }] : [] });
         break;
       case 'divider': nodes.push({ type: 'horizontalRule' }); break;
-      case 'toggle':
-        nodes.push({ type: 'heading', attrs: { level: 3 }, content: textNodes(b.text) });
-        if (b.children && b.open) {
-          const child = docBlocksToTiptap(b.children);
-          nodes.push(...(child.content ?? []));
-        }
+      case 'toggle': {
+        const bodyBlocks = (b.open && b.children && b.children.length > 0)
+          ? (docBlocksToTiptap(b.children).content ?? [])
+          : [];
+        nodes.push({
+          type: 'toggleBlock',
+          attrs: { open: b.open !== false },
+          content: [
+            { type: 'paragraph', content: textNodes(b.text) },
+            ...bodyBlocks,
+          ],
+        });
         break;
+      }
       default: nodes.push({ type: 'paragraph', content: textNodes(b.text) });
     }
     i++;
