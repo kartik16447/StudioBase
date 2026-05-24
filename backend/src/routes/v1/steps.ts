@@ -544,8 +544,9 @@ steps.post('/:sessionId/generate-narration', async (c) => {
   const session = await requireSession(c.env, sessionId, user.id);
   const workspaceId = session.workspaceId;
 
-  // Load steps from session.json in R2
-  const assetKey = `sessions/${sessionId}/session.json`;
+  // Load steps from R2 — use the authoritative r2JsonKey from D1, not a
+  // hardcoded path, so the correct file is read even if the key ever differs.
+  const assetKey = (session as any).r2JsonKey || `sessions/${sessionId}/session.json`;
   const assetObj = await c.env.R2.get(assetKey);
   if (!assetObj) {
     throw new HTTPException(404, { message: 'Session asset not found' });

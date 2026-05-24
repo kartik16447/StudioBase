@@ -284,6 +284,7 @@ export const AudioPanel: React.FC = () => {
   const audioPollingStepIds = useStudioStore(s => s.audioPollingStepIds);
   const generateAllAudio = useStudioStore(s => s.generateAllAudio);
   const fetchNarrationStatus = useStudioStore(s => s.fetchNarrationStatus);
+  const sessionStatus = useStudioStore(s => s.sessionStatus);
 
   const sessionId = (session as any)?.id || (session as any)?.sessionId;
 
@@ -316,9 +317,12 @@ export const AudioPanel: React.FC = () => {
 
   // ── Helpers ──
   const steps = session?.steps ?? [];
-  const stepsWithText = steps.filter(s =>
-    (s.textOverride || s.generatedText || (s as any).elementText || '').trim()
-  );
+  // Use displayText() so [SILENCE] and trailing-... steps are excluded from
+  // the narration count — the backend skips them anyway, so the UI should too.
+  const stepsWithText = steps.filter(s => {
+    const raw = displayText(s.textOverride || s.generatedText) || (s as any).elementText || '';
+    return raw.trim().length > 0;
+  });
 
   const audioUrl = useCallback((key: string | null | undefined) => {
     if (!key) return null;
@@ -488,6 +492,16 @@ export const AudioPanel: React.FC = () => {
           <p className="text-[10px] text-text-3 text-center">
             {stepsWithText.length} credit{stepsWithText.length !== 1 ? 's' : ''} to regenerate all
           </p>
+        )}
+
+        {/* Stale audio warning — shown after AI text was just regenerated */}
+        {hasAnyAudio && !activelyGenerating && sessionStatus === 'ready' && (
+          <div className="flex items-start gap-2 bg-warning/10 border border-warning/30 rounded-lg px-3 py-2">
+            <I.AlertTriangle size={12} className="text-warning shrink-0 mt-0.5" />
+            <p className="text-[10px] text-warning leading-relaxed">
+              Script was updated — regenerate voice so audio matches your new narration.
+            </p>
+          </div>
         )}
       </div>
     </div>
