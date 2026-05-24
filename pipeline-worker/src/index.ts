@@ -266,7 +266,7 @@ function computeAnimationTarget(step: any) {
   return {
     centerX: (rawX / vw) * 100,
     centerY: (rawY / vh) * 100,
-    zoomScale: 2.5,
+    zoomScale: 1.0,
     transitionType: "fade",
     transitionDurationMs: 400,
   };
