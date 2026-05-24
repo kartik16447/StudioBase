@@ -1162,6 +1162,8 @@ export function LibraryPage() {
               width: "90%",
               border: "1px solid rgba(255,255,255,0.1)",
               position: "relative",
+              maxHeight: "90vh",
+              overflowY: "auto",
             }}
           >
             <button

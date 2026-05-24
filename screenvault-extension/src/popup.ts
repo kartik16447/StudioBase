@@ -38,6 +38,7 @@ const btnToggleMic = document.getElementById(
 
 const accountsList = document.getElementById("accounts-list")!;
 const noAccounts = document.getElementById("no-accounts")!;
+const recordUi = document.getElementById("record-ui")!;
 
 const recTimer = document.getElementById("rec-timer")!;
 const recTargetLabel = document.getElementById("rec-target-label")!;
@@ -61,8 +62,9 @@ chrome.storage.local.get(["sv_state", "sv_accounts"], (stored) => {
   if (stored.sv_accounts && (stored.sv_accounts as StorageAccount[]).length > 0) {
     renderAccounts(stored.sv_accounts as StorageAccount[]);
   } else {
-    // Show empty state, NOT skeleton on initial load
+    // Show onboarding, NOT skeleton on initial load
     noAccounts.style.display = "block";
+    recordUi.style.display = "none";
   }
 
   // 2. Background silent refresh
@@ -251,12 +253,13 @@ async function renderAccounts(accs: StorageAccount[]) {
 
   if (accounts.length === 0 && !isConnectingAccount) {
     noAccounts.style.display = "block";
-    // Remove existing rows except section label
+    recordUi.style.display = "none";
     Array.from(accountsList.children).forEach((child) => {
-      if (!child.classList.contains("section-label")) child.remove();
+      if (!child.classList.contains("section-label") && !child.classList.contains("accounts-header")) child.remove();
     });
   } else {
     noAccounts.style.display = "none";
+    recordUi.style.display = "block";
 
     // Clear list (keep section-label)
     Array.from(accountsList.children).forEach((child) => {
@@ -359,11 +362,13 @@ function stopLocalTimer() {
 }
 
 // Button Wiring
-btnConnect.addEventListener("click", () => {
+const connectHandler = () => {
   isConnectingAccount = true;
   renderAccounts(accounts);
   chrome.runtime.sendMessage({ type: "CONNECT_ACCOUNT" });
-});
+};
+btnConnect.addEventListener("click", connectHandler);
+document.getElementById("btn-connect-onboarding")?.addEventListener("click", connectHandler);
 
 btnNewRecording.addEventListener("click", () => {
   if (accounts.length > 0) {
@@ -425,6 +430,6 @@ btnTryAgain.addEventListener("click", () => {
 
 document.getElementById("dashboardBtn")?.addEventListener("click", () => {
   chrome.tabs.create({
-    url: chrome.runtime.getURL("dashboard.html"),
+    url: "https://screenvault-web.pages.dev",
   });
 });

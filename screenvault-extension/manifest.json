@@ -29,7 +29,7 @@
     }
   },
   "oauth2": {
-    "client_id": "64877467372-b3aksjdsc4g7g0d5u3m5bb0ac41ed408.apps.googleusercontent.com",
+    "client_id": "176032547575-vas0b4kc3mson1s9dhopmkikq2p90cg4.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/drive.file",
       "https://www.googleapis.com/auth/drive.metadata.readonly",

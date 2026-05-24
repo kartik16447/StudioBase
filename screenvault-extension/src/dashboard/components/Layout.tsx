@@ -71,9 +71,9 @@ export function Layout({ session }: { session: any }) {
         borderRight: '1px solid rgba(255,255,255,0.04)', 
         padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' 
       }}>
-        <div style={{ fontWeight: 700, fontSize: '1.25rem', color: '#fff', marginBottom: '2rem', paddingLeft: '0.5rem', letterSpacing: '-0.025em' }}>
+        <a href="https://screenvault.karthik-upadhyay98.workers.dev" target="_blank" rel="noreferrer" style={{ fontWeight: 700, fontSize: '1.25rem', color: '#fff', marginBottom: '2rem', paddingLeft: '0.5rem', letterSpacing: '-0.025em', textDecoration: 'none', display: 'block' }}>
           ScreenVault
-        </div>
+        </a>
 
         <div style={{ marginBottom: '2rem' }}>
           <p style={{ fontSize: '0.65rem', color: '#71717A', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, paddingLeft: '0.5rem', marginBottom: '0.75rem' }}>Workspace</p>

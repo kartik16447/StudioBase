@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ScreenVault</title>
+    <title>RecVault Beta</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
@@ -11,121 +11,143 @@
       <div class="header">
         <div class="logo">
           <div class="logo-dot"></div>
-          <span class="logo-name">ScreenVault</span>
+          <span class="logo-name">RecVault Beta</span>
         </div>
         <div class="header-actions">
           <button
             class="icon-btn connect-btn"
             id="btn-connect"
-            title="Connect Google Account"
+            title="Add another Google Drive account for storage"
           >
-            <svg viewBox="0 0 18 18" width="14" height="14" style="margin-right:4px;flex-shrink:0" fill="none">
+            <svg viewBox="0 0 18 18" width="12" height="12" style="margin-right:4px;flex-shrink:0" fill="none">
               <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
               <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
               <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
               <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
             </svg>
-            Connect
+            + Drive
           </button>
         </div>
       </div>
 
       <!-- Screen: Idle -->
       <div class="screen" id="screen-idle">
-        <div class="action-row">
-          <button
-            class="icon-btn mic-toggle-btn"
-            id="btn-toggle-mic"
-            title="Enable Microphone"
-          >
-            <svg
-              class="mic-icon"
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              stroke="currentColor"
-              stroke-width="2"
-              fill="none"
-            >
-              <path
-                d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
-              ></path>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-              <line x1="12" y1="19" x2="12" y2="23"></line>
-              <line x1="8" y1="23" x2="16" y2="23"></line>
-            </svg>
-            <svg
-              class="mic-off-icon"
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              stroke="currentColor"
-              stroke-width="2"
-              fill="none"
-            >
-              <path d="M12 1a3 3 0 0 0-3 3v5"></path>
-              <path d="M15 9V4a3 3 0 0 0-5.2-2.1"></path>
-              <path d="M19 10v2a7 7 0 0 1-12.2 4.6"></path>
-              <line x1="12" y1="19" x2="12" y2="23"></line>
-              <line x1="8" y1="23" x2="16" y2="23"></line>
-              <line x1="3" y1="3" x2="21" y2="21"></line>
-            </svg>
-          </button>
-          <button class="record-btn" id="btn-new-recording">
-            <div class="rec-dot"></div>
-            <span class="rec-label">Start Recording</span>
-            <span class="rec-arrow">›</span>
-          </button>
-        </div>
-        <div style="margin-top: 12px; margin-bottom: 12px; width: 100%;">
-          <input 
-            type="text" 
-            id="rec-title-input" 
-            placeholder="Recording Title (optional)"
-            style="
-              width: 100%;
-              background: #141414;
-              border: 1px solid #222;
-              border-radius: 6px;
-              color: white;
-              padding: 10px 12px;
-              font-size: 13px;
-              outline: none;
-              transition: border-color 0.2s;
-            "
-            onfocus="this.style.borderColor='#3b82f6'"
-            onblur="this.style.borderColor='#222'"
-          />
-        </div>
-        <div style="font-size: 11px; color: var(--text-3); text-align: center; margin-bottom: 8px;">
-          You’ll choose what to record (Tab, Window, or Screen) next.
-        </div>
 
-        <button
-          id="dashboardBtn"
-          style="
-            width: 100%;
-            margin-top: 8px;
-            margin-bottom: 8px;
-            background: #1f2937;
-            color: white;
-            padding: 8px;
-            border-radius: 6px;
-            border: none;
-            cursor: pointer;
-          "
-        >
-          My Library
-        </button>
-
-        <div class="accounts-section" id="accounts-list">
-          <div class="section-label">Storage Accounts</div>
-          <!-- Account rows injected by popup.ts -->
-        </div>
+        <!-- No accounts: onboarding steps -->
         <div class="no-accounts" id="no-accounts" style="display: none">
-          <p>No accounts connected.</p>
-          <p>Click <strong>Connect</strong> above to add Google Drive.</p>
+          <div class="onboarding-card">
+            <div class="onboarding-title">Get started in 2 steps</div>
+
+            <div class="onboarding-step">
+              <div class="step-num">1</div>
+              <div class="step-body">
+                <div class="step-title">Connect Google Drive</div>
+                <div class="step-desc">Recordings are saved to your Drive automatically — no storage limits set by us.</div>
+              </div>
+            </div>
+
+            <button class="connect-drive-btn" id="btn-connect-onboarding">
+              <svg viewBox="0 0 18 18" width="14" height="14" style="flex-shrink:0" fill="none">
+                <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+                <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+                <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+                <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+              </svg>
+              Connect Google Drive
+            </button>
+
+            <div class="onboarding-step step-muted">
+              <div class="step-num step-num-muted">2</div>
+              <div class="step-body">
+                <div class="step-title" style="color: var(--text-3)">Start Recording</div>
+                <div class="step-desc">Available once Drive is connected.</div>
+              </div>
+            </div>
+          </div>
         </div>
+
+        <!-- Accounts connected: record UI -->
+        <div id="record-ui" style="display: none">
+          <div class="action-row">
+            <button
+              class="icon-btn mic-toggle-btn"
+              id="btn-toggle-mic"
+              title="Enable Microphone"
+            >
+              <svg class="mic-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+              <svg class="mic-off-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                <path d="M12 1a3 3 0 0 0-3 3v5"></path>
+                <path d="M15 9V4a3 3 0 0 0-5.2-2.1"></path>
+                <path d="M19 10v2a7 7 0 0 1-12.2 4.6"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+                <line x1="3" y1="3" x2="21" y2="21"></line>
+              </svg>
+            </button>
+            <button class="record-btn" id="btn-new-recording">
+              <div class="rec-dot"></div>
+              <span class="rec-label">Start Recording</span>
+              <span class="rec-arrow">›</span>
+            </button>
+          </div>
+
+          <div style="margin: 0 14px 10px;">
+            <input
+              type="text"
+              id="rec-title-input"
+              placeholder="Recording title (optional)"
+              style="
+                width: 100%;
+                background: #141414;
+                border: 1px solid #222;
+                border-radius: 6px;
+                color: white;
+                padding: 9px 12px;
+                font-size: 13px;
+                outline: none;
+                transition: border-color 0.2s;
+              "
+              onfocus="this.style.borderColor='#3b82f6'"
+              onblur="this.style.borderColor='#222'"
+            />
+          </div>
+
+          <div style="font-size: 11px; color: var(--text-3); text-align: center; margin-bottom: 10px; padding: 0 14px;">
+            You'll choose what to record (Tab, Window, or Screen) next.
+          </div>
+
+          <div style="padding: 0 14px 12px;">
+            <button
+              id="dashboardBtn"
+              style="
+                width: 100%;
+                background: #1f2937;
+                color: white;
+                padding: 8px;
+                border-radius: 6px;
+                border: none;
+                cursor: pointer;
+                font-size: 12px;
+              "
+            >
+              Dashboard ↗
+            </button>
+          </div>
+
+          <div class="accounts-section" id="accounts-list">
+            <div class="accounts-header">
+              <span class="section-label">Saving to Drive</span>
+              <span class="section-label-hint">recordings auto-upload here</span>
+            </div>
+            <!-- Account rows injected by popup.ts -->
+          </div>
+        </div>
+
       </div>
 
       <!-- Screen: Recording -->
