@@ -258,11 +258,10 @@ export const SharePage: React.FC = () => {
   // Tabs: show all three whenever each format is available.
   // Raw Video tab appears if there is a video asset and raw is enabled.
   // Cinematic tab appears only when credits have been spent to unlock it.
-  const hasVoiceovers = steps.some(s => s.voiceoverKey);
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     ...(sopEnabled !== false ? [{ id: 'guide' as Tab, label: 'Step Guide', icon: <I.List size={13} /> }] : []),
     ...(_rawEnabled !== false && videoUrl ? [{ id: 'recording' as Tab, label: 'Raw Video', icon: <I.Video size={13} /> }] : []),
-    ...(cinematicEnabled || hasVoiceovers ? [{ id: 'cinematic' as Tab, label: 'Cinematic AI', icon: <I.Play size={13} /> }] : []),
+    ...(cinematicEnabled ? [{ id: 'cinematic' as Tab, label: 'Cinematic AI', icon: <I.Play size={13} /> }] : []),
   ];
 
   // Auto-select first available tab (or keep current if still valid)

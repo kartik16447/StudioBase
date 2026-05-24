@@ -121,6 +121,7 @@ const FormatCard: React.FC<FormatCardProps> = ({
 
 export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
   const session    = useStudioStore((s) => s.session);
+  const setSession = useStudioStore((s) => s.setSession);
   const sessionId  = (session as any)?.sessionId ?? (session as any)?.id ?? null;
   const title      = session?.aiOutputs?.title ?? 'Untitled';
   const hasVideo   = !!((session as any)?.videoKey);
@@ -182,6 +183,8 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     setFormatSaving(true);
     try {
       await apiClient.patch(`/sessions/${sessionId}/share-formats`, { [field]: next });
+      // Keep store in sync so re-opening the modal reads fresh values
+      if (session) setSession({ ...session, [field]: next } as any);
     } catch {
       setFormats(f => ({ ...f, [field]: !next }));
     } finally {
@@ -204,6 +207,8 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
         return;
       }
       setFormats(f => ({ ...f, cinematicEnabled: true }));
+      // Keep store in sync — cinematic is now unlocked (credit spent)
+      if (session) setSession({ ...session, cinematicEnabled: true } as any);
     } catch (e: any) {
       setCinematicError(e?.message || 'Failed to unlock cinematic.');
     } finally {
