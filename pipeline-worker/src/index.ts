@@ -107,6 +107,14 @@ If you write more words than the budget allows, audio will OVERRUN the video and
 4. Reveal tone: Use "!" once per chapter when something important appears. Example: "There it is -- the full build history!"
 5. Grouping: If multiple rapid clicks happen under 1 second apart, summarize as one fluid sentence.
 
+**STEP CONTEXT FIELDS (use these, don't invent):**
+- enrichedElementText: the specific UI label clicked. If it is null or longer than 80 chars, it is a noisy container — use pageTitle + viewportZone instead to describe what the user clicked on.
+- viewportZone: spatial location of the click (e.g. "left sidebar", "top navigation bar"). Use it when enrichedElementText is unclear.
+- For steps where viewportZone is "left sidebar" or "top navigation bar" with no clear enrichedElementText, write a zone-based description: e.g. "in the left sidebar, select…" or "from the top nav, click…"
+
+**BUDGET RULE:**
+For steps with visualDurationSeconds ≥ 4, use AT LEAST 60% of your word budget. Do not leave long steps with 2–4 words. Fill the time naturally with observation or context.
+
 **YOUR TASK:**
 Output ONLY valid JSON matching the schema. No preamble, no explanation, no markdown — start your response with { and end with }. Count words per step before finalizing.`;
 
@@ -178,7 +186,34 @@ function enrichElementText(s: any): string | null {
       return null;
     }
   }
-  return raw ?? null;
+  if (!raw) return null;
+
+  // Collapse whitespace and truncate noisy container text to the first meaningful line
+  const collapsed = raw.replace(/\s+/g, ' ').trim();
+  // If it's a short clean label, return as-is
+  if (collapsed.length <= 60) return collapsed;
+  // Take the first sentence / newline-delimited chunk that is short enough
+  const firstLine = collapsed.split(/[.\n]/)[0].trim();
+  if (firstLine.length >= 3 && firstLine.length <= 80) return firstLine;
+  // Last resort: hard-truncate at 80 chars
+  return collapsed.slice(0, 80).trimEnd() + '…';
+}
+
+function viewportZone(s: any): string | null {
+  const coords = s.coordinates || s.data?.coordinates;
+  if (!coords) return null;
+  const x = coords.x ?? 0;
+  const y = coords.y ?? 0;
+  const vw = coords.viewportWidth ?? 1280;
+  const vh = coords.viewportHeight ?? 720;
+  const xPct = x / vw;
+  const yPct = y / vh;
+
+  if (xPct < 0.12) return yPct < 0.15 ? 'top-left corner' : 'left sidebar';
+  if (xPct > 0.88) return yPct < 0.15 ? 'top-right corner' : 'right sidebar';
+  if (yPct < 0.12) return 'top navigation bar';
+  if (yPct > 0.88) return 'bottom bar';
+  return null; // main content — no zone label needed
 }
 
 // Hard post-processing word budget trimmer.
@@ -210,21 +245,33 @@ interface StepPayloadItem {
   inputValue: string | null;
   pageTitle: string | null;
   url: string | null;
+  viewportZone: string | null;
   visualDurationSeconds: number;
   isBackNavigation: boolean;
   isModalInput: boolean;
 }
 
-function buildStepPayload(steps: any[]): { payload: StepPayloadItem[]; budgetMap: Map<string, number> } {
+function buildStepPayload(
+  steps: any[],
+  totalRecordingMs?: number,
+): { payload: StepPayloadItem[]; budgetMap: Map<string, number> } {
   const filtered = steps.filter(s => !isToolbarOrInternalStep(s));
   const budgetMap = new Map<string, number>();
 
   const payload = filtered.map((s, i) => {
+    const isLast = i === filtered.length - 1;
     let durationSeconds = 3.0;
+
     if (s.timestamp != null) {
       const nextStep = filtered[i + 1];
-      if (nextStep?.timestamp != null) {
+      if (!isLast && nextStep?.timestamp != null) {
         durationSeconds = (nextStep.timestamp - s.timestamp) / 1000;
+      } else if (isLast && totalRecordingMs != null) {
+        // Use remaining recording time for the last step
+        const firstTs = filtered[0]?.timestamp ?? s.timestamp;
+        const elapsed = (s.timestamp - firstTs) / 1000;
+        const remaining = totalRecordingMs / 1000 - elapsed;
+        durationSeconds = Math.max(remaining, 2.0);
       }
     }
 
@@ -248,6 +295,7 @@ function buildStepPayload(steps: any[]): { payload: StepPayloadItem[]; budgetMap
       inputValue:            noisy ? null : (s.inputValue || s.data?.inputValue || null),
       pageTitle:             s.pageTitle || s.data?.pageTitle || null,
       url:                   s.url || s.data?.url || s.data?.frameUrl || null,
+      viewportZone:          viewportZone(s),
       visualDurationSeconds: Math.round(budgetSeconds * 10) / 10,
       isBackNavigation:      backNav,
       isModalInput:          noisy,
@@ -328,7 +376,8 @@ export default {
 
         // ── SOP generation via Workers AI (single call) ───────────────────────
         if (steps.length > 0) {
-          const { payload, budgetMap } = buildStepPayload(steps);
+          const totalRecordingMs = session.metadata?.durationMs || null;
+          const { payload, budgetMap } = buildStepPayload(steps, totalRecordingMs ?? undefined);
           console.log(`[PIPELINE] Calling Workers AI — filtered:${payload.length}/${steps.length} steps inputChars:${JSON.stringify(payload).length}`);
 
           const aiResponse = await (env.AI.run as any)(
