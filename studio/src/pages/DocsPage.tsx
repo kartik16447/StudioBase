@@ -10,6 +10,7 @@ import { EmojiPickerPopover } from '../features/editor/components/EmojiPickerPop
 import { docsApi } from '../features/editor/lib/docsApi';
 import type { ApiDocSummary } from '../features/editor/lib/docsApi';
 import type { PageNode, PageContextMenu } from '../features/editor/types';
+import { useStudioStore } from '../store/useStudioStore';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -198,9 +199,16 @@ export const DocsPage: React.FC = () => {
       const summaries = await docsApi.list();
       const tree = buildTree(summaries);
       setPages(tree);
-      if (selectFirst && summaries.length > 0) {
-        const sorted = [...summaries].sort((a, b) => a.sortOrder - b.sortOrder);
-        setActiveId(sorted[0].id);
+      if (selectFirst) {
+        // If navigated here from SOP export, open that doc directly
+        const pending = useStudioStore.getState().pendingDocId;
+        if (pending) {
+          setActiveId(pending);
+          useStudioStore.getState().setPendingDocId(null);
+        } else if (summaries.length > 0) {
+          const sorted = [...summaries].sort((a, b) => a.sortOrder - b.sortOrder);
+          setActiveId(sorted[0].id);
+        }
       }
     } catch (err) {
       console.error('Failed to load docs tree:', err);

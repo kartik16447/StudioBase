@@ -12,6 +12,8 @@ export interface StudioHeaderProps {
   onNavigateHome: () => void;
   onShareClick?: () => void;
   onSandboxExport?: () => void;
+  onOpenInDocs?: () => void;
+  isOpeningInDocs?: boolean;
 }
 
 export const StudioHeader: React.FC<StudioHeaderProps> = ({
@@ -22,6 +24,8 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
   onNavigateHome,
   onShareClick,
   onSandboxExport,
+  onOpenInDocs,
+  isOpeningInDocs,
 }) => {
   return (
     <header className="h-14 bg-surface border-b border-border flex items-center px-4 gap-3 z-40 relative min-w-0">
@@ -114,6 +118,22 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
         </button>
 
         <NotificationBell />
+
+        {activeView === 'sop' && onOpenInDocs && (
+          <button
+            onClick={onOpenInDocs}
+            disabled={isOpeningInDocs}
+            className="h-8 px-2.5 rounded-pill inline-flex items-center gap-1.5 border border-border text-text hover:bg-surface-2 transition-colors text-[13px] font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Export this SOP as a Docs page"
+          >
+            {isOpeningInDocs ? (
+              <I.Loader size={14} className="animate-spin" />
+            ) : (
+              <I.FileText size={14} />
+            )}
+            <span className="hidden lg:inline">{isOpeningInDocs ? 'Creating…' : 'Open in Docs'}</span>
+          </button>
+        )}
 
         {onSandboxExport && (
           <Button variant="ghost" size="sm" icon={I.Download} onClick={onSandboxExport}>

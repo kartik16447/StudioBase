@@ -136,6 +136,10 @@ interface StudioState {
   triggerPipeline: () => Promise<void>;
   startPipelinePolling: (sessionId: string) => void;
   stopPipelinePolling: () => void;
+
+  // Docs bridge
+  pendingDocId: string | null;
+  setPendingDocId: (id: string | null) => void;
 }
 
 // const RESTORABLE_ROUTES: RouteName[] = ['home', 'brand', 'templates', 'team', 'analytics'];
@@ -1045,4 +1049,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
     set({ isAiProcessing: false });
   },
+
+  // Docs bridge
+  pendingDocId: null,
+  setPendingDocId: (id) => set({ pendingDocId: id }),
 }));

@@ -41,6 +41,7 @@ const CreateDocBody = z.object({
   emoji: z.string().max(8).nullable().default(null),
   blocks: z.array(z.any()).default([]),
   parentId: z.string().nullable().default(null),
+  sourceSopId: z.string().nullable().optional(),
 });
 
 docs.post('/', requireWorkspaceMembership('editor'), async (c) => {
@@ -61,6 +62,7 @@ docs.post('/', requireWorkspaceMembership('editor'), async (c) => {
     blocks: parsed.data.blocks,
     sortOrder,
     userId: user.id,
+    sourceSopId: parsed.data.sourceSopId ?? null,
   });
 
   AuditService.record(c.env, {

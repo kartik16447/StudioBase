@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../store/useStudioStore';
 import { I } from '../components/icons';
+import { docsApi } from '../features/editor/lib/docsApi';
+import { sopToTiptapContent } from '../features/sop/utils/sopToTiptapContent';
+import { showToast } from '../components/GlobalToast';
 import {
   Button, Kbd
 } from '../components/ui';
@@ -48,7 +51,9 @@ export const StudioPage: React.FC = () => {
   const renderMode = useStudioStore(state => state.renderMode);
   const setRenderMode = useStudioStore(state => state.setRenderMode);
   const masterAudioUrl = useStudioStore(state => state.masterAudioUrl);
+  const setPendingDocId = useStudioStore(state => state.setPendingDocId);
   const [shareOpen, setShareOpen] = useState(false);
+  const [isOpeningInDocs, setIsOpeningInDocs] = useState(false);
 
   useSessionManager();
 
@@ -113,6 +118,27 @@ export const StudioPage: React.FC = () => {
     );
   }
 
+  const handleOpenInDocs = async () => {
+    if (isOpeningInDocs || !session) return;
+    setIsOpeningInDocs(true);
+    try {
+      const sopTitle = (session as any).title || (session as any).metadata?.title || 'Untitled SOP';
+      const blocks = sopToTiptapContent(sopTitle, session.steps || [], (session as any).assets || {});
+      const doc = await docsApi.create({
+        title: sopTitle,
+        blocks,
+        sourceSopId: session.sessionId,
+      });
+      setPendingDocId(doc.id);
+      setActiveTab('docs');
+    } catch (err) {
+      console.error('Failed to export SOP to Docs:', err);
+      showToast('Failed to create doc. Please try again.', 'error');
+    } finally {
+      setIsOpeningInDocs(false);
+    }
+  };
+
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
       <StudioHeader
@@ -123,6 +149,8 @@ export const StudioPage: React.FC = () => {
         onNavigateHome={() => navigate('home')}
         onShareClick={() => setShareOpen(true)}
         onSandboxExport={() => handleSOPVideoExport({ session, theme: useStudioStore.getState().brand, renderMode, masterAudioUrl })}
+        onOpenInDocs={handleOpenInDocs}
+        isOpeningInDocs={isOpeningInDocs}
       />
       <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
       <div className="flex-1 flex min-h-0">

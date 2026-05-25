@@ -6,6 +6,7 @@ export interface DocumentRow {
   emoji: string | null;
   blocks: string; // JSON string
   sortOrder: number;
+  sourceSopId: string | null;
   createdBy: string;
   updatedBy: string;
   createdAt: number;
@@ -77,13 +78,14 @@ export class DocumentService {
     blocks: unknown[];
     sortOrder: number;
     userId: string;
+    sourceSopId?: string | null;
   }): Promise<DocumentRow> {
     const now = Date.now();
     await this.db
       .prepare(
         `INSERT INTO documents
-           (id, workspaceId, parentId, title, emoji, blocks, sortOrder, createdBy, updatedBy, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, workspaceId, parentId, title, emoji, blocks, sortOrder, sourceSopId, createdBy, updatedBy, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         params.id,
@@ -93,6 +95,7 @@ export class DocumentService {
         params.emoji,
         JSON.stringify(params.blocks),
         params.sortOrder,
+        params.sourceSopId ?? null,
         params.userId,
         params.userId,
         now,

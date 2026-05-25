@@ -15,6 +15,7 @@ export interface ApiDocSummary {
 // Full doc returned by get/create/update (blocks included)
 export interface ApiDoc extends ApiDocSummary {
   blocks: any[];
+  sourceSopId?: string | null;
 }
 
 export interface ApiSearchHit {
@@ -41,6 +42,7 @@ export const docsApi = {
     emoji?: string | null;
     parentId?: string | null;
     blocks?: any[];
+    sourceSopId?: string | null;
   }): Promise<ApiDoc> =>
     apiClient.post<ApiDoc>(base(), p),
 
