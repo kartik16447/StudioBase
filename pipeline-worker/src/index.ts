@@ -332,7 +332,7 @@ export default {
           console.log(`[PIPELINE] Calling Workers AI — filtered:${payload.length}/${steps.length} steps inputChars:${JSON.stringify(payload).length}`);
 
           const aiResponse = await (env.AI.run as any)(
-            "@cf/meta/llama-4-scout-17b-16e-instruct",
+            "@cf/meta/llama-3.1-8b-instruct",
             {
               messages: [
                 { role: "system", content: SYSTEM_PROMPT },
