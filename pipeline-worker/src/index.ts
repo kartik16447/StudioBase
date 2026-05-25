@@ -332,14 +332,14 @@ export default {
           console.log(`[PIPELINE] Calling Workers AI — filtered:${payload.length}/${steps.length} steps inputChars:${JSON.stringify(payload).length}`);
 
           const aiResponse = await (env.AI.run as any)(
-            "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/meta/llama-4-scout-17b-16e-instruct",
             {
               messages: [
                 { role: "system", content: SYSTEM_PROMPT },
                 { role: "user", content: JSON.stringify(payload) },
               ],
-              response_format: { type: "json_object" },
-              max_tokens: 8192,
+              guided_json: SOP_JSON_SCHEMA,
+              max_tokens: 4096,
             }
           ) as { response: string | object };
 
@@ -357,7 +357,7 @@ export default {
               throw new Error('AI response missing steps array');
             }
           } catch (parseErr: any) {
-            console.error(`[PIPELINE] AI JSON parse failed: ${parseErr.message} | raw: ${String(rawResponse).slice(0, 200)}`);
+            console.error(`[PIPELINE] AI JSON parse failed: ${parseErr.message} | raw: ${String(rawResponse).slice(0, 400)}`);
             throw new Error(`AI returned invalid JSON: ${parseErr.message}`);
           }
 
