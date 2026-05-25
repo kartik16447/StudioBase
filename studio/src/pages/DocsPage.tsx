@@ -447,7 +447,7 @@ export const DocsPage: React.FC = () => {
     );
   }, [dragId]);
 
-  const handleDrop = useCallback(async (id: string) => {
+  const handleDrop = useCallback(async (_id: string) => {
     const dragged = dragId;
     const target = dropTarget;
     setDragId(null);

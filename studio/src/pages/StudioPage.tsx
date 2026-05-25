@@ -133,7 +133,7 @@ export const StudioPage: React.FC = () => {
       setActiveTab('docs');
     } catch (err) {
       console.error('Failed to export SOP to Docs:', err);
-      showToast('Failed to create doc. Please try again.', 'error');
+      showToast('error', 'Failed to create doc. Please try again.');
     } finally {
       setIsOpeningInDocs(false);
     }
