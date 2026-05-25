@@ -375,7 +375,7 @@ export const DocsPage: React.FC = () => {
     setPageCtx({ id, x: r.right + 4, y: r.top });
   }, []);
 
-  const path = (activeId && findPath(pages, activeId)) ?? ['Docs'];
+  const path: string[] = (activeId ? findPath(pages, activeId) : null) ?? ['Docs'];
 
   // ---------------------------------------------------------------------------
   // Render
