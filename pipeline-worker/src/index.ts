@@ -375,19 +375,41 @@ export default {
 
           const FALLBACK_PHRASES = new Set(['completed action', 'other', 'find…', 'find...']);
 
-          const aiStepMap = new Map(generated.steps.map(s => {
-            const budget = budgetMap.get(s.id) ?? 3.0;
+          // Non-toolbar steps that were actually sent to the AI
+          const filteredSteps = steps.filter(s => !isToolbarOrInternalStep(s));
+
+          // Log what IDs the AI returned vs what we sent
+          const sentIds = new Set(filteredSteps.map(s => s.id));
+          const returnedIds = new Set(generated.steps.map(s => s.id));
+          const idMatchCount = [...sentIds].filter(id => returnedIds.has(id)).length;
+          console.log(`[PIPELINE] ID match: ${idMatchCount}/${filteredSteps.length} — AI returned IDs: ${[...returnedIds].slice(0,5).join(',')}`);
+
+          // If the AI ignored our IDs (common), fall back to positional matching
+          const usePositional = idMatchCount < Math.ceil(filteredSteps.length * 0.5);
+          if (usePositional) {
+            console.log('[PIPELINE] ID mismatch detected — using positional step mapping');
+          }
+
+          const processAiStep = (s: typeof generated.steps[0], originalId: string) => {
+            const budget = budgetMap.get(originalId) ?? 3.0;
             let text = s.generatedText?.trim() || '[SILENCE]';
+            if (FALLBACK_PHRASES.has(text.toLowerCase().replace(/\.+$/, '').trim())) text = '[SILENCE]';
+            if (text !== '[SILENCE]') text = trimToBudget(text, budget);
+            return { ...s, id: originalId, generatedText: text };
+          };
 
-            if (FALLBACK_PHRASES.has(text.toLowerCase().replace(/\.+$/, '').trim())) {
-              text = '[SILENCE]';
-            }
-            if (text !== '[SILENCE]') {
-              text = trimToBudget(text, budget);
-            }
-
-            return [s.id, { ...s, generatedText: text }];
-          }));
+          // Build final map keyed by original step ID
+          const aiStepMap = new Map<string, { stepTitle: string; generatedText: string }>();
+          if (usePositional) {
+            generated.steps.forEach((s, i) => {
+              const originalStep = filteredSteps[i];
+              if (originalStep) aiStepMap.set(originalStep.id, processAiStep(s, originalStep.id));
+            });
+          } else {
+            generated.steps.forEach(s => {
+              aiStepMap.set(s.id, processAiStep(s, s.id));
+            });
+          }
 
           for (const step of steps) {
             const ai = aiStepMap.get(step.id);
@@ -395,7 +417,6 @@ export default {
               step.stepTitle = ai.stepTitle;
               step.generatedText = ai.generatedText;
             } else {
-              // Toolbar/internal steps: default to silence so TTS skips them
               step.generatedText = '[SILENCE]';
             }
           }
