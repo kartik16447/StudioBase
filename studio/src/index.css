@@ -1371,3 +1371,7 @@
 .doc-menu-item.active {
   background: var(--doc-hover);
 }
+
+/* ── Sidebar page-tree drag cursor ────────────────────────── */
+.doc-tree-item[draggable="true"] { cursor: grab; }
+.doc-tree-item[draggable="true"]:active { cursor: grabbing; }

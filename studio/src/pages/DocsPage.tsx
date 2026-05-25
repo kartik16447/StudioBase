@@ -103,6 +103,53 @@ function treeInsertChild(nodes: PageNode[], parentId: string, child: PageNode): 
   });
 }
 
+function treeReorder(
+  nodes: PageNode[],
+  dragId: string,
+  targetId: string,
+  position: 'above' | 'below',
+): PageNode[] {
+  let dragNode: PageNode | null = null;
+
+  function extract(ns: PageNode[]): PageNode[] {
+    return ns.reduce<PageNode[]>((acc, n) => {
+      if (n.id === dragId) { dragNode = { ...n }; return acc; }
+      return [...acc, { ...n, children: extract(n.children) }];
+    }, []);
+  }
+
+  const withoutDrag = extract(nodes);
+  if (!dragNode) return nodes;
+
+  function insert(ns: PageNode[]): PageNode[] {
+    const result: PageNode[] = [];
+    for (const n of ns) {
+      if (n.id === targetId) {
+        if (position === 'above') result.push(dragNode!, n);
+        else result.push(n, dragNode!);
+      } else {
+        result.push({ ...n, children: insert(n.children) });
+      }
+    }
+    return result;
+  }
+
+  return insert(withoutDrag);
+}
+
+function findNodeInfo(
+  nodes: PageNode[],
+  id: string,
+  parentId: string | null = null,
+): { parentId: string | null; index: number } | null {
+  for (let i = 0; i < nodes.length; i++) {
+    if (nodes[i].id === id) return { parentId, index: i };
+    const found = findNodeInfo(nodes[i].children, id, nodes[i].id);
+    if (found) return found;
+  }
+  return null;
+}
+
 const EMPTY_CONTENT: JSONContent = { type: 'doc', content: [{ type: 'paragraph' }] };
 
 // ---------------------------------------------------------------------------
@@ -118,6 +165,8 @@ export const DocsPage: React.FC = () => {
   const [showTemplatesSection, setShowTemplatesSection] = useState(false);
   const [pageCtx, setPageCtx] = useState<PageContextMenu | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; position: 'above' | 'below' } | null>(null);
 
   // Active doc
   const [docLoading, setDocLoading] = useState(false);
@@ -375,6 +424,49 @@ export const DocsPage: React.FC = () => {
     setPageCtx({ id, x: r.right + 4, y: r.top });
   }, []);
 
+  // ---------------------------------------------------------------------------
+  // Drag & drop reorder
+  // ---------------------------------------------------------------------------
+  const handleDragStart = useCallback((id: string) => {
+    setDragId(id);
+  }, []);
+
+  const handleDragOver = useCallback((id: string, clientY: number, rect: DOMRect) => {
+    if (id === dragId) return;
+    const position: 'above' | 'below' = clientY < rect.top + rect.height / 2 ? 'above' : 'below';
+    setDropTarget((prev) =>
+      prev?.id === id && prev.position === position ? prev : { id, position }
+    );
+  }, [dragId]);
+
+  const handleDrop = useCallback(async (id: string) => {
+    const dragged = dragId;
+    const target = dropTarget;
+    setDragId(null);
+    setDropTarget(null);
+    if (!dragged || !target || dragged === target.id) return;
+
+    const reordered = treeReorder(pages, dragged, target.id, target.position);
+    setPages(reordered);
+
+    const info = findNodeInfo(reordered, dragged);
+    if (!info) return;
+    try {
+      await docsApi.update(dragged, {
+        parentId: info.parentId,
+        sortOrder: info.index * 1000,
+      });
+    } catch (err) {
+      console.error('Failed to reorder doc:', err);
+      loadTree();
+    }
+  }, [dragId, dropTarget, pages, loadTree]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragId(null);
+    setDropTarget(null);
+  }, []);
+
   const path: string[] = (activeId ? findPath(pages, activeId) : null) ?? ['Docs'];
 
   // ---------------------------------------------------------------------------
@@ -397,6 +489,11 @@ export const DocsPage: React.FC = () => {
         onRenameCommit={handleRenameCommit}
         onRenameCancel={() => setRenamingId(null)}
         loading={loading}
+        dropTarget={dropTarget}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onDragEnd={handleDragEnd}
       />
 
       {activeId && !docLoading && (

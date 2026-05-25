@@ -18,6 +18,10 @@ interface DocsSidebarProps {
   onRenameCommit?: (id: string, title: string) => void;
   onRenameCancel?: () => void;
   loading?: boolean;
+  onDragStart?: (id: string) => void;
+  onDragOver?: (id: string, clientY: number, rect: DOMRect) => void;
+  onDrop?: (id: string) => void;
+  onDragEnd?: () => void;
 }
 
 export const DocsSidebar: React.FC<DocsSidebarProps> = ({
@@ -25,6 +29,7 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
   onOpenSearch, onOpenContext, onNewDoc, dropTarget,
   showTemplates, setShowTemplates,
   renamingId, onRenameCommit, onRenameCancel, loading,
+  onDragStart, onDragOver, onDrop, onDragEnd,
 }) => (
   <div className="docsside">
     <div className="docsside-header">
@@ -59,6 +64,10 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
           renamingId={renamingId}
           onRenameCommit={onRenameCommit}
           onRenameCancel={onRenameCancel}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          onDragEnd={onDragEnd}
         />
       ))}
 
@@ -119,11 +128,16 @@ interface PageNodeItemProps {
   renamingId?: string | null;
   onRenameCommit?: (id: string, title: string) => void;
   onRenameCancel?: () => void;
+  onDragStart?: (id: string) => void;
+  onDragOver?: (id: string, clientY: number, rect: DOMRect) => void;
+  onDrop?: (id: string) => void;
+  onDragEnd?: () => void;
 }
 
 const PageNodeItem: React.FC<PageNodeItemProps> = ({
   page, depth, activeId, expandedIds, onToggleExpand, onSelect, onOpenContext, dropTarget,
   renamingId, onRenameCommit, onRenameCancel,
+  onDragStart, onDragOver, onDrop, onDragEnd,
 }) => {
   const isActive = activeId === page.id;
   const isOpen = expandedIds.has(page.id);
@@ -152,7 +166,29 @@ const PageNodeItem: React.FC<PageNodeItemProps> = ({
       <div
         className={`doc-tree-item ${isActive ? 'active' : ''}`}
         style={{ paddingLeft: indentPx }}
+        draggable={!isRenaming}
         onClick={() => !isRenaming && onSelect(page.id)}
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move';
+          // Use a tiny transparent ghost image so native ghost doesn't flicker
+          const ghost = document.createElement('div');
+          ghost.style.cssText = 'position:fixed;top:-999px;left:-999px;pointer-events:none;';
+          document.body.appendChild(ghost);
+          e.dataTransfer.setDragImage(ghost, 0, 0);
+          setTimeout(() => document.body.removeChild(ghost), 0);
+          onDragStart?.(page.id);
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const rect = e.currentTarget.getBoundingClientRect();
+          onDragOver?.(page.id, e.clientY, rect);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          onDrop?.(page.id);
+        }}
+        onDragEnd={() => onDragEnd?.()}
       >
         <button
           className={`doc-tree-expander ${hasChildren ? '' : 'empty'} ${isOpen ? 'open' : ''}`}
@@ -204,6 +240,10 @@ const PageNodeItem: React.FC<PageNodeItemProps> = ({
           renamingId={renamingId}
           onRenameCommit={onRenameCommit}
           onRenameCancel={onRenameCancel}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
+          onDragEnd={onDragEnd}
         />
       ))}
     </>
