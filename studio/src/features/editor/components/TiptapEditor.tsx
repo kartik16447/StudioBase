@@ -13,6 +13,8 @@ import Image from '@tiptap/extension-image';
 import { FloatingToolbar, ImageInsertPopover } from './FloatingToolbar';
 import { SlashMenu, getFilteredItems } from './SlashMenu';
 import { ToggleBlock } from './ToggleBlock';
+import { BlockHandle } from './BlockHandle';
+import { BlockContextMenu } from './BlockContextMenu';
 import type { ActiveFormats, DocBlock } from '../types';
 import { docBlocksToTiptap } from '../utils/docBlocks';
 
@@ -33,6 +35,7 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
   const [tbColorOpen, setTbColorOpen] = useState(false);
   const [tbLinkOpen, setTbLinkOpen] = useState(false);
   const [imageInsert, setImageInsert] = useState<{ x: number; y: number } | null>(null);
+  const [blockMenu, setBlockMenu] = useState<{ x: number; y: number; nodePos: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Refs so keyboard extensions always have fresh state without re-creating them
@@ -283,6 +286,51 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
     }
   }, [editor]);
 
+  // Block handle actions — operate on the node at the tracked position
+  const handleBlockAction = useCallback((action: string) => {
+    if (!editor || !blockMenu) return;
+    const { nodePos } = blockMenu;
+    setBlockMenu(null);
+
+    const node = editor.state.doc.nodeAt(nodePos);
+    if (!node) return;
+
+    if (action === 'delete') {
+      editor.chain().focus()
+        .deleteRange({ from: nodePos, to: nodePos + node.nodeSize })
+        .run();
+    } else if (action === 'duplicate') {
+      editor.chain().focus()
+        .insertContentAt(nodePos + node.nodeSize, node.toJSON())
+        .run();
+    } else if (action === 'copyMd') {
+      // Copy plain text content — a proper markdown serializer can be added later
+      navigator.clipboard.writeText(node.textContent).catch(() => {});
+    }
+  }, [editor, blockMenu]);
+
+  const handleBlockTurnInto = useCallback((type: string) => {
+    if (!editor || !blockMenu) return;
+    setBlockMenu(null);
+    // Select the entire block then apply the turn-into
+    const { nodePos } = blockMenu;
+    const node = editor.state.doc.nodeAt(nodePos);
+    if (!node) return;
+    editor.chain()
+      .focus()
+      .setTextSelection({ from: nodePos + 1, to: nodePos + node.nodeSize - 1 })
+      .run();
+    handleTurnInto(type);
+  }, [editor, blockMenu, handleTurnInto]);
+
+  const handleInsertBelow = useCallback((nodePos: number) => {
+    if (!editor) return;
+    const node = editor.state.doc.nodeAt(nodePos);
+    if (!node) return;
+    const insertPos = nodePos + node.nodeSize;
+    editor.chain().focus().insertContentAt(insertPos, { type: 'paragraph' }).run();
+  }, [editor]);
+
   if (!editor) return null;
 
   const activeFormats: ActiveFormats = {
@@ -311,6 +359,21 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
     : '';
 
   const activeColor: string | undefined = editor.getAttributes('textStyle').color ?? undefined;
+
+  const blockMenuBlockType = blockMenu
+    ? (() => {
+        const node = editor.state.doc.nodeAt(blockMenu.nodePos);
+        if (!node) return 'p';
+        if (node.type.name === 'heading') return `h${node.attrs.level}`;
+        if (node.type.name === 'bulletList') return 'bullet';
+        if (node.type.name === 'orderedList') return 'numbered';
+        if (node.type.name === 'taskList') return 'check';
+        if (node.type.name === 'blockquote') return 'quote';
+        if (node.type.name === 'codeBlock') return 'code';
+        if (node.type.name === 'toggleBlock') return 'toggle';
+        return 'p';
+      })()
+    : 'p';
 
   return (
     <div className="tiptap-editor-wrap" ref={wrapRef}>
@@ -344,12 +407,34 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
 
       <EditorContent editor={editor} />
 
+      <BlockHandle
+        editor={editor}
+        onMenuOpen={(nodePos, x, y) => {
+          const wrap = wrapRef.current;
+          if (!wrap) return;
+          const rect = wrap.getBoundingClientRect();
+          setBlockMenu({ nodePos, x: x - rect.left, y: y - rect.top });
+        }}
+        onInsertBelow={handleInsertBelow}
+      />
+
       {slash && (
         <SlashMenu
           position={slash.pos}
           query={slash.query}
           activeIdx={slash.activeIdx}
           onPick={handleSlashPick}
+        />
+      )}
+
+      {blockMenu && (
+        <BlockContextMenu
+          x={blockMenu.x}
+          y={blockMenu.y}
+          currentBlockType={blockMenuBlockType}
+          onClose={() => setBlockMenu(null)}
+          onAction={handleBlockAction}
+          onTurnInto={handleBlockTurnInto}
         />
       )}
 

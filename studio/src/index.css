@@ -1305,3 +1305,69 @@
   outline: 2px solid var(--doc-primary);
   border-radius: 6px;
 }
+
+/* ── Block drag handle ───────────────────────────────────── */
+.doc-block-handle-wrap {
+  position: absolute;
+  left: -52px;
+  top: 0;
+  display: flex;
+  align-items: flex-start;
+}
+
+.doc-block-handle {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.12s;
+  padding-top: 2px;
+}
+
+/* Show handle on ProseMirror hover (extension adds .tiptap-drag-handle-active) */
+.tiptap-editor-wrap:hover .doc-block-handle {
+  opacity: 1;
+}
+
+.doc-handle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 22px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  color: var(--doc-text-3);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.doc-handle-btn:hover {
+  background: var(--doc-hover);
+  color: var(--doc-text-1);
+}
+
+.doc-handle-grip {
+  cursor: grab;
+}
+
+.doc-handle-grip:active {
+  cursor: grabbing;
+}
+
+/* DragHandle portal element — must be positioned */
+[data-drag-handle] {
+  position: absolute;
+}
+
+/* Drag-over indicator */
+.ProseMirror .is-dragging {
+  opacity: 0.4;
+}
+
+/* ── Block context menu active state ─────────────────────── */
+.doc-menu-item.active {
+  background: var(--doc-hover);
+}
