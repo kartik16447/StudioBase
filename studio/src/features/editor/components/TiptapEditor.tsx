@@ -15,11 +15,10 @@ import { SlashMenu, getFilteredItems } from './SlashMenu';
 import { ToggleBlock } from './ToggleBlock';
 import { BlockHandle } from './BlockHandle';
 import { BlockContextMenu } from './BlockContextMenu';
-import type { ActiveFormats, DocBlock } from '../types';
-import { docBlocksToTiptap } from '../utils/docBlocks';
+import type { ActiveFormats } from '../types';
 
 interface TiptapEditorProps {
-  initialBlocks: DocBlock[];
+  initialContent: JSONContent;
   onChange?: (json: JSONContent) => void;
 }
 
@@ -29,7 +28,7 @@ interface SlashState {
   activeIdx: number;
 }
 
-export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onChange }) => {
+export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onChange }) => {
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [tbTurnOpen, setTbTurnOpen] = useState(false);
   const [tbColorOpen, setTbColorOpen] = useState(false);
@@ -150,7 +149,7 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialBlocks, onCha
       SlashNavExtension,
       KeyboardExtension,
     ],
-    content: docBlocksToTiptap(initialBlocks),
+    content: initialContent,
     editorProps: {
       attributes: { spellcheck: 'true' },
     },

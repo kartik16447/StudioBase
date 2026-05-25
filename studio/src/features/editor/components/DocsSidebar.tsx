@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { I } from '../../../components/icons';
 import type { PageNode } from '../types';
 
@@ -14,12 +14,17 @@ interface DocsSidebarProps {
   dropTarget?: { id: string; position: 'above' | 'below' } | null;
   showTemplates: boolean;
   setShowTemplates: (v: boolean) => void;
+  renamingId?: string | null;
+  onRenameCommit?: (id: string, title: string) => void;
+  onRenameCancel?: () => void;
+  loading?: boolean;
 }
 
 export const DocsSidebar: React.FC<DocsSidebarProps> = ({
   pages, activeId, expandedIds, onToggleExpand, onSelect,
   onOpenSearch, onOpenContext, onNewDoc, dropTarget,
   showTemplates, setShowTemplates,
+  renamingId, onRenameCommit, onRenameCancel, loading,
 }) => (
   <div className="docsside">
     <div className="docsside-header">
@@ -37,7 +42,10 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
 
     <div className="doc-tree">
       <SectionLabel label="Pages" collapsed={false} canAdd onAdd={onNewDoc} />
-      {pages.map((p) => (
+      {loading && (
+        <div style={{ padding: '12px 8px', color: 'var(--doc-text-3)', fontSize: 12 }}>Loading…</div>
+      )}
+      {!loading && pages.map((p) => (
         <PageNodeItem
           key={p.id}
           page={p}
@@ -48,6 +56,9 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
           onSelect={onSelect}
           onOpenContext={onOpenContext}
           dropTarget={dropTarget}
+          renamingId={renamingId}
+          onRenameCommit={onRenameCommit}
+          onRenameCancel={onRenameCancel}
         />
       ))}
 
@@ -105,25 +116,43 @@ interface PageNodeItemProps {
   onSelect: (id: string) => void;
   onOpenContext: (id: string, el: HTMLElement) => void;
   dropTarget?: { id: string; position: 'above' | 'below' } | null;
+  renamingId?: string | null;
+  onRenameCommit?: (id: string, title: string) => void;
+  onRenameCancel?: () => void;
 }
 
 const PageNodeItem: React.FC<PageNodeItemProps> = ({
   page, depth, activeId, expandedIds, onToggleExpand, onSelect, onOpenContext, dropTarget,
+  renamingId, onRenameCommit, onRenameCancel,
 }) => {
   const isActive = activeId === page.id;
   const isOpen = expandedIds.has(page.id);
   const hasChildren = page.children && page.children.length > 0;
   const indentPx = 8 + depth * 16;
-  const dropAbove = dropTarget?.id === page.id && dropTarget.position === 'above';
-  const dropBelow = dropTarget?.id === page.id && dropTarget.position === 'below';
+  const isRenaming = renamingId === page.id;
+  const [renameVal, setRenameVal] = useState(page.title);
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  // Focus and select-all when rename mode starts
+  useEffect(() => {
+    if (isRenaming) {
+      setRenameVal(page.title);
+      setTimeout(() => { renameRef.current?.select(); }, 10);
+    }
+  }, [isRenaming, page.title]);
+
+  const commitRename = () => {
+    const v = renameVal.trim();
+    onRenameCommit?.(page.id, v || page.title);
+  };
 
   return (
     <>
-      {dropAbove && <div className="doc-drop-indicator" />}
+      {dropTarget?.id === page.id && dropTarget.position === 'above' && <div className="doc-drop-indicator" />}
       <div
         className={`doc-tree-item ${isActive ? 'active' : ''}`}
         style={{ paddingLeft: indentPx }}
-        onClick={() => onSelect(page.id)}
+        onClick={() => !isRenaming && onSelect(page.id)}
       >
         <button
           className={`doc-tree-expander ${hasChildren ? '' : 'empty'} ${isOpen ? 'open' : ''}`}
@@ -134,16 +163,33 @@ const PageNodeItem: React.FC<PageNodeItemProps> = ({
         <span className="doc-tree-icon">
           {page.emoji ? page.emoji : <I.File size={14} style={{ color: 'var(--doc-text-3)' }} />}
         </span>
-        <span className="doc-tree-title">{page.title}</span>
-        <button
-          className="doc-tree-menu"
-          onClick={(e) => { e.stopPropagation(); onOpenContext(page.id, e.currentTarget); }}
-          title="More"
-        >
-          <I.MoreHorizontal size={14} />
-        </button>
+        {isRenaming ? (
+          <input
+            ref={renameRef}
+            className="doc-tree-rename-input"
+            value={renameVal}
+            onChange={(e) => setRenameVal(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+              if (e.key === 'Escape') { e.preventDefault(); onRenameCancel?.(); }
+            }}
+            onBlur={commitRename}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="doc-tree-title">{page.title || 'Untitled'}</span>
+        )}
+        {!isRenaming && (
+          <button
+            className="doc-tree-menu"
+            onClick={(e) => { e.stopPropagation(); onOpenContext(page.id, e.currentTarget); }}
+            title="More"
+          >
+            <I.MoreHorizontal size={14} />
+          </button>
+        )}
       </div>
-      {dropBelow && <div className="doc-drop-indicator" />}
+      {dropTarget?.id === page.id && dropTarget.position === 'below' && <div className="doc-drop-indicator" />}
       {isOpen && hasChildren && page.children.map((c) => (
         <PageNodeItem
           key={c.id}
@@ -155,6 +201,9 @@ const PageNodeItem: React.FC<PageNodeItemProps> = ({
           onSelect={onSelect}
           onOpenContext={onOpenContext}
           dropTarget={dropTarget}
+          renamingId={renamingId}
+          onRenameCommit={onRenameCommit}
+          onRenameCancel={onRenameCancel}
         />
       ))}
     </>

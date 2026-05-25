@@ -3,28 +3,29 @@ import type { JSONContent } from '@tiptap/react';
 import { I } from '../../../components/icons';
 import { TiptapEditor } from './TiptapEditor';
 import { ExportMenuDropdown } from './ExportMenuDropdown';
-import type { DocRecord, DocBlock } from '../types';
 
 interface EditorPaneProps {
-  doc: DocRecord;
+  docId: string;
+  path: string[];
   title: string;
   onTitleChange: (v: string) => void;
   emoji: string | null;
   onPickEmoji: () => void;
   dirty: boolean;
+  saving: boolean;
   exportOpen: boolean;
   onOpenExport: (e: React.MouseEvent) => void;
   onCloseExport: () => void;
-  initialBlocks: DocBlock[];
+  initialContent: JSONContent;
   onContentChange: (json: JSONContent) => void;
   onShare: () => void;
   onMore: () => void;
 }
 
 export const EditorPane: React.FC<EditorPaneProps> = ({
-  doc, title, onTitleChange, emoji, onPickEmoji, dirty,
+  docId, path, title, onTitleChange, emoji, onPickEmoji, dirty, saving,
   exportOpen, onOpenExport, onCloseExport,
-  initialBlocks, onContentChange,
+  initialContent, onContentChange,
   onShare, onMore,
 }) => (
   <div className="doc-editor">
@@ -34,14 +35,18 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
         <I.BookOpen size={12} />
         <span>Docs</span>
       </span>
-      {doc.path.slice(1, -1).map((p, i) => (
+      {path.slice(1, -1).map((p, i) => (
         <React.Fragment key={i}>
           <span className="doc-breadcrumb-sep">/</span>
           <span className="doc-breadcrumb-item">{p}</span>
         </React.Fragment>
       ))}
-      <span className="doc-breadcrumb-sep">/</span>
-      <span className="doc-breadcrumb-item current">{doc.path[doc.path.length - 1]}</span>
+      {path.length > 1 && (
+        <>
+          <span className="doc-breadcrumb-sep">/</span>
+          <span className="doc-breadcrumb-item current">{path[path.length - 1]}</span>
+        </>
+      )}
     </div>
 
     {/* Page header */}
@@ -61,7 +66,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       />
       <div className="doc-page-meta">
         <span className={`doc-save-status ${dirty ? 'dirty' : ''}`}>
-          {dirty ? '• Unsaved' : 'Saved ✓'}
+          {saving ? 'Saving…' : dirty ? '• Unsaved' : 'Saved ✓'}
         </span>
         <div style={{ position: 'relative' }}>
           <button className="doc-btn doc-btn-ghost sm" onClick={onOpenExport}>
@@ -78,7 +83,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
       </div>
     </div>
 
-    {/* Tiptap canvas */}
-    <TiptapEditor initialBlocks={initialBlocks} onChange={onContentChange} />
+    {/* Tiptap canvas — key=docId forces remount when switching docs */}
+    <TiptapEditor key={docId} initialContent={initialContent} onChange={onContentChange} />
   </div>
 );

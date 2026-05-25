@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { I } from '../../../components/icons';
-import { SEARCH_RESULTS } from '../data/mockData';
+import { docsApi } from '../lib/docsApi';
 import type { SearchResult } from '../types';
 
 interface SearchModalProps {
@@ -9,29 +9,56 @@ interface SearchModalProps {
 }
 
 export const SearchModal: React.FC<SearchModalProps> = ({ onClose, onPick }) => {
-  const [query, setQuery] = useState('type');
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [active, setActive] = useState(0);
+  const [searching, setSearching] = useState(false);
 
-  const results = useMemo(() => {
-    if (!query.trim()) return [];
-    return SEARCH_RESULTS.filter(
-      (r) =>
-        r.title.toLowerCase().includes(query.toLowerCase()) ||
-        r.snip.toLowerCase().includes(query.toLowerCase()) ||
-        query.toLowerCase() === 'type'
-    );
+  // Debounced live search
+  useEffect(() => {
+    if (!query.trim()) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const hits = await docsApi.search(query);
+        if (cancelled) return;
+        setResults(
+          hits.map((h) => ({
+            id: h.id,
+            emoji: h.emoji ?? '📄',
+            title: h.title,
+            path: h.title,
+            snip: h.snippet,
+          }))
+        );
+        setActive(0);
+      } catch {
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [query]);
+
+  const handlePick = useCallback((r: SearchResult) => {
+    onPick(r);
+  }, [onPick]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); }
       else if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(results.length - 1, a + 1)); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
-      else if (e.key === 'Enter' && results[active]) { e.preventDefault(); onPick(results[active]); }
+      else if (e.key === 'Enter' && results[active]) { e.preventDefault(); handlePick(results[active]); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, results, onClose, onPick]);
+  }, [active, results, onClose, handlePick]);
 
   const renderSnip = (snip: string) => {
     const parts = snip.split(/\*\*([^*]+)\*\*/g);
@@ -57,25 +84,30 @@ export const SearchModal: React.FC<SearchModalProps> = ({ onClose, onPick }) => 
           )}
         </div>
         <div className="doc-search-results">
-          {results.length === 0 && query && (
+          {searching && (
+            <div className="doc-search-empty" style={{ gap: 8 }}>
+              <p style={{ color: 'var(--doc-text-3)', fontSize: 13 }}>Searching…</p>
+            </div>
+          )}
+          {!searching && results.length === 0 && query.trim() && (
             <div className="doc-search-empty">
               <div className="doc-glass"><I.Search size={24} /></div>
               <p>No results for <span>"{query}"</span></p>
             </div>
           )}
-          {results.map((r, i) => (
+          {!searching && results.map((r, i) => (
             <div
               key={r.id}
               className={`doc-search-result ${i === active ? 'active' : ''}`}
               onMouseEnter={() => setActive(i)}
-              onClick={() => onPick(r)}
+              onClick={() => handlePick(r)}
             >
               <span className="doc-res-icon">{r.emoji}</span>
               <div className="doc-res-info">
                 <div className="doc-res-title">{r.title}</div>
                 <div className="doc-res-path">{r.path}</div>
               </div>
-              <div className="doc-res-snip">{renderSnip(r.snip)}</div>
+              {r.snip && <div className="doc-res-snip">{renderSnip(r.snip)}</div>}
             </div>
           ))}
         </div>
