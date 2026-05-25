@@ -311,10 +311,21 @@ function computeAnimationTarget(step: any) {
   const vh = coords?.viewportHeight ?? 720;
   const rawX = coords?.x ?? vw / 2;
   const rawY = coords?.y ?? vh / 2;
+  const centerX = (rawX / vw) * 100;
+  const centerY = (rawY / vh) * 100;
+
+  // Compute zoom scale from how far the click is from the viewport centre.
+  // Edge/corner clicks need more zoom to keep the target readable; centre
+  // clicks need less. Range: 1.12 (dead-centre) → 1.22 (extreme corner).
+  const dxPct   = Math.abs(centerX - 50) / 50; // 0 = centre, 1 = edge
+  const dyPct   = Math.abs(centerY - 50) / 50;
+  const edgeness = Math.sqrt(dxPct * dxPct + dyPct * dyPct) / Math.SQRT2; // 0–1
+  const zoomScale = parseFloat((1.12 + edgeness * 0.10).toFixed(3)); // 1.12–1.22
+
   return {
-    centerX: (rawX / vw) * 100,
-    centerY: (rawY / vh) * 100,
-    zoomScale: 1.0,
+    centerX,
+    centerY,
+    zoomScale,
     transitionType: "fade",
     transitionDurationMs: 400,
   };

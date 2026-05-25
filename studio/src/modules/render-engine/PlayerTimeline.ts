@@ -9,6 +9,8 @@
 export const DEFAULT_STEP_MS    = 5000; // fallback when voiceoverDurationMs absent
 export const MIN_STEP_MS        = 1000; // never shorter than 1 s
 export const POST_STEP_GAP_MS   = 250;  // silence gap between steps — lets Aura's trailing ... breathe
+export const AUDIO_LEAD_IN_MS   = 300;  // delay audio this many ms after step start so the
+                                        // screenshot dissolve (400 ms) settles before narration begins
 
 export const MIN_PLAYBACK_RATES: Record<string, number> = {
   navigate: 0.6,
@@ -119,11 +121,12 @@ export function buildTimeline(
       holdClipDuration = resolvedDuration;
     }
 
-    // 1. Audio Track
+    // 1. Audio Track — offset by AUDIO_LEAD_IN_MS so narration starts after the
+    //    screenshot dissolve settles, matching the visual "see it then hear it" expectation.
     if (audioDuration > 0) {
       audioTrack.clips.push({
         stepIndex: i,
-        logicalStartMs: cursor,
+        logicalStartMs: cursor + AUDIO_LEAD_IN_MS,
         logicalDurationMs: audioDuration,
         sourceStartMs: 0,
         type: 'action',

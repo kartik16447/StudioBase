@@ -154,9 +154,11 @@ export const SharePage: React.FC = () => {
   const [ownerName, setOwnerName] = useState<string>('');
   const [capturedAt, setCapturedAt] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -168,29 +170,66 @@ export const SharePage: React.FC = () => {
       return;
     }
 
+    const loadSession = async (jsonUrl: string) => {
+      const data = await fetch(jsonUrl).then(r => r.json()) as PublicSession;
+      setSession(data);
+      setPreparing(false);
+      setLoading(false);
+    };
+
+    const fetchMeta = async (): Promise<boolean> => {
+      const meta = await fetch(`${BACKEND_URL}/v1/public/${shareToken}`).then(r => r.json()) as any;
+      if (meta.error) throw new Error(meta.error);
+
+      setOwnerName(meta.owner?.name || 'Anonymous');
+      setCapturedAt(meta.capturedAt);
+      setCinematicEnabled(!!meta.cinematicEnabled);
+      setSopEnabled(meta.sopEnabled !== false);
+      setRawEnabled(meta.rawEnabled !== false);
+
+      if (meta.status === 'failed') throw new Error('This walkthrough failed to process.');
+
+      if (!meta.sessionJsonUrl || meta.status === 'processing' || meta.status === 'uploading') {
+        return false; // not ready yet
+      }
+
+      await loadSession(meta.sessionJsonUrl);
+      return true;
+    };
+
     const load = async () => {
       try {
-        const meta = await fetch(`${BACKEND_URL}/v1/public/${shareToken}`).then(r => r.json()) as any;
-        if (meta.error) throw new Error(meta.error);
-
-        setOwnerName(meta.owner?.name || 'Anonymous');
-        setCapturedAt(meta.capturedAt);
-        setCinematicEnabled(!!meta.cinematicEnabled);
-        setSopEnabled(meta.sopEnabled !== false);
-        setRawEnabled(meta.rawEnabled !== false);
-
-        if (!meta.sessionJsonUrl) throw new Error('Session not ready.');
-
-        const data = await fetch(meta.sessionJsonUrl).then(r => r.json()) as PublicSession;
-        setSession(data);
+        const ready = await fetchMeta();
+        if (!ready) {
+          // Show processing state and start polling
+          setLoading(false);
+          setPreparing(true);
+          pollRef.current = setInterval(async () => {
+            try {
+              const done = await fetchMeta();
+              if (done && pollRef.current) {
+                clearInterval(pollRef.current);
+                pollRef.current = null;
+              }
+            } catch (e: any) {
+              if (pollRef.current) clearInterval(pollRef.current);
+              pollRef.current = null;
+              setError(e.message || 'Failed to load walkthrough.');
+              setPreparing(false);
+            }
+          }, 3000);
+        }
       } catch (e: any) {
         setError(e.message || 'Failed to load walkthrough.');
-      } finally {
         setLoading(false);
       }
     };
 
     load();
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
 
   const copyLink = () => {
@@ -213,6 +252,42 @@ export const SharePage: React.FC = () => {
           <div className="h-4 w-1/3 bg-gray-100 rounded animate-pulse" />
           <div className="h-20 bg-gray-100 rounded-xl animate-pulse" />
           {[1,2,3].map(i => <div key={i} className="h-48 sm:h-64 bg-gray-100 rounded-2xl animate-pulse" />)}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Preparing (pipeline still running) ──
+  if (preparing) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col">
+        <nav className="h-14 border-b border-gray-100 flex items-center px-4 sm:px-6">
+          <div className="w-7 h-7 rounded-lg bg-gray-900 flex items-center justify-center">
+            <span className="text-white font-bold text-xs">S</span>
+          </div>
+        </nav>
+        <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+          {/* Animated icon */}
+          <div className="relative w-16 h-16 mb-6">
+            <div className="absolute inset-0 rounded-full bg-indigo-100 animate-ping opacity-60" />
+            <div className="relative w-16 h-16 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center">
+              <I.Sparkles size={26} className="text-indigo-500" />
+            </div>
+          </div>
+          <h2 className="text-[20px] font-bold text-gray-900 mb-2">Preparing your walkthrough…</h2>
+          <p className="text-[14px] text-gray-500 max-w-xs leading-relaxed">
+            AI is generating scripts and building the guide. This usually takes 30–60 seconds.
+          </p>
+          {/* Progress dots */}
+          <div className="flex items-center gap-1.5 mt-6">
+            {[0,1,2].map(i => (
+              <div
+                key={i}
+                className="w-1.5 h-1.5 rounded-full bg-indigo-400"
+                style={{ animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite` }}
+              />
+            ))}
+          </div>
         </div>
       </div>
     );
