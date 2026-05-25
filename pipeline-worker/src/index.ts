@@ -108,7 +108,7 @@ If you write more words than the budget allows, audio will OVERRUN the video and
 5. Grouping: If multiple rapid clicks happen under 1 second apart, summarize as one fluid sentence.
 
 **YOUR TASK:**
-Output ONLY valid JSON matching the schema. Count words per step before finalizing.`;
+Output ONLY valid JSON matching the schema. No preamble, no explanation, no markdown — start your response with { and end with }. Count words per step before finalizing.`;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -352,7 +352,19 @@ export default {
             chapterBreaks: { afterStepId: string; chapterTitle: string }[];
           };
           try {
-            generated = (typeof rawResponse === 'string' ? JSON.parse(rawResponse) : rawResponse) as typeof generated;
+            let rawStr = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
+
+            // Strip markdown code fences if present
+            rawStr = rawStr.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
+
+            // Extract outermost JSON object — handles "Here is the JSON: {...}" preamble
+            const firstBrace = rawStr.indexOf('{');
+            const lastBrace  = rawStr.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace > firstBrace) {
+              rawStr = rawStr.slice(firstBrace, lastBrace + 1);
+            }
+
+            generated = JSON.parse(rawStr) as typeof generated;
             if (!generated?.steps || !Array.isArray(generated.steps)) {
               throw new Error('AI response missing steps array');
             }
