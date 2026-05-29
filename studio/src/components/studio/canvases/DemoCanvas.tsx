@@ -201,7 +201,7 @@ function ContentPanel({ step, stepIndex, brand, onSave }: { step: any; stepIndex
 
       {picker && (
         <div style={{ position: 'absolute', left: 14, right: 14, bottom: 14, zIndex: 50 }}>
-          <CardTypePicker brand={brand} onPick={(t: DemoCardType) => { setPicker(false); }} onClose={() => setPicker(false)} embedded />
+          <CardTypePicker brand={brand} onPick={() => { setPicker(false); }} onClose={() => setPicker(false)} embedded />
         </div>
       )}
     </div>

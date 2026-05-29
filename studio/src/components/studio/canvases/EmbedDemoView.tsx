@@ -159,7 +159,7 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
   const coords = step.coordinates;
   const hotspotX = coords && coords.viewportWidth > 0 ? (coords.x / coords.viewportWidth) * 100 : null;
   const hotspotY = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
-  const callouts = (step.annotations ?? []).filter((a) => (a.shape === 'callout' || a.shape === 'text') && a.text);
+  const callouts = (step.annotations ?? []).filter((a) => a.shape === 'text' && a.text);
   const blurs    = (step.annotations ?? []).filter((a) => a.shape === 'blur');
   const screenshotUrl = step.screenshotKey && session?.assets?.[step.screenshotKey] ? session.assets[step.screenshotKey] : null;
 
