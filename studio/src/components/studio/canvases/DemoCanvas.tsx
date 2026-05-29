@@ -6,7 +6,6 @@ import { Hotspot } from '../../../components/demo/Hotspot';
 import type { HotspotStyle } from '../../../components/demo/Hotspot';
 import { HotspotStylePicker } from '../../../components/demo/HotspotStylePicker';
 import { CardTypePicker } from '../../../components/demo/CardTypePicker';
-import type { DemoCardType } from '../../../components/demo/CardTypePicker';
 import { withAlpha } from '../../../components/demo/helpers';
 import { displayText } from '../../../lib/textUtils';
 
