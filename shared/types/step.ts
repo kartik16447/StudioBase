@@ -41,6 +41,7 @@ export const AnimationTargetSchema = z.object({
   zoomScale: z.number(),
   transitionType: z.enum(['slide', 'fade', 'zoom', 'instant']).optional(),
   transitionDurationMs: z.number().optional(),
+  hotspotSize: z.number().optional(), // px — 14 | 20 | 28
 });
 
 export const StepSchema = z.object({

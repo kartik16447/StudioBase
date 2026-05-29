@@ -203,9 +203,13 @@ function EndScreen({ brand, onReplay }: { brand: string; onReplay: () => void })
 function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspot }: {
   step: Step; session: any; brand: string; hotspotStyle: HotspotStyle; progress: number; onHotspot: () => void;
 }) {
-  const coords = step.coordinates;
-  const hotspotX = coords && coords.viewportWidth > 0 ? (coords.x / coords.viewportWidth) * 100 : null;
-  const hotspotY = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
+  const coords    = step.coordinates;
+  const rawX      = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : null;
+  const rawY      = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
+  // Prefer creator-repositioned value; fall back to raw recorded coordinate
+  const hotspotX  = step.animationTarget?.pctX  ?? rawX;
+  const hotspotY  = step.animationTarget?.pctY  ?? rawY;
+  const hotspotSz = step.animationTarget?.hotspotSize ?? 20;
   const cards: DemoCard[] = (step as any).cards ?? [];
   const callouts = (step.annotations ?? []).filter((a) => a.shape === 'text' && a.text);
   const blurs    = (step.annotations ?? []).filter((a) => a.shape === 'blur');
@@ -229,7 +233,7 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
       {callouts.map((a, i) => <CalloutOverlay key={i} x={a.x} y={a.y} text={a.text!} brand={brand} />)}
       {cardCallouts.map((c) => <CalloutOverlay key={c.id} x={c.rect!.x} y={c.rect!.y} text={c.body || 'Note'} brand={c.color || brand} />)}
       {hotspotX !== null && hotspotY !== null && (
-        <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={20} onClick={onHotspot} title="Next" />
+        <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={hotspotSz} onClick={onHotspot} title="Next" />
       )}
     </div>
   );

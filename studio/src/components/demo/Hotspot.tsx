@@ -12,6 +12,7 @@ interface HotspotProps {
   handles?: boolean; // show drag corner handles (studio only)
   white?: boolean;   // force white core (for light screenshots)
   onClick?: () => void;
+  onMouseDown?: (e: React.MouseEvent) => void;
   title?: string;
 }
 
@@ -24,6 +25,7 @@ export const Hotspot: React.FC<HotspotProps> = ({
   handles = false,
   white = false,
   onClick,
+  onMouseDown,
   title,
 }) => {
   const core = white ? '#ffffff' : brand;
@@ -95,7 +97,7 @@ export const Hotspot: React.FC<HotspotProps> = ({
   }
 
   return (
-    <span style={wrap} onClick={onClick} title={title} role={onClick ? 'button' : undefined}>
+    <span style={wrap} onClick={onClick} onMouseDown={onMouseDown} title={title} role={onClick ? 'button' : undefined}>
       {inner}
       {handles && (
         <span style={{

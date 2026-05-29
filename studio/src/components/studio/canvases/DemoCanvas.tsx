@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent,
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+} from '@dnd-kit/core';
+import type {
+  DragEndEvent,
 } from '@dnd-kit/core';
 import {
   arrayMove, SortableContext, useSortable, verticalListSortingStrategy,
@@ -104,14 +107,56 @@ function StepRail({ current, setCurrent, brand, session }: {
   );
 }
 
-// ─── Browser mock (screenshot + hotspot) ─────────────────────────────────────
+// ─── Browser mock (screenshot + draggable hotspot) ───────────────────────────
 
-function BrowserMock({ step, session, brand, hotspotStyle }: { step: any; session: any; brand: string; hotspotStyle: HotspotStyle }) {
-  const coords = step?.coordinates;
-  const hotspotX = coords && coords.viewportWidth > 0 ? (coords.x / coords.viewportWidth) * 100 : 50;
-  const hotspotY = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : 50;
+const HS_SIZES = [{ label: 'S', v: 14 }, { label: 'M', v: 20 }, { label: 'L', v: 28 }];
 
-  // Blur/callout card overlays from step.cards
+function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot }: {
+  step: any; session: any; brand: string; hotspotStyle: HotspotStyle;
+  onUpdateHotspot: (pctX: number, pctY: number, hotspotSize?: number) => void;
+}) {
+  const coords  = step?.coordinates;
+  const rawX    = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : 50;
+  const rawY    = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : 50;
+
+  const savedX      = step?.animationTarget?.pctX;
+  const savedY      = step?.animationTarget?.pctY;
+  const currentSize: number = step?.animationTarget?.hotspotSize ?? 20;
+
+  const [pos, setPos]   = useState({ x: savedX ?? rawX, y: savedY ?? rawY });
+  const dragging        = useRef(false);
+  const dragPos         = useRef(pos);
+  const screenshotRef   = useRef<HTMLDivElement>(null);
+
+  // Sync when step switches
+  useEffect(() => {
+    const x = step?.animationTarget?.pctX ?? rawX;
+    const y = step?.animationTarget?.pctY ?? rawY;
+    setPos({ x, y });
+    dragPos.current = { x, y };
+  }, [step?.id]);
+
+  const onHotspotMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragging.current = true;
+  };
+
+  const onScreenshotMouseMove = (e: React.MouseEvent) => {
+    if (!dragging.current || !screenshotRef.current) return;
+    const rect = screenshotRef.current.getBoundingClientRect();
+    const x = Math.min(100, Math.max(0, ((e.clientX - rect.left)  / rect.width)  * 100));
+    const y = Math.min(100, Math.max(0, ((e.clientY - rect.top)   / rect.height) * 100));
+    dragPos.current = { x, y };
+    setPos({ x, y });
+  };
+
+  const onScreenshotMouseUp = () => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    onUpdateHotspot(dragPos.current.x, dragPos.current.y);
+  };
+
   const cards: DemoCard[] = step?.cards ?? [];
   const blurCards    = cards.filter((c) => c.type === 'blur'    && c.rect);
   const calloutCards = cards.filter((c) => c.type === 'callout' && c.rect);
@@ -129,17 +174,25 @@ function BrowserMock({ step, session, brand, hotspotStyle }: { step: any; sessio
               <I.Link size={11} /> {step?.url?.replace(/^https?:\/\//, '').substring(0, 40) || 'app.example.com'}
             </div>
           </div>
+
           {/* Screenshot + overlays */}
-          <div style={{ position: 'relative', aspectRatio: '16/9', background: '#fff' }}>
+          <div
+            ref={screenshotRef}
+            onMouseMove={onScreenshotMouseMove}
+            onMouseUp={onScreenshotMouseUp}
+            onMouseLeave={onScreenshotMouseUp}
+            style={{ position: 'relative', aspectRatio: '16/9', background: '#fff', userSelect: 'none' }}
+          >
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.1)', zIndex: 30 }}>
               <div style={{ height: '100%', background: brand }} />
             </div>
             <ScreenshotPlaceholder step={step} session={session} showChrome={false} aspect="16/9" rounded="" mode="stage" className="w-full h-full !shadow-none" />
-            {/* Card-based blur overlays */}
+
+            {/* Blur overlays */}
             {blurCards.map((card) => (
               <div key={card.id} style={{ position: 'absolute', left: `${card.rect!.x}%`, top: `${card.rect!.y}%`, width: `${card.rect!.w}%`, height: `${card.rect!.h}%`, backdropFilter: 'blur(7px)', WebkitBackdropFilter: 'blur(7px)', background: 'rgba(0,0,0,0.12)', borderRadius: 4, zIndex: 16, border: '1.5px dashed rgba(255,255,255,0.3)', pointerEvents: 'none' }} />
             ))}
-            {/* Card-based callout overlays */}
+            {/* Callout overlays */}
             {calloutCards.map((card) => (
               <div key={card.id} style={{ position: 'absolute', left: `${card.rect!.x}%`, top: `${card.rect!.y}%`, transform: 'translate(-50%, -100%)', zIndex: 18, pointerEvents: 'none' }}>
                 <div style={{ background: card.color || brand, color: '#fff', fontSize: 11, fontWeight: 600, padding: '4px 9px', borderRadius: 6, whiteSpace: 'nowrap', boxShadow: `0 6px 18px ${withAlpha(card.color || brand, 0.4)}`, position: 'relative' }}>
@@ -148,10 +201,34 @@ function BrowserMock({ step, session, brand, hotspotStyle }: { step: any; sessio
                 </div>
               </div>
             ))}
+
+            {/* Draggable hotspot */}
             {coords && (
-              <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={20} handles />
+              <Hotspot
+                style={hotspotStyle}
+                brand={brand}
+                white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'}
+                x={pos.x}
+                y={pos.y}
+                size={currentSize}
+                handles
+                onMouseDown={onHotspotMouseDown}
+              />
             )}
           </div>
+
+          {/* Hotspot size controls */}
+          {coords && (
+            <div style={{ height: 34, background: '#1a1a1d', borderTop: `1px solid ${zn.border}`, display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', justifyContent: 'flex-end' }}>
+              <span style={{ fontSize: 10.5, color: zn.dim, marginRight: 2 }}>Hotspot size</span>
+              {HS_SIZES.map(({ label, v }) => (
+                <button key={label} onClick={() => onUpdateHotspot(dragPos.current.x, dragPos.current.y, v)}
+                  style={{ width: 26, height: 22, borderRadius: 5, border: `1px solid ${currentSize === v ? brand : zn.border}`, background: currentSize === v ? withAlpha(brand, 0.15) : 'transparent', color: currentSize === v ? brand : zn.dim, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -407,11 +484,12 @@ function BottomBar({ current, total, brand, onPrev, onNext }: { current: number;
 // ─── Main: DemoCanvas (Studio Editor) ────────────────────────────────────────
 
 export const DemoCanvas: React.FC = () => {
-  const session    = useStudioStore((s) => s.session);
-  const brandState = useStudioStore((s) => s.brand);
-  const saveStep   = useStudioStore((s) => s.saveStep);
-  const updateStep = useStudioStore((s) => s.updateStep);
-  const brand      = brandState.primaryColor || '#6366f1';
+  const session             = useStudioStore((s) => s.session);
+  const brandState          = useStudioStore((s) => s.brand);
+  const saveStep            = useStudioStore((s) => s.saveStep);
+  const updateStep          = useStudioStore((s) => s.updateStep);
+  const saveAnimationTarget = useStudioStore((s) => s.saveAnimationTarget);
+  const brand               = brandState.primaryColor || '#6366f1';
 
   const [current,      setCurrent]      = useState(0);
   const [hotspotStyle, setHotspotStyle] = useState<HotspotStyle>('pulse');
@@ -443,12 +521,19 @@ export const DemoCanvas: React.FC = () => {
     });
   };
 
+  const handleUpdateHotspot = async (pctX: number, pctY: number, hotspotSize?: number) => {
+    const existing = step?.animationTarget ?? { zoomScale: 1 };
+    const updated  = { ...existing, pctX, pctY, ...(hotspotSize !== undefined ? { hotspotSize } : {}) };
+    updateStep(step.id, { animationTarget: updated });
+    await saveAnimationTarget(step.id, updated);
+  };
+
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
       <TopBar brand={brand} autoplay={autoplay} setAutoplay={setAutoplay} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
         <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} />
-        <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} />
+        <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} />
         <ContentPanel step={step} stepIndex={current} brand={brand} onSave={handleSave} />
 
         {showHsPicker && (
