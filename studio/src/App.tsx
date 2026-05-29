@@ -14,6 +14,7 @@ import { AdminDiagnosticsPage } from './pages/AdminDiagnosticsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { DocsPage } from './pages/DocsPage';
 import { SharedDocPage } from './pages/SharedDocPage';
+import { PrivacyPage } from './pages/PrivacyPage';
 import { LoginPage } from './pages/LoginPage';
 import { CommandPalette } from './components/CommandPalette';
 import { GlobalToastContainer } from './components/GlobalToast';
@@ -97,6 +98,11 @@ function App() {
         const shareToken = window.location.pathname.split('/s/')[1]?.split('/')[0];
         if (shareToken) { navigate('player', { shareToken }); return; }
       }
+      // Privacy policy page — /privacy
+      if (window.location.pathname === '/privacy') {
+        navigate('privacy'); return;
+      }
+
       // Legacy ?share= param → redirect to /s/:token
       const legacyShare = params.get('share');
       if (legacyShare) {
@@ -264,6 +270,7 @@ function App() {
         case 'analytics': return <AnalyticsPage />;
         case 'docs': return <DocsPage />;
         case 'shared-doc': return <SharedDocPage shareToken={route.params.shareToken} />;
+        case 'privacy': return <PrivacyPage />;
         default: return <HomePage />;
       }
     } catch (e: any) {
@@ -281,6 +288,8 @@ function App() {
 
   // While the async token exchange / workspace sync is running, show a neutral loading
   // screen instead of the login page — avoids the flash-of-login-then-app on reload.
+  if (route.name === 'privacy') return <PrivacyPage />;
+
   if (initializing && route.name !== 'share' && route.name !== 'player' && route.name !== 'shared-doc' && !isEmbed) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center">
