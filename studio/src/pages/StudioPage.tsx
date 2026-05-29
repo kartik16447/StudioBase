@@ -155,28 +155,33 @@ export const StudioPage: React.FC = () => {
       <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
       <div className="flex-1 flex min-h-0">
         
-        {/* Left Panel */}
-        <SidebarControls 
-          isPanelOpen={isPanelOpen}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          tabs={STUDIO_TABS}
-        />
+        {/* Left Panel — hidden in Demo mode (DemoCanvas has its own step rail + content panel) */}
+        {activeView !== 'demo' && (
+          <SidebarControls
+            isPanelOpen={isPanelOpen}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            tabs={STUDIO_TABS}
+          />
+        )}
 
         {/* Canvas */}
-        <motion.section 
+        <motion.section
           layout
           transition={RenderConstants.PANEL_SPRING}
           className="flex-1 min-w-0 flex flex-col relative"
         >
-          <button
-            onClick={togglePanel}
-            className="absolute top-3 left-3 z-20 glass rounded-pill h-8 px-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-text-2 hover:text-text"
-          >
-            {isPanelOpen ? <I.ChevronLeft size={14} /> : <I.ChevronRight size={14} />}
-            <span>{isPanelOpen ? 'Collapse' : 'Open panel'}</span>
-            <Kbd>⌘\</Kbd>
-          </button>
+          {/* Panel toggle — not shown in Demo mode */}
+          {activeView !== 'demo' && (
+            <button
+              onClick={togglePanel}
+              className="absolute top-3 left-3 z-20 glass rounded-pill h-8 px-3 inline-flex items-center gap-1.5 text-[12px] font-medium text-text-2 hover:text-text"
+            >
+              {isPanelOpen ? <I.ChevronLeft size={14} /> : <I.ChevronRight size={14} />}
+              <span>{isPanelOpen ? 'Collapse' : 'Open panel'}</span>
+              <Kbd>⌘\</Kbd>
+            </button>
+          )}
 
           <AnimatePresence mode="wait">
             <motion.div
