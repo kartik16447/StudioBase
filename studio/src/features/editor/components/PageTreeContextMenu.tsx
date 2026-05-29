@@ -36,8 +36,7 @@ export const PageTreeContextMenu: React.FC<PageTreeContextMenuProps> = ({ x, y, 
       <div className="doc-menu-item" onClick={() => onAction('move')}><I.CornerUpRight size={14} className="doc-icon" />Move to…</div>
       <div className="doc-menu-item" onClick={() => onAction('save-as-template')}><I.LayoutTemplate size={14} className="doc-icon" />Save as template</div>
       <div className="doc-menu-divider" />
-      <div className="doc-menu-item danger" onClick={() => onAction('delete')}><I.Trash2 size={14} className="doc-icon" />Delete</div></anpl:parameter>
-</invoke>
+      <div className="doc-menu-item danger" onClick={() => onAction('delete')}><I.Trash2 size={14} className="doc-icon" />Delete</div>
     </div>
   );
 };

@@ -1,4 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import {
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove, SortableContext, useSortable, verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../../components/icons';
 import { ScreenshotPlaceholder } from '../../../components/ui';
@@ -8,6 +15,7 @@ import { HotspotStylePicker } from '../../../components/demo/HotspotStylePicker'
 import { CardTypePicker } from '../../../components/demo/CardTypePicker';
 import { withAlpha } from '../../../components/demo/helpers';
 import { displayText } from '../../../lib/textUtils';
+import type { DemoCard } from '../../../../../shared/types/step';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -103,6 +111,11 @@ function BrowserMock({ step, session, brand, hotspotStyle }: { step: any; sessio
   const hotspotX = coords && coords.viewportWidth > 0 ? (coords.x / coords.viewportWidth) * 100 : 50;
   const hotspotY = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : 50;
 
+  // Blur/callout card overlays from step.cards
+  const cards: DemoCard[] = step?.cards ?? [];
+  const blurCards    = cards.filter((c) => c.type === 'blur'    && c.rect);
+  const calloutCards = cards.filter((c) => c.type === 'callout' && c.rect);
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: zn.bg, position: 'relative' }}>
       <div style={{ flex: 1, display: 'grid', placeItems: 'center', padding: '34px 40px', minHeight: 0 }}>
@@ -118,11 +131,23 @@ function BrowserMock({ step, session, brand, hotspotStyle }: { step: any; sessio
           </div>
           {/* Screenshot + overlays */}
           <div style={{ position: 'relative', aspectRatio: '16/9', background: '#fff' }}>
-            {/* Progress bar */}
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.1)', zIndex: 30 }}>
               <div style={{ height: '100%', background: brand }} />
             </div>
             <ScreenshotPlaceholder step={step} session={session} showChrome={false} aspect="16/9" rounded="" mode="stage" className="w-full h-full !shadow-none" />
+            {/* Card-based blur overlays */}
+            {blurCards.map((card) => (
+              <div key={card.id} style={{ position: 'absolute', left: `${card.rect!.x}%`, top: `${card.rect!.y}%`, width: `${card.rect!.w}%`, height: `${card.rect!.h}%`, backdropFilter: 'blur(7px)', WebkitBackdropFilter: 'blur(7px)', background: 'rgba(0,0,0,0.12)', borderRadius: 4, zIndex: 16, border: '1.5px dashed rgba(255,255,255,0.3)', pointerEvents: 'none' }} />
+            ))}
+            {/* Card-based callout overlays */}
+            {calloutCards.map((card) => (
+              <div key={card.id} style={{ position: 'absolute', left: `${card.rect!.x}%`, top: `${card.rect!.y}%`, transform: 'translate(-50%, -100%)', zIndex: 18, pointerEvents: 'none' }}>
+                <div style={{ background: card.color || brand, color: '#fff', fontSize: 11, fontWeight: 600, padding: '4px 9px', borderRadius: 6, whiteSpace: 'nowrap', boxShadow: `0 6px 18px ${withAlpha(card.color || brand, 0.4)}`, position: 'relative' }}>
+                  {card.body || 'Callout'}
+                  <span style={{ position: 'absolute', left: '50%', bottom: -4, transform: 'translateX(-50%) rotate(45deg)', width: 8, height: 8, background: card.color || brand, borderRadius: 1 }} />
+                </div>
+              </div>
+            ))}
             {coords && (
               <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={20} handles />
             )}
@@ -133,47 +158,171 @@ function BrowserMock({ step, session, brand, hotspotStyle }: { step: any; sessio
   );
 }
 
-// ─── Card block ───────────────────────────────────────────────────────────────
+// ─── Sortable card block ───────────────────────────────────────────────────────
 
 const fieldLabel: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: zn.dim, marginBottom: 6, display: 'block' };
 const inputStyle: React.CSSProperties = { width: '100%', background: zn.bg, border: `1px solid ${zn.border}`, borderRadius: 8, color: zn.ink, fontSize: 13, padding: '9px 11px', outline: 'none', fontFamily: 'inherit' };
 
-function CardBlock({ type, children, brand, defaultOpen = true }: { type: string; children: React.ReactNode; brand: string; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const iconMap: Record<string, React.FC<any>> = { text: I.AlignLeft, cta: I.ArrowRight, blur: I.EyeOff, callout: I.MessageSquare, video: I.Video, form: I.ClipboardList, image: I.Image, embed: I.Code2 };
-  const Icon = iconMap[type] || I.AlignLeft;
-  const label = type.charAt(0).toUpperCase() + type.slice(1);
+const CARD_ICONS: Record<string, React.FC<any>> = {
+  text: I.AlignLeft, cta: I.ArrowRight, blur: I.EyeOff, callout: I.MessageSquare,
+  video: I.Video, form: I.ClipboardList, image: I.Image, embed: I.Code2,
+};
+
+function SortableCardBlock({ card, brand, onChange, onDelete }: {
+  card: DemoCard; brand: string;
+  onChange: (id: string, patch: Partial<DemoCard>) => void;
+  onDelete: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id });
+  const [open, setOpen] = useState(true);
+  const Icon = CARD_ICONS[card.type] || I.AlignLeft;
+  const label = card.type.charAt(0).toUpperCase() + card.type.slice(1);
+
   return (
-    <div style={{ borderRadius: 10, border: `1px solid ${zn.border}`, background: zn.panel, overflow: 'hidden' }}>
+    <div ref={setNodeRef} style={{ borderRadius: 10, border: `1px solid ${zn.border}`, background: zn.panel, overflow: 'hidden', opacity: isDragging ? 0.5 : 1, transform: CSS.Transform.toString(transform), transition }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 9px', background: zn.panel2, borderBottom: open ? `1px solid ${zn.border}` : 'none' }}>
-        <span style={{ color: zn.dim, cursor: 'grab', display: 'flex' }}><I.GripVertical size={15} /></span>
+        <span {...attributes} {...listeners} style={{ color: zn.dim, cursor: 'grab', display: 'flex', touchAction: 'none' }}>
+          <I.GripVertical size={15} />
+        </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: brand, background: withAlpha(brand, 0.13), padding: '3px 8px', borderRadius: 6 }}>
           <Icon size={12} /> {label}
         </span>
-        <span style={{ marginLeft: 'auto' }}>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 3 }}>
           <button onClick={() => setOpen((v) => !v)} style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: 'transparent', color: zn.dim, cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
             {open ? <I.ChevronUp size={15} /> : <I.ChevronDown size={15} />}
           </button>
+          <button onClick={() => onDelete(card.id)} style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: 'transparent', color: zn.dim, cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
+            <I.Trash2 size={14} />
+          </button>
         </span>
       </div>
-      {open && <div style={{ padding: 11 }}>{children}</div>}
+      {open && (
+        <div style={{ padding: 11, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {card.type === 'text' && (
+            <textarea
+              value={card.body ?? ''}
+              onChange={(e) => onChange(card.id, { body: e.target.value })}
+              rows={3}
+              placeholder="Describe what's happening…"
+              style={{ ...inputStyle, lineHeight: 1.5 }}
+            />
+          )}
+          {card.type === 'cta' && (
+            <>
+              <div>
+                <label style={fieldLabel}>Button label</label>
+                <input value={card.ctaLabel ?? ''} onChange={(e) => onChange(card.id, { ctaLabel: e.target.value })} placeholder="Get started" style={inputStyle} />
+              </div>
+              <div>
+                <label style={fieldLabel}>URL</label>
+                <input value={card.ctaUrl ?? ''} onChange={(e) => onChange(card.id, { ctaUrl: e.target.value })} placeholder="https://…" style={inputStyle} />
+              </div>
+            </>
+          )}
+          {card.type === 'callout' && (
+            <>
+              <div>
+                <label style={fieldLabel}>Text</label>
+                <input value={card.body ?? ''} onChange={(e) => onChange(card.id, { body: e.target.value })} placeholder="Look here!" style={inputStyle} />
+              </div>
+              <div>
+                <label style={fieldLabel}>Position X% / Y%</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input type="number" min={0} max={100} value={card.rect?.x ?? 50} onChange={(e) => onChange(card.id, { rect: { ...(card.rect ?? { x: 50, y: 50, w: 20, h: 10 }), x: +e.target.value } })} style={{ ...inputStyle, width: '50%' }} placeholder="X%" />
+                  <input type="number" min={0} max={100} value={card.rect?.y ?? 50} onChange={(e) => onChange(card.id, { rect: { ...(card.rect ?? { x: 50, y: 50, w: 20, h: 10 }), y: +e.target.value } })} style={{ ...inputStyle, width: '50%' }} placeholder="Y%" />
+                </div>
+              </div>
+            </>
+          )}
+          {card.type === 'blur' && (
+            <>
+              <div style={{ fontSize: 12, color: zn.mute, lineHeight: 1.4 }}>Define the blur region using percent coordinates.</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {(['x', 'y', 'w', 'h'] as const).map((k) => (
+                  <div key={k}>
+                    <label style={fieldLabel}>{k === 'w' ? 'Width %' : k === 'h' ? 'Height %' : k.toUpperCase() + ' %'}</label>
+                    <input type="number" min={0} max={100} value={card.rect?.[k] ?? (k === 'x' || k === 'y' ? 30 : 20)} onChange={(e) => onChange(card.id, { rect: { ...(card.rect ?? { x: 30, y: 30, w: 20, h: 10 }), [k]: +e.target.value } })} style={inputStyle} />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {card.type === 'video' && (
+            <div>
+              <label style={fieldLabel}>Video URL</label>
+              <input value={card.videoUrl ?? ''} onChange={(e) => onChange(card.id, { videoUrl: e.target.value })} placeholder="https://youtube.com/…" style={inputStyle} />
+            </div>
+          )}
+          {card.type === 'form' && (
+            <div style={{ fontSize: 12, color: zn.mute }}>Form fields editor — coming soon.</div>
+          )}
+          {(card.type === 'image' || card.type === 'embed') && (
+            <div style={{ fontSize: 12, color: zn.mute }}>{card.type === 'image' ? 'Image upload' : 'Embed URL'} — coming soon.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Content panel ────────────────────────────────────────────────────────────
 
-function ContentPanel({ step, stepIndex, brand, onSave }: { step: any; stepIndex: number; brand: string; onSave: (updates: any) => void }) {
-  const [picker, setPicker] = useState(false);
-  const [title, setTitle] = useState(step?.stepTitle || '');
-  const [body,  setBody]  = useState(displayText(step?.textOverride || step?.generatedText) || '');
+function ContentPanel({ step, stepIndex, brand, onSave }: {
+  step: any; stepIndex: number; brand: string;
+  onSave: (updates: { stepTitle?: string | null; textOverride?: string | null; cards?: DemoCard[] }) => void;
+}) {
+  const [picker, setPicker]   = useState(false);
+  const [title,  setTitle]    = useState(step?.stepTitle || '');
+  const [body,   setBody]     = useState(displayText(step?.textOverride || step?.generatedText) || '');
+  const [cards,  setCards]    = useState<DemoCard[]>(step?.cards ?? []);
 
+  // Sync local state when step changes
   useEffect(() => {
     setTitle(step?.stepTitle || '');
     setBody(displayText(step?.textOverride || step?.generatedText) || '');
+    setCards(step?.cards ?? []);
   }, [step?.id]);
 
-  const save = () => onSave({ stepTitle: title || null, textOverride: body || null });
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const saveAll = (overrides?: { cards?: DemoCard[] }) => {
+    onSave({ stepTitle: title || null, textOverride: body || null, cards: overrides?.cards ?? cards });
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = cards.findIndex((c) => c.id === active.id);
+    const newIdx = cards.findIndex((c) => c.id === over.id);
+    const reordered = arrayMove(cards, oldIdx, newIdx).map((c, i) => ({ ...c, order: i }));
+    setCards(reordered);
+    onSave({ stepTitle: title || null, textOverride: body || null, cards: reordered });
+  };
+
+  const handleCardChange = (id: string, patch: Partial<DemoCard>) => {
+    const updated = cards.map((c) => c.id === id ? { ...c, ...patch } : c);
+    setCards(updated);
+    // debounce via blur — just update local for now, save on blur via parent
+  };
+
+  const handleCardDelete = (id: string) => {
+    const updated = cards.filter((c) => c.id !== id).map((c, i) => ({ ...c, order: i }));
+    setCards(updated);
+    onSave({ stepTitle: title || null, textOverride: body || null, cards: updated });
+  };
+
+  const handleAddCard = (type: DemoCard['type']) => {
+    const newCard: DemoCard = { id: crypto.randomUUID(), type, order: cards.length };
+    if (type === 'blur' || type === 'callout') newCard.rect = { x: 30, y: 30, w: 20, h: 10 };
+    if (type === 'form') newCard.formFields = [{ id: crypto.randomUUID(), label: 'Name', type: 'text' }];
+    const updated = [...cards, newCard];
+    setCards(updated);
+    onSave({ stepTitle: title || null, textOverride: body || null, cards: updated });
+    setPicker(false);
+  };
+
+  // Separate non-text cards to show after text
+  const nonTextCards = cards.filter((c) => c.type !== 'text');
 
   return (
     <div className="dm-scroll" style={{ width: 340, flex: 'none', borderLeft: `1px solid ${zn.border}`, background: zn.bg, padding: 14, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 11, position: 'relative' }}>
@@ -185,13 +334,43 @@ function ContentPanel({ step, stepIndex, brand, onSave }: { step: any; stepIndex
       {/* Title */}
       <div>
         <label style={fieldLabel}>Step title</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={save} placeholder="e.g. Select a project" style={{ ...inputStyle, fontWeight: 600, fontSize: 14 }} />
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => saveAll()}
+          placeholder="e.g. Select a project"
+          style={{ ...inputStyle, fontWeight: 600, fontSize: 14 }}
+        />
       </div>
 
-      {/* Text card */}
-      <CardBlock type="text" brand={brand}>
-        <textarea value={body} onChange={(e) => setBody(e.target.value)} onBlur={save} rows={3} placeholder="Describe what's happening…" style={{ ...inputStyle, lineHeight: 1.5 }} />
-      </CardBlock>
+      {/* Text card (always present, first) */}
+      <div style={{ borderRadius: 10, border: `1px solid ${zn.border}`, background: zn.panel, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 9px', background: zn.panel2, borderBottom: `1px solid ${zn.border}` }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: brand, background: withAlpha(brand, 0.13), padding: '3px 8px', borderRadius: 6 }}>
+            <I.AlignLeft size={12} /> Text
+          </span>
+        </div>
+        <div style={{ padding: 11 }}>
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} onBlur={() => saveAll()} rows={3} placeholder="Describe what's happening…" style={{ ...inputStyle, lineHeight: 1.5 }} />
+        </div>
+      </div>
+
+      {/* Sortable extra cards */}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={nonTextCards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+          {nonTextCards.map((card) => (
+            <SortableCardBlock
+              key={card.id}
+              card={card}
+              brand={brand}
+              onChange={(id, patch) => {
+                handleCardChange(id, patch);
+              }}
+              onDelete={handleCardDelete}
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
 
       {/* Add card button */}
       <button onClick={() => setPicker((v) => !v)} style={{ height: 38, borderRadius: 9, border: `1.5px dashed ${zn.border2}`, background: 'transparent', color: zn.mute, fontSize: 12.5, fontWeight: 550, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
@@ -200,7 +379,7 @@ function ContentPanel({ step, stepIndex, brand, onSave }: { step: any; stepIndex
 
       {picker && (
         <div style={{ position: 'absolute', left: 14, right: 14, bottom: 14, zIndex: 50 }}>
-          <CardTypePicker brand={brand} onPick={() => { setPicker(false); }} onClose={() => setPicker(false)} embedded />
+          <CardTypePicker brand={brand} onPick={(type) => handleAddCard(type as DemoCard['type'])} onClose={() => setPicker(false)} embedded />
         </div>
       )}
     </div>
@@ -243,7 +422,6 @@ export const DemoCanvas: React.FC = () => {
   const step  = steps[current];
   const total = steps.length;
 
-  // Auto-advance when autoplay is on
   useEffect(() => {
     if (!autoplay || total === 0) return;
     const t = setInterval(() => setCurrent((c) => (c + 1) % total), 5000);
@@ -256,9 +434,13 @@ export const DemoCanvas: React.FC = () => {
     </div>
   );
 
-  const handleSave = async (updates: { stepTitle?: string | null; textOverride?: string | null }) => {
+  const handleSave = async (updates: { stepTitle?: string | null; textOverride?: string | null; cards?: DemoCard[] }) => {
     updateStep(step.id, updates as any);
-    await saveStep(step.id, { textOverride: updates.textOverride ?? undefined });
+    await saveStep(step.id, {
+      textOverride: updates.textOverride ?? undefined,
+      cards: updates.cards,
+      stepTitle: updates.stepTitle,
+    });
   };
 
   return (
@@ -269,7 +451,6 @@ export const DemoCanvas: React.FC = () => {
         <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} />
         <ContentPanel step={step} stepIndex={current} brand={brand} onSave={handleSave} />
 
-        {/* Hotspot style picker overlay */}
         {showHsPicker && (
           <div style={{ position: 'absolute', bottom: 60, right: 360, zIndex: 60 }}>
             <HotspotStylePicker brand={brand} selected={hotspotStyle} onPick={(s) => { setHotspotStyle(s); setShowHsPicker(false); }} onClose={() => setShowHsPicker(false)} />

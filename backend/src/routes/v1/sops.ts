@@ -33,6 +33,8 @@ sops.get('/:sopId', requireWorkspaceMembership('viewer'), async (c) => {
 const UpdateStepBody = z.object({
   textOverride: z.string().max(2000).optional(),
   annotations: z.array(z.any()).optional(),
+  cards: z.array(z.any()).optional(),
+  stepTitle: z.string().max(300).nullable().optional(),
 });
 
 sops.patch('/:sopId/steps/:stepId', requireWorkspaceMembership('editor'), async (c) => {

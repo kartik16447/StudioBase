@@ -6,7 +6,7 @@ import { Hotspot } from '../../demo/Hotspot';
 import type { HotspotStyle } from '../../demo/Hotspot';
 import { withAlpha, brandGradient } from '../../demo/helpers';
 import { displayText } from '../../../lib/textUtils';
-import type { Step } from '../../../../../shared/types/step';
+import type { Step, DemoCard } from '../../../../../shared/types/step';
 import type { ChapterBreak } from '../../../../../shared/types/session';
 
 // ─── Sequence ────────────────────────────────────────────────────────────────
@@ -80,6 +80,11 @@ function InfoPanel({ step, stepIndex, totalSteps, brand, onPrev, onNext, atStart
 }) {
   const title = step.stepTitle;
   const body  = displayText(step.textOverride || step.generatedText);
+  const cards: DemoCard[] = (step as any).cards ?? [];
+
+  const ctaCard   = cards.find((c) => c.type === 'cta');
+  const videoCard = cards.find((c) => c.type === 'video');
+  const formCard  = cards.find((c) => c.type === 'form');
 
   const shell: React.CSSProperties = { width: '100%', marginTop: 16, padding: '15px 17px', borderRadius: 13, background: 'rgba(20,20,23,0.72)', border: '1px solid rgba(255,255,255,0.07)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' };
 
@@ -104,11 +109,53 @@ function InfoPanel({ step, stepIndex, totalSteps, brand, onPrev, onNext, atStart
         <div style={{ flex: 1, minWidth: 0 }}>
           {title && <div style={{ fontSize: 15.5, fontWeight: 600, color: '#fff', letterSpacing: '-0.01em', lineHeight: 1.3 }}>{title}</div>}
           {body  && <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.66)', lineHeight: 1.5, marginTop: title ? 3 : 0 }}>{body}</div>}
+
+          {/* Video card embed */}
+          {videoCard?.videoUrl && (
+            <div style={{ marginTop: 10, borderRadius: 9, overflow: 'hidden', aspectRatio: '16/9', background: '#000' }}>
+              <iframe src={toEmbedUrl(videoCard.videoUrl)} style={{ width: '100%', height: '100%', border: 'none' }} allowFullScreen title="Step video" />
+            </div>
+          )}
+
+          {/* Form card */}
+          {formCard && (formCard.formFields?.length ?? 0) > 0 && (
+            <form onSubmit={(e) => e.preventDefault()} style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {formCard.formFields!.map((f) => (
+                <div key={f.id}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.55)', display: 'block', marginBottom: 4 }}>{f.label}</label>
+                  <input type={f.type} placeholder={f.label} style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7, color: '#fff', fontSize: 13, padding: '8px 10px', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                </div>
+              ))}
+              <button type="submit" style={{ marginTop: 2, padding: '9px 16px', borderRadius: 8, border: 'none', background: brand, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                Submit
+              </button>
+            </form>
+          )}
+
+          {/* CTA button */}
+          {ctaCard?.ctaLabel && (
+            <div style={{ marginTop: 10 }}>
+              <a href={ctaCard.ctaUrl || '#'} target="_blank" rel="noopener noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 18px', borderRadius: 9, background: brand, color: '#fff', fontSize: 13.5, fontWeight: 600, textDecoration: 'none', boxShadow: `0 8px 22px ${withAlpha(brand, 0.45)}` }}>
+                {ctaCard.ctaLabel} <I.ArrowRight size={15} />
+              </a>
+            </div>
+          )}
         </div>
         {arrows}
       </div>
     </div>
   );
+}
+
+function toEmbedUrl(url: string): string {
+  // YouTube
+  const yt = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([a-zA-Z0-9_-]{11})/);
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
+  // Loom
+  const loom = url.match(/loom\.com\/share\/([a-f0-9]+)/);
+  if (loom) return `https://www.loom.com/embed/${loom[1]}`;
+  return url;
 }
 
 // ─── Chapter screen ───────────────────────────────────────────────────────────
@@ -159,8 +206,11 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
   const coords = step.coordinates;
   const hotspotX = coords && coords.viewportWidth > 0 ? (coords.x / coords.viewportWidth) * 100 : null;
   const hotspotY = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
+  const cards: DemoCard[] = (step as any).cards ?? [];
   const callouts = (step.annotations ?? []).filter((a) => a.shape === 'text' && a.text);
   const blurs    = (step.annotations ?? []).filter((a) => a.shape === 'blur');
+  const cardBlurs    = cards.filter((c) => c.type === 'blur'    && c.rect);
+  const cardCallouts = cards.filter((c) => c.type === 'callout' && c.rect);
   const screenshotUrl = step.screenshotKey && session?.assets?.[step.screenshotKey] ? session.assets[step.screenshotKey] : null;
 
   return (
@@ -175,7 +225,9 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
         <ScreenshotPlaceholder step={step} session={session} showChrome={false} aspect="16/9" rounded="" mode="stage" className="w-full h-full !shadow-none" />
       )}
       {blurs.map((a, i) => <BlurMask key={i} x={a.x} y={a.y} w={a.width ?? 10} h={a.height ?? 5} />)}
+      {cardBlurs.map((c) => <BlurMask key={c.id} x={c.rect!.x} y={c.rect!.y} w={c.rect!.w} h={c.rect!.h} />)}
       {callouts.map((a, i) => <CalloutOverlay key={i} x={a.x} y={a.y} text={a.text!} brand={brand} />)}
+      {cardCallouts.map((c) => <CalloutOverlay key={c.id} x={c.rect!.x} y={c.rect!.y} text={c.body || 'Note'} brand={c.color || brand} />)}
       {hotspotX !== null && hotspotY !== null && (
         <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={20} onClick={onHotspot} title="Next" />
       )}
