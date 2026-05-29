@@ -8,7 +8,7 @@
  *
  * Feature matrix:
  *   free       → core features only (record, SOP, raw video share)
- *   pro        → + cinematic share, audio voiceover, advanced export
+ *   pro        → + cinematic share, audio voiceover, advanced export, Docs editor
  *   enterprise → + SSO, audit logs, governance, white-label
  */
 
@@ -52,4 +52,6 @@ export const PLAN_FEATURES = {
   governance:       (plan: PlanTier) => plan === 'enterprise',
   /** White-label / custom branding is enterprise-only. */
   whiteLabel:       (plan: PlanTier) => plan === 'enterprise',
+  /** Docs editor (rich text, templates, public share) requires ≥ pro. */
+  docs:             (plan: PlanTier) => plan === 'pro' || plan === 'enterprise',
 } as const;

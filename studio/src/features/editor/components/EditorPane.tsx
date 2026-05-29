@@ -1,5 +1,5 @@
 import React from 'react';
-import type { JSONContent } from '@tiptap/react';
+import type { JSONContent, Editor } from '@tiptap/react';
 import { I } from '../../../components/icons';
 import { TiptapEditor } from './TiptapEditor';
 import { ExportMenuDropdown } from './ExportMenuDropdown';
@@ -18,15 +18,21 @@ interface EditorPaneProps {
   onCloseExport: () => void;
   initialContent: JSONContent;
   onContentChange: (json: JSONContent) => void;
+  onEditorReady: (editor: Editor) => void;
   onShare: () => void;
   onMore: () => void;
+  onExportMarkdown: () => void;
+  onExportPlainText: () => void;
+  onExportPDF: () => void;
+  onCopyMarkdown: () => void;
 }
 
 export const EditorPane: React.FC<EditorPaneProps> = ({
   docId, path, title, onTitleChange, emoji, onPickEmoji, dirty, saving,
   exportOpen, onOpenExport, onCloseExport,
-  initialContent, onContentChange,
+  initialContent, onContentChange, onEditorReady,
   onShare, onMore,
+  onExportMarkdown, onExportPlainText, onExportPDF, onCopyMarkdown,
 }) => (
   <div className="doc-editor">
     {/* Breadcrumb */}
@@ -72,7 +78,15 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           <button className="doc-btn doc-btn-ghost sm" onClick={onOpenExport}>
             <I.FileDown size={14} /> Export
           </button>
-          {exportOpen && <ExportMenuDropdown onClose={onCloseExport} />}
+          {exportOpen && (
+            <ExportMenuDropdown
+              onClose={onCloseExport}
+              onMarkdown={onExportMarkdown}
+              onPlainText={onExportPlainText}
+              onPDF={onExportPDF}
+              onCopyMarkdown={onCopyMarkdown}
+            />
+          )}
         </div>
         <button className="doc-btn doc-btn-ghost sm" onClick={onShare}>
           <I.Share2 size={14} /> Share
@@ -84,6 +98,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     </div>
 
     {/* Tiptap canvas — key=docId forces remount when switching docs */}
-    <TiptapEditor key={docId} initialContent={initialContent} onChange={onContentChange} />
+    <TiptapEditor key={docId} initialContent={initialContent} onChange={onContentChange} onEditorReady={onEditorReady} />
   </div>
 );

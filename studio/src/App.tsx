@@ -13,6 +13,7 @@ import { AuditLogPage } from './pages/AuditLogPage';
 import { AdminDiagnosticsPage } from './pages/AdminDiagnosticsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { DocsPage } from './pages/DocsPage';
+import { SharedDocPage } from './pages/SharedDocPage';
 import { LoginPage } from './pages/LoginPage';
 import { CommandPalette } from './components/CommandPalette';
 import { GlobalToastContainer } from './components/GlobalToast';
@@ -84,6 +85,12 @@ function App() {
 
       const workspaceId = params.get('workspaceId') || sessionManager.getWorkspaceId();
       if (workspaceId) sessionManager.setWorkspaceId(workspaceId);
+
+      // Public shared doc — /share/docs/:shareToken
+      if (window.location.pathname.startsWith('/share/docs/')) {
+        const shareToken = window.location.pathname.split('/share/docs/')[1]?.split('/')[0];
+        if (shareToken) { navigate('shared-doc', { shareToken }); return; }
+      }
 
       // Public player page — /s/:shareToken
       if (window.location.pathname.startsWith('/s/')) {
@@ -256,6 +263,7 @@ function App() {
         case 'admin' as any: return <AdminDiagnosticsPage />;
         case 'analytics': return <AnalyticsPage />;
         case 'docs': return <DocsPage />;
+        case 'shared-doc': return <SharedDocPage shareToken={route.params.shareToken} />;
         default: return <HomePage />;
       }
     } catch (e: any) {
@@ -273,7 +281,7 @@ function App() {
 
   // While the async token exchange / workspace sync is running, show a neutral loading
   // screen instead of the login page — avoids the flash-of-login-then-app on reload.
-  if (initializing && route.name !== 'share' && route.name !== 'player' && !isEmbed) {
+  if (initializing && route.name !== 'share' && route.name !== 'player' && route.name !== 'shared-doc' && !isEmbed) {
     return (
       <div className="min-h-screen bg-[#F5F5F7] flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -282,15 +290,16 @@ function App() {
   }
 
   // Show login page if not authenticated (except share/embed pages which are public)
-  if (!authed && route.name !== 'share' && route.name !== 'player' && !isEmbed) {
+  if (!authed && route.name !== 'share' && route.name !== 'player' && route.name !== 'shared-doc' && !isEmbed) {
     return <LoginPage />;
   }
 
   const isShare = route.name === 'share';
   const isPlayer = route.name === 'player';
+  const isSharedDoc = route.name === 'shared-doc';
 
-  // Player page renders completely standalone — no AppShell
-  if (isPlayer) return <>{renderRoute()}<GlobalToastContainer /></>;
+  // Player and shared-doc pages render completely standalone — no AppShell
+  if (isPlayer || isSharedDoc) return <>{renderRoute()}<GlobalToastContainer /></>;
 
   return (
     <>

@@ -60,4 +60,19 @@ export const docsApi = {
 
   search: (q: string): Promise<ApiSearchHit[]> =>
     apiClient.get<ApiSearchHit[]>(`${base()}/search?q=${encodeURIComponent(q)}`),
+
+  listTemplates: (): Promise<ApiDocSummary[]> =>
+    apiClient.get<ApiDocSummary[]>(`${base()}/templates`),
+
+  saveAsTemplate: (id: string): Promise<{ ok: boolean }> =>
+    apiClient.post<{ ok: boolean }>(`${base()}/${id}/save-as-template`, {}),
+
+  createFromTemplate: (templateId: string, parentId?: string | null): Promise<ApiDoc> =>
+    apiClient.post<ApiDoc>(`${base()}/from-template/${templateId}`, { parentId: parentId ?? null }),
+
+  shareDoc: (id: string): Promise<{ shareToken: string; shareUrl: string }> =>
+    apiClient.post<{ shareToken: string; shareUrl: string }>(`${base()}/${id}/share`, {}),
+
+  getPublic: (token: string): Promise<{ title: string; emoji: string | null; blocks: any[] }> =>
+    apiClient.get<{ title: string; emoji: string | null; blocks: any[] }>(`/public/docs/${token}`),
 };

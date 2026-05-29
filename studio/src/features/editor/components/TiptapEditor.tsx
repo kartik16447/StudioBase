@@ -20,6 +20,8 @@ import type { ActiveFormats } from '../types';
 interface TiptapEditorProps {
   initialContent: JSONContent;
   onChange?: (json: JSONContent) => void;
+  onEditorReady?: (editor: Editor) => void;
+  editable?: boolean;
 }
 
 interface SlashState {
@@ -28,7 +30,7 @@ interface SlashState {
   activeIdx: number;
 }
 
-export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onChange }) => {
+export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onChange, onEditorReady, editable = true }) => {
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [tbTurnOpen, setTbTurnOpen] = useState(false);
   const [tbColorOpen, setTbColorOpen] = useState(false);
@@ -46,6 +48,7 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onCh
 
   // editorRef lets KeyboardExtension access the editor without recreating the extension
   const editorRef = useRef<Editor | null>(null);
+  const editorReadyFiredRef = useRef(false);
 
   // openLinkEditorRef: called by Mod-k to open the link popover in FloatingToolbar
   const openLinkEditorRef = useRef<() => void>(() => {});
@@ -150,6 +153,7 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onCh
       KeyboardExtension,
     ],
     content: initialContent,
+    editable,
     editorProps: {
       attributes: { spellcheck: 'true' },
     },
@@ -237,7 +241,13 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onCh
 
   // Keep refs fresh every render
   handleSlashPickRef.current = handleSlashPick;
-  if (editor) editorRef.current = editor;
+  if (editor) {
+    editorRef.current = editor;
+    if (!editorReadyFiredRef.current) {
+      editorReadyFiredRef.current = true;
+      onEditorReady?.(editor);
+    }
+  }
 
   const handleFormat = useCallback((fmt: keyof ActiveFormats) => {
     if (!editor) return;

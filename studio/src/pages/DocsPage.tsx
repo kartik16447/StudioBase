@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { JSONContent } from '@tiptap/react';
+import type { JSONContent, Editor } from '@tiptap/react';
+import { blocksToMarkdown, blocksToPlainText } from '../features/editor/lib/tiptapToMarkdown';
 import { DocsSidebar } from '../features/editor/components/DocsSidebar';
 import { EditorPane } from '../features/editor/components/EditorPane';
 import { BlockContextMenu } from '../features/editor/components/BlockContextMenu';
@@ -11,6 +12,8 @@ import { docsApi } from '../features/editor/lib/docsApi';
 import type { ApiDocSummary } from '../features/editor/lib/docsApi';
 import type { PageNode, PageContextMenu } from '../features/editor/types';
 import { useStudioStore } from '../store/useStudioStore';
+import { showToast } from '../components/GlobalToast';
+import { usePlan, PLAN_FEATURES } from '../hooks/usePlan';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -158,6 +161,25 @@ const EMPTY_CONTENT: JSONContent = { type: 'doc', content: [{ type: 'paragraph' 
 // ---------------------------------------------------------------------------
 
 export const DocsPage: React.FC = () => {
+  const plan = usePlan();
+  if (!PLAN_FEATURES.docs(plan)) return <DocsUpgradeGate />;
+  return <DocsPageInner />;
+};
+
+const DocsUpgradeGate: React.FC = () => (
+  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32, background: 'var(--doc-surface)' }}>
+    <div style={{ fontSize: 40 }}>📄</div>
+    <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--doc-text-1)', margin: 0 }}>Docs is a Pro feature</h2>
+    <p style={{ fontSize: 14, color: 'var(--doc-text-2)', textAlign: 'center', maxWidth: 360, margin: 0 }}>
+      Create rich-text documents, templates, and shareable pages with a Pro or Enterprise plan.
+    </p>
+    <a href="/settings/billing" className="doc-btn doc-btn-primary" style={{ marginTop: 8 }}>
+      Upgrade to Pro
+    </a>
+  </div>
+);
+
+const DocsPageInner: React.FC = () => {
   // Tree
   const [pages, setPages] = useState<PageNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -183,6 +205,7 @@ export const DocsPage: React.FC = () => {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [emojiAnchor, setEmojiAnchor] = useState({ left: 0, top: 0 });
   const [exportOpen, setExportOpen] = useState(false);
+  const editorInstanceRef = useRef<Editor | null>(null);
   const [blockMenuAnchor, setBlockMenuAnchor] = useState<{ x: number; y: number } | null>(null);
 
   const titleSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -350,6 +373,12 @@ export const DocsPage: React.FC = () => {
       } catch (err) {
         console.error('Failed to delete doc:', err);
       }
+    } else if (action === 'save-as-template') {
+      try {
+        await docsApi.saveAsTemplate(id);
+      } catch (err) {
+        console.error('Failed to save as template:', err);
+      }
     }
   }, [pageCtx, handleNewDoc]);
 
@@ -477,6 +506,38 @@ export const DocsPage: React.FC = () => {
 
   const path: string[] = (activeId ? findPath(pages, activeId) : null) ?? ['Docs'];
 
+  function triggerDownload(text: string, filename: string, mime: string) {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const handleExportMarkdown = useCallback(() => {
+    const blocks = editorInstanceRef.current?.getJSON()?.content ?? [];
+    const md = blocksToMarkdown(blocks, title);
+    triggerDownload(md, `${title || 'Untitled'}.md`, 'text/markdown');
+  }, [title]);
+
+  const handleExportPlainText = useCallback(() => {
+    const blocks = editorInstanceRef.current?.getJSON()?.content ?? [];
+    const txt = blocksToPlainText(blocks);
+    triggerDownload(txt, `${title || 'Untitled'}.txt`, 'text/plain');
+  }, [title]);
+
+  const handleExportPDF = useCallback(() => {
+    window.print();
+  }, []);
+
+  const handleCopyMarkdown = useCallback(() => {
+    const blocks = editorInstanceRef.current?.getJSON()?.content ?? [];
+    const md = blocksToMarkdown(blocks, title);
+    navigator.clipboard.writeText(md).catch(() => {});
+  }, [title]);
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -519,8 +580,22 @@ export const DocsPage: React.FC = () => {
           onCloseExport={() => setExportOpen(false)}
           initialContent={content}
           onContentChange={handleContentChange}
-          onShare={() => {}}
+          onEditorReady={(e) => { editorInstanceRef.current = e; }}
+          onShare={async () => {
+            if (!activeId) return;
+            try {
+              const { shareUrl } = await docsApi.shareDoc(activeId);
+              await navigator.clipboard.writeText(shareUrl);
+              showToast('info', 'Share link copied to clipboard');
+            } catch {
+              showToast('error', 'Failed to generate share link');
+            }
+          }}
           onMore={() => {}}
+          onExportMarkdown={handleExportMarkdown}
+          onExportPlainText={handleExportPlainText}
+          onExportPDF={handleExportPDF}
+          onCopyMarkdown={handleCopyMarkdown}
         />
       )}
 
@@ -576,7 +651,29 @@ export const DocsPage: React.FC = () => {
       {templateOpen && (
         <TemplateModal
           onClose={() => setTemplateOpen(false)}
-          onUse={() => setTemplateOpen(false)}
+          onUse={async (templateId) => {
+            setTemplateOpen(false);
+            try {
+              let doc;
+              if (templateId.startsWith('__')) {
+                // Starter template — create a blank doc with a matching title
+                const starterTitles: Record<string, string> = {
+                  '__creative-brief': 'Creative Brief',
+                  '__meeting-notes': 'Meeting Notes',
+                  '__decision-log': 'Decision Log',
+                  '__project-retro': 'Project Retro',
+                };
+                doc = await docsApi.create({ title: starterTitles[templateId] ?? 'Untitled' });
+              } else {
+                doc = await docsApi.createFromTemplate(templateId);
+              }
+              const node: PageNode = { id: doc.id, title: doc.title, emoji: doc.emoji ?? undefined, children: [] };
+              setPages((prev) => [...prev, node]);
+              setActiveId(doc.id);
+            } catch (err) {
+              console.error('Failed to create from template:', err);
+            }
+          }}
         />
       )}
     </div>

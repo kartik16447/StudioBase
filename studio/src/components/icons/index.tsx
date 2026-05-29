@@ -12,7 +12,7 @@ import {
   File, GripVertical, PanelLeft, Clipboard, AlignLeft, Printer,
   Bold, Italic, Underline, Strikethrough, Link2, Baseline,
   ListOrdered, CheckSquare, Quote, Minus, Unlink, ExternalLink,
-  Pencil, CornerUpRight, FileDown, Heading1, Heading2, Heading3,
+  Pencil, CornerUpRight, FileDown, Heading1, Heading2, Heading3, LayoutTemplate,
 } from 'lucide-react';
 
 export const I = {
@@ -29,5 +29,5 @@ export const I = {
   File, GripVertical, PanelLeft, Clipboard, AlignLeft, Printer,
   Bold, Italic, Underline, Strikethrough, Link2, Baseline,
   ListOrdered, CheckSquare, Quote, Minus, Unlink, ExternalLink,
-  Pencil, CornerUpRight, FileDown, Heading1, Heading2, Heading3,
+  Pencil, CornerUpRight, FileDown, Heading1, Heading2, Heading3, LayoutTemplate,
 };

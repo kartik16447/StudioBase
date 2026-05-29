@@ -7,6 +7,14 @@ import { Env } from '../../types/hono';
 
 const docs = new Hono<{ Bindings: Env }>();
 
+// List templates
+docs.get('/templates', requireWorkspaceMembership('viewer'), async (c) => {
+  const workspaceId = c.get('workspace').id;
+  const service = new DocumentService(c.env.DB);
+  const results = await service.listTemplates(workspaceId);
+  return c.json(results);
+});
+
 // List all documents (summaries, no blocks) for workspace
 docs.get('/', requireWorkspaceMembership('viewer'), async (c) => {
   const workspaceId = c.get('workspace').id;
@@ -130,6 +138,50 @@ docs.delete('/:docId', requireWorkspaceMembership('editor'), async (c) => {
   }).catch(() => {});
 
   return c.json({ ok: true });
+});
+
+// Generate a public share link for a document
+docs.post('/:docId/share', requireWorkspaceMembership('editor'), async (c) => {
+  const { docId } = c.req.param();
+  const workspaceId = c.get('workspace').id;
+  const service = new DocumentService(c.env.DB);
+  let token: string;
+  try {
+    token = await service.generateShareToken(docId, workspaceId);
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+  const origin = new URL(c.req.url).origin;
+  return c.json({ shareToken: token, shareUrl: `${origin}/share/docs/${token}` });
+});
+
+// Save a document as a template
+docs.post('/:docId/save-as-template', requireWorkspaceMembership('editor'), async (c) => {
+  const { docId } = c.req.param();
+  const workspaceId = c.get('workspace').id;
+  const service = new DocumentService(c.env.DB);
+  const doc = await service.getById(docId, workspaceId);
+  if (!doc) return c.json({ error: 'Not found' }, 404);
+  await service.saveAsTemplate(docId, workspaceId);
+  return c.json({ ok: true });
+});
+
+// Create a new document from a template
+docs.post('/from-template/:templateId', requireWorkspaceMembership('editor'), async (c) => {
+  const { templateId } = c.req.param();
+  const workspaceId = c.get('workspace').id;
+  const user = c.get('user');
+  const body = await c.req.json().catch(() => ({}));
+  const parentId = typeof body.parentId === 'string' ? body.parentId : null;
+
+  const service = new DocumentService(c.env.DB);
+  let doc;
+  try {
+    doc = await service.createFromTemplate({ templateId, workspaceId, parentId, userId: user.id });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 404);
+  }
+  return c.json({ ...doc, blocks: JSON.parse(doc.blocks) }, 201);
 });
 
 export { docs };

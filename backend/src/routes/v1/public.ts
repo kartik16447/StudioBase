@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { Env, Variables } from '../../types/hono';
+import { DocumentService } from '../../services/DocumentService';
 
 export const publicRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -363,4 +364,16 @@ publicRoutes.post('/admin/trigger-swap-voice', async (c) => {
   }
 });
 
+// GET /v1/public/docs/:shareToken — no auth, returns read-only doc
+publicRoutes.get('/docs/:shareToken', async (c) => {
+  const { shareToken } = c.req.param();
+  const service = new DocumentService(c.env.DB);
+  const doc = await service.getByShareToken(shareToken);
+  if (!doc) return c.json({ error: 'Not found' }, 404);
+  return c.json({
+    title: doc.title,
+    emoji: doc.emoji,
+    blocks: JSON.parse(doc.blocks),
+  });
+});
 

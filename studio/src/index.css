@@ -1395,3 +1395,13 @@
 /* ── Sidebar page-tree drag cursor ────────────────────────── */
 .doc-tree-item[draggable="true"] { cursor: grab; }
 .doc-tree-item[draggable="true"]:active { cursor: grabbing; }
+
+/* ── Print / PDF export ────────────────────────────────────── */
+@media print {
+  body > * { display: none !important; }
+  .doc-editor { display: block !important; }
+  .doc-breadcrumb,
+  .doc-page-meta,
+  .doc-block-handle,
+  .doc-floating-toolbar { display: none !important; }
+}

@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { I } from '../../../components/icons';
 import type { PageNode } from '../types';
+import { docsApi } from '../lib/docsApi';
+import type { ApiDocSummary } from '../lib/docsApi';
 
 interface DocsSidebarProps {
   pages: PageNode[];
@@ -30,7 +32,15 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
   showTemplates, setShowTemplates,
   renamingId, onRenameCommit, onRenameCancel, loading,
   onDragStart, onDragOver, onDrop, onDragEnd,
-}) => (
+}) => {
+  const [sidebarTemplates, setSidebarTemplates] = useState<ApiDocSummary[]>([]);
+
+  useEffect(() => {
+    if (!showTemplates) return;
+    docsApi.listTemplates().then(setSidebarTemplates).catch(() => {});
+  }, [showTemplates]);
+
+  return (
   <div className="docsside">
     <div className="docsside-header">
       <button
@@ -77,17 +87,18 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
         collapsed={!showTemplates}
         onToggle={() => setShowTemplates(!showTemplates)}
       />
-      {showTemplates && (
-        <>
-          <TemplateRow emoji="📝" title="Creative brief" />
-          <TemplateRow emoji="🗒️" title="Meeting notes" />
-          <TemplateRow emoji="✅" title="Decision log" />
-          <TemplateRow emoji="🔁" title="Project retro" />
-        </>
+      {showTemplates && sidebarTemplates.length === 0 && (
+        <div style={{ padding: '6px 8px 4px 8px', color: 'var(--doc-text-3)', fontSize: 11 }}>
+          No templates yet
+        </div>
       )}
+      {showTemplates && sidebarTemplates.map((t) => (
+        <TemplateRow key={t.id} emoji={t.emoji || '📄'} title={t.title || 'Untitled'} />
+      ))}
     </div>
   </div>
-);
+  );
+};
 
 interface SectionLabelProps {
   label: string;

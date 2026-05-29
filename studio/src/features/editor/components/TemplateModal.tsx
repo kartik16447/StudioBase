@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { I } from '../../../components/icons';
-import { TEMPLATES_STARTER, TEMPLATES_MINE } from '../data/mockData';
+import { docsApi } from '../lib/docsApi';
+import type { ApiDocSummary } from '../lib/docsApi';
+
+const STARTER_TEMPLATES = [
+  { id: '__creative-brief', emoji: '📝', name: 'Creative brief' },
+  { id: '__meeting-notes', emoji: '🗒️', name: 'Meeting notes' },
+  { id: '__decision-log', emoji: '✅', name: 'Decision log' },
+  { id: '__project-retro', emoji: '🔁', name: 'Project retro' },
+];
 
 interface TemplateModalProps {
   onClose: () => void;
@@ -9,14 +17,24 @@ interface TemplateModalProps {
 
 export const TemplateModal: React.FC<TemplateModalProps> = ({ onClose, onUse }) => {
   const [tab, setTab] = useState<'starter' | 'mine'>('starter');
-  const [selected, setSelected] = useState('brief');
-  const list = tab === 'starter' ? TEMPLATES_STARTER : TEMPLATES_MINE;
+  const [selected, setSelected] = useState<string>('');
+  const [myTemplates, setMyTemplates] = useState<ApiDocSummary[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    if (tab !== 'mine') return;
+    setLoading(true);
+    docsApi.listTemplates()
+      .then(setMyTemplates)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [tab]);
 
   return (
     <>
@@ -29,44 +47,71 @@ export const TemplateModal: React.FC<TemplateModalProps> = ({ onClose, onUse }) 
         <div className="doc-template-tabs">
           <button
             className={`doc-template-tab ${tab === 'starter' ? 'active' : ''}`}
-            onClick={() => setTab('starter')}
+            onClick={() => { setTab('starter'); setSelected(''); }}
           >
             Starter templates
           </button>
           <button
             className={`doc-template-tab ${tab === 'mine' ? 'active' : ''}`}
-            onClick={() => setTab('mine')}
+            onClick={() => { setTab('mine'); setSelected(''); }}
           >
             My templates
           </button>
         </div>
+
         <div className="doc-template-grid">
-          {list.map((t) => (
+          {tab === 'starter' && STARTER_TEMPLATES.map((t) => (
             <div
               key={t.id}
               className={`doc-template-card ${selected === t.id ? 'selected' : ''}`}
               onClick={() => setSelected(t.id)}
             >
               <div className="doc-template-preview">
-                <div className="doc-bar" style={{ width: '60%' }} />
-                <div className="doc-bar" style={{ width: '90%' }} />
+                <div style={{ fontSize: 28, textAlign: 'center', padding: '12px 0' }}>{t.emoji}</div>
                 <div className="doc-bar" style={{ width: '75%' }} />
-                <div className="doc-bar" style={{ width: '82%' }} />
+                <div className="doc-bar" style={{ width: '90%' }} />
               </div>
               <div className="doc-template-foot">
                 <span className="doc-template-name">{t.name}</span>
-                <span className="doc-template-count">{t.count}</span>
+              </div>
+            </div>
+          ))}
+
+          {tab === 'mine' && loading && (
+            <div style={{ gridColumn: '1/-1', padding: 24, color: 'var(--doc-text-3)', fontSize: 13 }}>
+              Loading…
+            </div>
+          )}
+          {tab === 'mine' && !loading && myTemplates.length === 0 && (
+            <div style={{ gridColumn: '1/-1', padding: 24, color: 'var(--doc-text-3)', fontSize: 13 }}>
+              No saved templates yet. Right-click any doc in the sidebar and choose "Save as template".
+            </div>
+          )}
+          {tab === 'mine' && !loading && myTemplates.map((t) => (
+            <div
+              key={t.id}
+              className={`doc-template-card ${selected === t.id ? 'selected' : ''}`}
+              onClick={() => setSelected(t.id)}
+            >
+              <div className="doc-template-preview">
+                <div style={{ fontSize: 28, textAlign: 'center', padding: '12px 0' }}>{t.emoji || '📄'}</div>
+                <div className="doc-bar" style={{ width: '75%' }} />
+                <div className="doc-bar" style={{ width: '90%' }} />
+              </div>
+              <div className="doc-template-foot">
+                <span className="doc-template-name">{t.title || 'Untitled'}</span>
               </div>
             </div>
           ))}
         </div>
+
         <div className="doc-template-foot-bar">
           <button className="doc-btn doc-btn-ghost" onClick={onClose}>Start blank</button>
           <div style={{ flex: 1 }} />
           <button
             className="doc-btn doc-btn-primary"
             disabled={!selected}
-            onClick={() => onUse(selected)}
+            onClick={() => selected && onUse(selected)}
           >
             Use template
           </button>

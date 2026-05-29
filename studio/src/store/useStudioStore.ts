@@ -8,7 +8,7 @@ let audioPollInterval: ReturnType<typeof setInterval> | null = null;
 // Per-step debounce timers for annotation backend writes
 const annoSaveTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
-export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'player' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team' | 'analytics' | 'docs';
+export type RouteName = 'home' | 'studio' | 'sop' | 'share' | 'player' | 'brand' | 'library' | 'shared' | 'recent' | 'templates' | 'knowledge' | 'team' | 'analytics' | 'docs' | 'shared-doc';
 
 interface Route {
   name: RouteName;
