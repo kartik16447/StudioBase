@@ -98,7 +98,7 @@ export const AdminDiagnosticsPage: React.FC = () => {
       // Actually the userId on the notification is the session owner. The requester is in metadata.
       // We just mark the notification read as an acknowledgement.
       await apiClient.request(`/notifications/${req.id}/read`, { method: 'POST' });
-      showToast('success', 'Access request acknowledged.');
+      showToast('info', 'Access request acknowledged.');
       setAccessRequests(prev => prev.filter(r => r.id !== req.id));
     } catch {
       showToast('error', 'Failed to process.');
