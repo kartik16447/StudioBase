@@ -27,7 +27,6 @@ export const ScriptPanel: React.FC = () => {
   const [search, setSearch] = useState('');
   const isAiProcessing = useStudioStore(state => state.isAiProcessing);
   const triggerPipeline = useStudioStore(state => state.triggerPipeline);
-  const updateStep = useStudioStore(state => state.updateStep);
   const [regenModalOpen, setRegenModalOpen] = useState(false);
   const [stepsWithOverride, setStepsWithOverride] = useState<Step[]>([]);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
