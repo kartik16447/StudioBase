@@ -171,6 +171,170 @@ function ChapterEditor({ afterStepId, session, brand, onClose }: {
   );
 }
 
+function CalloutCard({
+  ov,
+  selected,
+  brand,
+  onClick,
+  isEditor = false,
+}: {
+  ov: any;
+  selected: boolean;
+  brand: string;
+  onClick?: () => void;
+  isEditor?: boolean;
+}) {
+  const dir = ov.arrowDir ?? 'none';
+  const showArrow = ov.showArrow !== false;
+  const bgColor = ov.bgColor ?? '#18181b';
+  const textColor = ov.textColor ?? '#ffffff';
+
+  // Boundary Clamping (between 5% and 95%)
+  const clampedX = Math.min(95, Math.max(5, ov.pctX));
+  const clampedY = Math.min(95, Math.max(5, ov.pctY));
+
+  // Translation & 12px Offset Math based on arrow direction
+  let transformStr = 'translate(-50%, -50%)';
+  let arrowStyle: React.CSSProperties = {};
+
+  if (dir === 't') {
+    transformStr = 'translate(-50%, 12px)';
+    arrowStyle = {
+      top: -5,
+      left: '50%',
+      transform: 'translateX(-50%) rotate(45deg)',
+    };
+  } else if (dir === 'b') {
+    transformStr = 'translate(-50%, calc(-100% - 12px))';
+    arrowStyle = {
+      bottom: -5,
+      left: '50%',
+      transform: 'translateX(-50%) rotate(45deg)',
+    };
+  } else if (dir === 'l') {
+    transformStr = 'translate(12px, -50%)';
+    arrowStyle = {
+      left: -5,
+      top: '50%',
+      transform: 'translateY(-50%) rotate(45deg)',
+    };
+  } else if (dir === 'r') {
+    transformStr = 'translate(calc(-100% - 12px), -50%)';
+    arrowStyle = {
+      right: -5,
+      top: '50%',
+      transform: 'translateY(-50%) rotate(45deg)',
+    };
+  }
+
+  // Handle empty states & placeholder spacing
+  const hasTitle = !!ov.title;
+  const hasBody = !!ov.body;
+  const hasContent = hasTitle || hasBody;
+
+  // Next / action button visibility
+  const showButton = ov.destination !== 'stay';
+  const buttonLabel = ov.destination === 'specific'
+    ? `Go to step ${ov.destinationStep ?? 1} →`
+    : 'Next →';
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        position: 'absolute',
+        left: `${clampedX}%`,
+        top: `${clampedY}%`,
+        transform: transformStr,
+        zIndex: selected ? 30 : 22,
+        cursor: onClick ? 'pointer' : 'default',
+        pointerEvents: 'auto',
+      }}
+    >
+      <div
+        style={{
+          background: bgColor,
+          color: textColor,
+          padding: '10px 14px',
+          borderRadius: 10,
+          border: selected ? `2.5px solid ${brand}` : '1.5px solid rgba(255,255,255,0.12)',
+          boxShadow: '0 12px 36px rgba(0,0,0,0.5)',
+          minWidth: 160,
+          maxWidth: 240,
+          boxSizing: 'border-box',
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          fontFamily: 'Inter, system-ui, sans-serif',
+        }}
+      >
+        {/* Title */}
+        {hasTitle && (
+          <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.25 }}>
+            {ov.title}
+          </div>
+        )}
+
+        {/* Body */}
+        {hasBody && (
+          <div style={{ fontSize: 11.5, lineHeight: 1.45, opacity: 0.9, whiteSpace: 'pre-wrap' }}>
+            {ov.body}
+          </div>
+        )}
+
+        {/* Placeholder for empty state in Editor */}
+        {!hasContent && isEditor && (
+          <div style={{ fontSize: 11, fontStyle: 'italic', opacity: 0.65 }}>
+            Click to add text
+          </div>
+        )}
+
+        {/* Next / Navigation Button */}
+        {showButton && (hasContent || isEditor) && (
+          <div
+            style={{
+              marginTop: 4,
+              padding: '5px 11px',
+              borderRadius: 6,
+              background: brand,
+              color: '#ffffff',
+              fontSize: 11,
+              fontWeight: 700,
+              textAlign: 'center',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+              display: 'inline-block',
+              alignSelf: 'flex-start',
+              cursor: 'pointer',
+            }}
+          >
+            {buttonLabel}
+          </div>
+        )}
+
+        {/* Rotated arrow element */}
+        {showArrow && dir !== 'none' && (
+          <span
+            style={{
+              position: 'absolute',
+              width: 10,
+              height: 10,
+              background: bgColor,
+              borderLeft: dir === 'r' ? 'none' : selected ? `2.5px solid ${brand}` : '1.5px solid rgba(255,255,255,0.08)',
+              borderTop: dir === 'b' ? 'none' : selected ? `2.5px solid ${brand}` : '1.5px solid rgba(255,255,255,0.08)',
+              borderRight: dir === 'l' ? 'none' : selected ? `2.5px solid ${brand}` : '1.5px solid rgba(255,255,255,0.08)',
+              borderBottom: dir === 't' ? 'none' : selected ? `2.5px solid ${brand}` : '1.5px solid rgba(255,255,255,0.08)',
+              zIndex: -1,
+              boxSizing: 'border-box',
+              ...arrowStyle,
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Browser mock (screenshot + draggable hotspot) ───────────────────────────
 
 const HS_SIZES = [{ label: 'S', v: 14 }, { label: 'M', v: 20 }, { label: 'L', v: 28 }];
@@ -279,6 +443,20 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: zn.bg, position: 'relative' }}>
       <DotGrid className="!fixed" glowRadius={RenderConstants.GLOW_RADIUS} />
+      {/* Floating hint chip when a tool is active */}
+      {activeTool && (
+        <div style={{
+          position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 20,
+          display: 'inline-flex', alignItems: 'center', gap: 7,
+          height: 26, padding: '0 10px', borderRadius: 7,
+          background: withAlpha(brand, 0.14), border: `1px solid ${withAlpha(brand, 0.4)}`,
+          color: brand, fontSize: 12, fontWeight: 500, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+          pointerEvents: 'none',
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: brand, boxShadow: `0 0 0 4px ${withAlpha(brand, 0.25)}` }} />
+          {OVERLAY_HINTS[activeTool]}
+        </div>
+      )}
       <div style={{ flex: 1, display: 'grid', placeItems: 'center', padding: '34px 40px', minHeight: 0, position: 'relative', zIndex: 10 }}>
         <div style={{ width: '100%', maxWidth: 760, borderRadius: 12, overflow: 'hidden', boxShadow: '0 30px 70px -24px rgba(0,0,0,0.8)', border: `1px solid ${zn.border2}` }}>
           {/* Browser chrome */}
@@ -342,21 +520,36 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
               const selected = ov.id === selectedOverlayId;
               if (ov.type === 'spotlight' && ov.w && ov.h) {
                 return (
-                  <div key={ov.id} onClick={(e) => { e.stopPropagation(); onSelectOverlay(ov.id); }} style={{ position: 'absolute', inset: 0, zIndex: 17, cursor: 'pointer' }}>
-                    <SpotlightMask rect={{ x: ov.pctX, y: ov.pctY, w: ov.w, h: ov.h }} shape={ov.shape ?? 'rounded'} overlayOpacity={ov.overlayOpacity ?? 55} borderColor={selected ? brand : (ov.borderColor ?? brand)} />
-                  </div>
+                  <SpotlightMask
+                    key={ov.id}
+                    rect={{ x: ov.pctX, y: ov.pctY, w: ov.w, h: ov.h }}
+                    shape={ov.shape ?? 'rounded'}
+                    overlayOpacity={ov.overlayOpacity ?? 55}
+                    borderColor={selected ? brand : (ov.borderColor ?? brand)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectOverlay(ov.id);
+                    }}
+                  />
+                );
+              }
+              if (ov.type === 'callout') {
+                return (
+                  <CalloutCard
+                    key={ov.id}
+                    ov={ov}
+                    selected={selected}
+                    brand={brand}
+                    isEditor
+                    onClick={() => onSelectOverlay(ov.id)}
+                  />
                 );
               }
               return (
                 <div key={ov.id} onClick={(e) => { e.stopPropagation(); onSelectOverlay(ov.id); }}
-                  style={{ position: 'absolute', left: `${ov.pctX}%`, top: `${ov.pctY}%`, transform: 'translate(-50%,-50%)', zIndex: 22, cursor: 'pointer' }}>
+                  style={{ position: 'absolute', left: `${ov.pctX}%`, top: `${ov.pctY}%`, transform: 'translate(-50%,-50%)', zIndex: selected ? 30 : 22, cursor: 'pointer' }}>
                   {ov.type === 'hotspot' && !ov.invisible && (
                     <Hotspot style={hotspotStyle} brand={brand} size={20} handles={selected} />
-                  )}
-                  {ov.type === 'callout' && (
-                    <div style={{ background: ov.bgColor ?? '#18181b', color: ov.textColor ?? '#e4e4e7', fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 8, whiteSpace: 'nowrap', border: selected ? `2px solid ${brand}` : '1px solid rgba(255,255,255,0.12)', boxShadow: '0 6px 18px rgba(0,0,0,0.5)' }}>
-                      {ov.body || 'Callout text'}
-                    </div>
                   )}
                 </div>
               );
@@ -847,20 +1040,6 @@ export const DemoCanvas: React.FC = () => {
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }} onClick={() => setSelectedOverlayId(null)}>
-          {/* Floating hint chip when a tool is active */}
-          {activeTool && (
-            <div style={{
-              position: 'absolute', top: 12, left: 12, zIndex: 20,
-              display: 'inline-flex', alignItems: 'center', gap: 7,
-              height: 26, padding: '0 10px', borderRadius: 7,
-              background: withAlpha(brand, 0.14), border: `1px solid ${withAlpha(brand, 0.4)}`,
-              color: brand, fontSize: 12, fontWeight: 500, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
-              pointerEvents: 'none',
-            }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: brand, boxShadow: `0 0 0 4px ${withAlpha(brand, 0.25)}` }} />
-              {OVERLAY_HINTS[activeTool]}
-            </div>
-          )}
           <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} selectedChapterId={selectedChapterId} onSelectChapter={setSelectedChapterId} />
           <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} onClearTool={() => setActiveTool(null)} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} />
           <AnimatePresence mode="wait">

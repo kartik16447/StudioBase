@@ -51,6 +51,162 @@ function BlurMask({ x, y, w, h }: { x: number; y: number; w: number; h: number }
   );
 }
 
+function CalloutCard({
+  ov,
+  brand,
+  onClick,
+}: {
+  ov: any;
+  brand: string;
+  onClick?: () => void;
+}) {
+  const dir = ov.arrowDir ?? 'none';
+  const showArrow = ov.showArrow !== false;
+  const bgColor = ov.bgColor ?? '#18181b';
+  const textColor = ov.textColor ?? '#ffffff';
+
+  // Boundary Clamping (between 5% and 95%)
+  const clampedX = Math.min(95, Math.max(5, ov.pctX));
+  const clampedY = Math.min(95, Math.max(5, ov.pctY));
+
+  // Translation & 12px Offset Math based on arrow direction
+  let transformStr = 'translate(-50%, -50%)';
+  let arrowStyle: React.CSSProperties = {};
+
+  if (dir === 't') {
+    transformStr = 'translate(-50%, 12px)';
+    arrowStyle = {
+      top: -5,
+      left: '50%',
+      transform: 'translateX(-50%) rotate(45deg)',
+    };
+  } else if (dir === 'b') {
+    transformStr = 'translate(-50%, calc(-100% - 12px))';
+    arrowStyle = {
+      bottom: -5,
+      left: '50%',
+      transform: 'translateX(-50%) rotate(45deg)',
+    };
+  } else if (dir === 'l') {
+    transformStr = 'translate(12px, -50%)';
+    arrowStyle = {
+      left: -5,
+      top: '50%',
+      transform: 'translateY(-50%) rotate(45deg)',
+    };
+  } else if (dir === 'r') {
+    transformStr = 'translate(calc(-100% - 12px), -50%)';
+    arrowStyle = {
+      right: -5,
+      top: '50%',
+      transform: 'translateY(-50%) rotate(45deg)',
+    };
+  }
+
+  // Handle empty states & placeholder spacing
+  const hasTitle = !!ov.title;
+  const hasBody = !!ov.body;
+  const hasContent = hasTitle || hasBody;
+
+  // Next / action button visibility
+  const showButton = ov.destination !== 'stay';
+  const buttonLabel = ov.destination === 'specific'
+    ? `Go to step ${ov.destinationStep ?? 1} →`
+    : 'Next →';
+
+  // If no content exists in viewer, do not render at all
+  if (!hasContent) return null;
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        position: 'absolute',
+        left: `${clampedX}%`,
+        top: `${clampedY}%`,
+        transform: transformStr,
+        zIndex: 22,
+        cursor: onClick ? 'pointer' : 'default',
+        pointerEvents: 'auto',
+      }}
+    >
+      <div
+        style={{
+          background: bgColor,
+          color: textColor,
+          padding: '10px 14px',
+          borderRadius: 10,
+          border: '1.5px solid rgba(255,255,255,0.12)',
+          boxShadow: '0 12px 36px rgba(0,0,0,0.5)',
+          minWidth: 160,
+          maxWidth: 240,
+          boxSizing: 'border-box',
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          fontFamily: 'Inter, system-ui, sans-serif',
+        }}
+      >
+        {/* Title */}
+        {hasTitle && (
+          <div style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.25 }}>
+            {ov.title}
+          </div>
+        )}
+
+        {/* Body */}
+        {hasBody && (
+          <div style={{ fontSize: 11.5, lineHeight: 1.45, opacity: 0.9, whiteSpace: 'pre-wrap' }}>
+            {ov.body}
+          </div>
+        )}
+
+        {/* Next / Navigation Button */}
+        {showButton && (
+          <div
+            style={{
+              marginTop: 4,
+              padding: '5px 11px',
+              borderRadius: 6,
+              background: brand,
+              color: '#ffffff',
+              fontSize: 11,
+              fontWeight: 700,
+              textAlign: 'center',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+              display: 'inline-block',
+              alignSelf: 'flex-start',
+              cursor: 'pointer',
+            }}
+          >
+            {buttonLabel}
+          </div>
+        )}
+
+        {/* Rotated arrow element */}
+        {showArrow && dir !== 'none' && (
+          <span
+            style={{
+              position: 'absolute',
+              width: 10,
+              height: 10,
+              background: bgColor,
+              borderLeft: dir === 'r' ? 'none' : '1.5px solid rgba(255,255,255,0.08)',
+              borderTop: dir === 'b' ? 'none' : '1.5px solid rgba(255,255,255,0.08)',
+              borderRight: dir === 'l' ? 'none' : '1.5px solid rgba(255,255,255,0.08)',
+              borderBottom: dir === 't' ? 'none' : '1.5px solid rgba(255,255,255,0.08)',
+              zIndex: -1,
+              boxSizing: 'border-box',
+              ...arrowStyle,
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Nav buttons ─────────────────────────────────────────────────────────────
 
 function NavBtn({ children, onClick, disabled, primary, brand }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean; primary?: boolean; brand?: string }) {
@@ -274,18 +430,28 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
       {/* Overlay layer */}
       {overlays.map((ov) => {
         if (ov.type === 'spotlight' && ov.w && ov.h) {
-          return <SpotlightMask key={ov.id} rect={{ x: ov.pctX, y: ov.pctY, w: ov.w, h: ov.h }} shape={ov.shape ?? 'rounded'} overlayOpacity={ov.overlayOpacity ?? 55} borderColor={ov.borderColor ?? brand} />;
+          return (
+            <SpotlightMask
+              key={ov.id}
+              rect={{ x: ov.pctX, y: ov.pctY, w: ov.w, h: ov.h }}
+              shape={ov.shape ?? 'rounded'}
+              overlayOpacity={ov.overlayOpacity ?? 55}
+              borderColor={ov.borderColor ?? brand}
+              onClick={ov.destination !== 'stay' ? onHotspot : undefined}
+            />
+          );
         }
         if (ov.type === 'hotspot' && !ov.invisible) {
           return <Hotspot key={ov.id} style={hotspotStyle} brand={brand} white x={ov.pctX} y={ov.pctY} size={20} onClick={ov.destination === 'next' ? onHotspot : undefined} title={ov.title} />;
         }
         if (ov.type === 'callout') {
           return (
-            <div key={ov.id} style={{ position: 'absolute', left: `${ov.pctX}%`, top: `${ov.pctY}%`, transform: 'translate(-50%,-50%)', zIndex: 22, pointerEvents: 'none' }}>
-              <div style={{ background: ov.bgColor ?? 'rgba(20,20,23,0.9)', color: ov.textColor ?? '#fff', fontSize: 12.5, fontWeight: 600, padding: '6px 11px', borderRadius: 8, whiteSpace: 'nowrap', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(8px)' }}>
-                {ov.body || ov.title || 'Note'}
-              </div>
-            </div>
+            <CalloutCard
+              key={ov.id}
+              ov={ov}
+              brand={brand}
+              onClick={ov.destination !== 'stay' ? onHotspot : undefined}
+            />
           );
         }
         return null;

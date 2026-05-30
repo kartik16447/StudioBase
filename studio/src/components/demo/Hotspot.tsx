@@ -35,8 +35,9 @@ export const Hotspot: React.FC<HotspotProps> = ({
     position: x != null ? 'absolute' : 'relative',
     left: x != null ? `${x}%` : undefined,
     top: y != null ? `${y}%` : undefined,
-    width: 0,
-    height: 0,
+    width: size,
+    height: size,
+    transform: 'translate(-50%,-50%)',
     zIndex: 20,
     cursor: onClick ? 'pointer' : 'default',
   };
@@ -45,10 +46,9 @@ export const Hotspot: React.FC<HotspotProps> = ({
     position: 'absolute',
     left: 0,
     top: 0,
-    width: size,
-    height: size,
+    width: '100%',
+    height: '100%',
     borderRadius: '50%',
-    transform: 'translate(-50%,-50%)',
     boxShadow: white
       ? '0 2px 10px rgba(0,0,0,0.45)'
       : `0 2px 12px ${withAlpha(brand, 0.6)}`,
@@ -73,14 +73,22 @@ export const Hotspot: React.FC<HotspotProps> = ({
     inner = (
       <>
         <span style={dot({ background: 'transparent', border: `${Math.max(2, size * 0.18)}px solid ${core}` })} />
-        <span style={dot({ width: size * 0.32, height: size * 0.32, background: core })} />
+        <span style={dot({
+          width: '32%',
+          height: '32%',
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%,-50%)',
+          background: core,
+          boxShadow: 'none',
+        })} />
       </>
     );
   } else if (style === 'arrow') {
     inner = (
       <span style={{
         position: 'absolute',
-        left: 0,
+        left: '50%',
         top: -size * 1.6,
         transform: 'translate(-50%, 0)',
         animation: 'dm-arrow-bob 1.2s ease-in-out infinite',
@@ -102,8 +110,8 @@ export const Hotspot: React.FC<HotspotProps> = ({
       {handles && (
         <span style={{
           position: 'absolute',
-          left: 0,
-          top: 0,
+          left: '50%',
+          top: '50%',
           width: size + 22,
           height: size + 22,
           transform: 'translate(-50%,-50%)',

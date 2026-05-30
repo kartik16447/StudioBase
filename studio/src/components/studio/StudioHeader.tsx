@@ -246,7 +246,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
 
   return (
     <header
-      className="h-14 bg-surface border-b border-border flex items-center px-4 gap-3 z-40 relative min-w-0"
+      className="h-14 bg-surface border-b border-border flex items-center px-2 sm:px-4 gap-1.5 sm:gap-3 z-40 relative min-w-0"
       onClick={() => setShowBranding(false)}
     >
       {/* Left zone: Session Breadcrumb */}
@@ -369,7 +369,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
                 className="h-8 px-2.5 rounded-pill border border-border text-text hover:bg-surface-2 inline-flex items-center gap-1.5 text-[13px] font-medium transition-colors"
               >
                 <I.Palette size={15} />
-                <span>Branding</span>
+                <span className="hidden xl:inline">Branding</span>
               </button>
               {showBranding && <BrandingPopover brand={brandColor} />}
             </div>
@@ -387,7 +387,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
                 }}
                 className="flex items-center gap-2 cursor-pointer select-none"
               >
-                <span className="text-[12px] text-text-2 font-semibold">Autoplay</span>
+                <span className="text-[12px] text-text-2 font-semibold hidden xl:inline">Autoplay</span>
                 <span
                   className="w-8 h-5 rounded-full relative transition-colors duration-200 bg-zinc-700 shrink-0"
                   style={{ backgroundColor: savedAutoplay ? brandColor : undefined }}
@@ -426,7 +426,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
               style={{ backgroundColor: brandColor }}
             >
               <I.Eye size={14} />
-              <span>Preview</span>
+              <span className="hidden lg:inline">Preview</span>
             </button>
 
             {/* Share Button */}
@@ -436,7 +436,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
               className="h-8 px-3 rounded-pill border border-border text-text hover:bg-surface-2 inline-flex items-center gap-1.5 text-[12.5px] font-semibold transition-colors shrink-0"
             >
               <I.Share2 size={14} />
-              <span>Share</span>
+              <span className="hidden lg:inline">Share</span>
             </button>
           </>
         ) : (
