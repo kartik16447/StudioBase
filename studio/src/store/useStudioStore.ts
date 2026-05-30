@@ -290,7 +290,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             }
           } catch {}
 
-          sessionData = { ...sessionData, ...jsonContent, sessionId: data.id || data.sessionId, shareToken: data.shareToken ?? sessionData.shareToken };
+          sessionData = { ...sessionData, ...jsonContent, sessionId: data.id || data.sessionId, shareToken: (data as any).shareToken ?? (sessionData as any).shareToken };
 
           // Restore D1 stepOverrides — they are authoritative for user edits
           if (d1StepOverrides) {
