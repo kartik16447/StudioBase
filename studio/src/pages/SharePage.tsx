@@ -165,7 +165,7 @@ export const SharePage: React.FC = () => {
     const token = new URLSearchParams(window.location.search).get('share') || new URLSearchParams(window.location.search).get('session');
     if (token) localStorage.setItem(`sb_share_tab_${token}`, tab);
   };
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [_sessionId, setSessionId] = useState<string | null>(null);
   const [accessRequestSent, setAccessRequestSent] = useState(false);
   const isPreview = new URLSearchParams(window.location.search).get('preview') === '1';
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);

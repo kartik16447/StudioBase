@@ -5,7 +5,7 @@ import { V1_API_URL } from '../../../../shared/constants';
 import { I } from '../icons';
 import {
   cn, Badge, IconButton, Tooltip, ScreenshotPlaceholder,
-  GlassPanel, Avatar, Button
+  GlassPanel, Button
 } from '../ui';
 import { useStudioStore } from '../../store/useStudioStore';
 import { AnimatePresence } from 'framer-motion';
