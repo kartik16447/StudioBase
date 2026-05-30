@@ -13,7 +13,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { useStudioStore } from '../../../store/useStudioStore';
 
 import { I } from '../../../components/icons';
-import { ScreenshotPlaceholder } from '../../../components/ui';
+import { ScreenshotPlaceholder, DotGrid } from '../../../components/ui';
+import { RenderConstants } from '../../../modules/render-engine/RenderConstants';
 import { Hotspot } from '../../../components/demo/Hotspot';
 import type { HotspotStyle } from '../../../components/demo/Hotspot';
 import { HotspotStylePicker } from '../../../components/demo/HotspotStylePicker';
@@ -277,7 +278,8 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: zn.bg, position: 'relative' }}>
-      <div style={{ flex: 1, display: 'grid', placeItems: 'center', padding: '34px 40px', minHeight: 0 }}>
+      <DotGrid className="!fixed" glowRadius={RenderConstants.GLOW_RADIUS} />
+      <div style={{ flex: 1, display: 'grid', placeItems: 'center', padding: '34px 40px', minHeight: 0, position: 'relative', zIndex: 10 }}>
         <div style={{ width: '100%', maxWidth: 760, borderRadius: 12, overflow: 'hidden', boxShadow: '0 30px 70px -24px rgba(0,0,0,0.8)', border: `1px solid ${zn.border2}` }}>
           {/* Browser chrome */}
           <div style={{ height: 34, background: '#1f1f22', display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', borderBottom: `1px solid ${zn.border}` }}>
@@ -775,8 +777,9 @@ export const DemoCanvas: React.FC = () => {
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} selectedChapterId={selectedChapterId} onSelectChapter={setSelectedChapterId} />
-        <div style={{ flex: 1, background: '#111', display: 'grid', placeItems: 'center' }} >
-          <div style={{ textAlign: 'center', color: zn.dim, fontSize: 13 }}>
+        <div style={{ flex: 1, background: 'transparent', display: 'grid', placeItems: 'center', position: 'relative' }} >
+          <DotGrid className="!fixed" glowRadius={RenderConstants.GLOW_RADIUS} />
+          <div style={{ textAlign: 'center', color: zn.dim, fontSize: 13, position: 'relative', zIndex: 10 }}>
             <I.Check size={28} color={brand} style={{ marginBottom: 8 }} />
             <div>End screen preview in the viewer</div>
           </div>
