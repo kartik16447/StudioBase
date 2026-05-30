@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors,
 } from '@dnd-kit/core';
@@ -20,8 +21,8 @@ import { CardTypePicker } from '../../../components/demo/CardTypePicker';
 import { withAlpha } from '../../../components/demo/helpers';
 import { displayText } from '../../../lib/textUtils';
 import type { DemoCard, Overlay } from '../../../../../shared/types/step';
-import { OverlayToolbar } from '../../../components/demo/OverlayToolbar';
 import type { OverlayTool } from '../../../components/demo/OverlayToolbar';
+import { Crosshair, MessageSquare, Scan, ZoomIn as ZoomInIcon } from '../../../components/demo/icons';
 import { EmbedDemoView } from './EmbedDemoView';
 import { OverlaySidebar } from '../../../components/demo/OverlaySidebar';
 import { SpotlightMask } from '../../../components/demo/SpotlightMask';
@@ -180,14 +181,60 @@ function BrandingPopover({ brand, onClose }: { brand: string; onClose: () => voi
   );
 }
 
-function TopBar({ brand, autoplay, setAutoplay, onPreview }: { brand: string; autoplay: boolean; setAutoplay: (v: boolean) => void; onPreview: () => void }) {
+const OVERLAY_TOOLS: { id: OverlayTool; label: string; Icon: React.ComponentType<any> }[] = [
+  { id: 'hotspot',    label: 'Hotspot',   Icon: Crosshair },
+  { id: 'callout',   label: 'Callout',   Icon: MessageSquare },
+  { id: 'spotlight', label: 'Spotlight', Icon: Scan },
+  { id: 'zoomFocus', label: 'Focus',     Icon: ZoomInIcon },
+];
+
+const OVERLAY_HINTS: Record<OverlayTool, string> = {
+  hotspot:   'Click on the screenshot to place a hotspot',
+  callout:   'Click on the screenshot to place a callout',
+  spotlight: 'Click and drag on the screenshot to draw a spotlight',
+  zoomFocus: 'Drag a rectangle on the screenshot to set zoom focus',
+};
+
+function TopBar({ brand, autoplay, setAutoplay, intervalSeconds, setIntervalSeconds, onPreview, activeTool, onSelectTool }: {
+  brand: string; autoplay: boolean; setAutoplay: (v: boolean) => void;
+  intervalSeconds: number; setIntervalSeconds: (s: number) => void;
+  onPreview: () => void;
+  activeTool?: OverlayTool | null;
+  onSelectTool?: (t: OverlayTool) => void;
+}) {
   const session = useStudioStore((s) => s.session);
   const title = session?.aiOutputs?.title || 'Untitled demo';
   const [showBranding, setShowBranding] = useState(false);
+
+  const toolBtn = (id: OverlayTool, Icon: React.ComponentType<any>, label: string) => {
+    const active = activeTool === id;
+    return (
+      <button
+        key={id}
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onSelectTool?.(id); }}
+        style={{
+          height: 28, padding: '0 10px', borderRadius: 7, border: `1px solid ${active ? withAlpha(brand, 0.55) : 'transparent'}`,
+          background: active ? withAlpha(brand, 0.14) : 'transparent',
+          color: active ? brand : zn.mute,
+          font: '500 12px/1 Inter, system-ui, sans-serif',
+          cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+          transition: 'background 120ms, color 120ms',
+        }}
+        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = zn.chip; }}
+        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <Icon size={14} color={active ? brand : zn.mute} />
+        {label}
+      </button>
+    );
+  };
+
   return (
-    <div style={{ height: 52, flex: 'none', borderBottom: `1px solid ${zn.border}`, background: zn.bg, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' }}
+    <div style={{ position: 'relative', height: 52, flex: 'none', borderBottom: `1px solid ${zn.border}`, background: zn.bg, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' }}
       onClick={() => setShowBranding(false)}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+      {/* Left: identity */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
         <span style={{ width: 24, height: 24, borderRadius: 7, background: brand, display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 700, fontSize: 13 }}>S</span>
         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: zn.ink }}>{title}</span>
@@ -195,42 +242,111 @@ function TopBar({ brand, autoplay, setAutoplay, onPreview }: { brand: string; au
         </div>
         <I.ChevronDown size={14} style={{ color: zn.dim, marginLeft: 2 }} />
       </div>
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 9 }}>
+
+      {/* Center: overlay tools (only shown when tools are available) */}
+      {onSelectTool && (
+        <>
+          <span style={{ width: 1, height: 22, background: zn.border, flexShrink: 0 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            {OVERLAY_TOOLS.map(({ id, label, Icon }) => toolBtn(id, Icon, label))}
+          </div>
+        </>
+      )}
+
+      {/* Right: actions */}
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
         <div style={{ position: 'relative' }}>
           <TopBtn icon={<I.Palette size={15} />} ghost onClick={(e) => { e?.stopPropagation(); setShowBranding((v) => !v); }}>Branding</TopBtn>
           {showBranding && <BrandingPopover brand={brand} onClose={() => setShowBranding(false)} />}
         </div>
-        <div onClick={() => setAutoplay(!autoplay)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '0 4px' }}>
-          <span style={{ fontSize: 12.5, color: zn.mute, fontWeight: 500 }}>Autoplay</span>
-          <span style={{ width: 34, height: 19, borderRadius: 99, background: autoplay ? brand : zn.border2, position: 'relative', transition: 'background 0.18s' }}>
-            <span style={{ position: 'absolute', top: 2, left: autoplay ? 17 : 2, width: 15, height: 15, borderRadius: '50%', background: '#fff', transition: 'left 0.18s', boxShadow: '0 1px 2px rgba(0,0,0,0.4)' }} />
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div onClick={() => setAutoplay(!autoplay)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '0 4px' }}>
+            <span style={{ fontSize: 12.5, color: zn.mute, fontWeight: 500 }}>Autoplay</span>
+            <span style={{ width: 34, height: 19, borderRadius: 99, background: autoplay ? brand : zn.border2, position: 'relative', transition: 'background 0.18s' }}>
+              <span style={{ position: 'absolute', top: 2, left: autoplay ? 17 : 2, width: 15, height: 15, borderRadius: '50%', background: '#fff', transition: 'left 0.18s', boxShadow: '0 1px 2px rgba(0,0,0,0.4)' }} />
+            </span>
+          </div>
+          {autoplay && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+              <input
+                type="number"
+                min={2}
+                max={30}
+                value={intervalSeconds}
+                onChange={(e) => {
+                  const v = Math.min(30, Math.max(2, Number(e.target.value)));
+                  setIntervalSeconds(v);
+                }}
+                style={{
+                  width: 42, height: 24, borderRadius: 6, border: `1px solid ${zn.border2}`,
+                  background: zn.panel2, color: zn.ink, fontSize: 12, fontWeight: 600,
+                  textAlign: 'center', outline: 'none', padding: '0 4px',
+                }}
+              />
+              <span style={{ fontSize: 11, color: zn.dim }}>sec / step</span>
+            </div>
+          )}
         </div>
         <span style={{ width: 1, height: 22, background: zn.border }} />
         <TopBtn icon={<I.Share2 size={15} />}>Share</TopBtn>
         <TopBtn icon={<I.Eye size={15} />} primary brand={brand} onClick={onPreview}>Preview</TopBtn>
       </div>
+
+      {/* Floating hint chip when a tool is active */}
+      {activeTool && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 12, marginTop: 8, zIndex: 20,
+          display: 'inline-flex', alignItems: 'center', gap: 7,
+          height: 26, padding: '0 10px', borderRadius: 7,
+          background: withAlpha(brand, 0.14), border: `1px solid ${withAlpha(brand, 0.4)}`,
+          color: brand, fontSize: 12, fontWeight: 500, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+          pointerEvents: 'none',
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: brand, boxShadow: `0 0 0 4px ${withAlpha(brand, 0.25)}` }} />
+          {OVERLAY_HINTS[activeTool]}
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Step rail ────────────────────────────────────────────────────────────────
 
-function StepRail({ current, setCurrent, brand, session }: {
+function StepRail({ current, setCurrent, brand, session, selectedChapterId, onSelectChapter }: {
   current: number; setCurrent: (i: number) => void; brand: string; session: any;
+  selectedChapterId: string | null; onSelectChapter: (afterStepId: string | null) => void;
 }) {
   const steps = session?.steps ?? [];
-  const chapterBreaks = new Set((session?.metadata?.chapterBreaks ?? []).map((b: any) => b.afterStepId));
+  const chapterBreaks: { afterStepId: string; chapterTitle: string }[] = session?.metadata?.chapterBreaks ?? [];
+  const chapterBreakIds = new Set(chapterBreaks.map((b: any) => b.afterStepId));
   return (
     <div className="dm-scroll" style={{ width: 136, flex: 'none', borderRight: `1px solid ${zn.border}`, background: zn.bg, padding: '10px 9px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 7 }}>
       <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: zn.dim, padding: '2px 4px 4px' }}>Steps</div>
       {steps.map((step: any, i: number) => {
-        const active = i === current;
-        const isChapterStart = i > 0 && chapterBreaks.has(steps[i - 1]?.id);
+        const active = i === current && !selectedChapterId;
+        const isChapterStart = i > 0 && chapterBreakIds.has(steps[i - 1]?.id);
+        const chapterAfterPrev = isChapterStart ? chapterBreaks.find((b: any) => b.afterStepId === steps[i - 1]?.id) : null;
+        const chapterActive = chapterAfterPrev && selectedChapterId === chapterAfterPrev.afterStepId;
         return (
           <div key={step.id}>
-            {isChapterStart && <div style={{ height: 1, background: zn.border, margin: '2px 0 6px' }} />}
-            <div onClick={() => setCurrent(i)} style={{ borderRadius: 8, padding: 5, cursor: 'pointer', background: active ? withAlpha(brand, 0.12) : 'transparent', border: `1px solid ${active ? withAlpha(brand, 0.4) : 'transparent'}` }}>
+            {isChapterStart && chapterAfterPrev && (
+              <button
+                onClick={() => { onSelectChapter(chapterAfterPrev.afterStepId); }}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 5,
+                  margin: '2px 0 4px', padding: '3px 6px', borderRadius: 6, cursor: 'pointer',
+                  background: chapterActive ? withAlpha(brand, 0.15) : 'transparent',
+                  border: `1px solid ${chapterActive ? withAlpha(brand, 0.4) : 'transparent'}`,
+                  textAlign: 'left',
+                }}
+              >
+                <I.BookOpen size={10} color={chapterActive ? brand : zn.dim} />
+                <span style={{ fontSize: 10, color: chapterActive ? brand : zn.dim, fontWeight: 600, letterSpacing: '0.04em', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {chapterAfterPrev.chapterTitle || 'Chapter'}
+                </span>
+              </button>
+            )}
+            <div onClick={() => { setCurrent(i); onSelectChapter(null); }} style={{ borderRadius: 8, padding: 5, cursor: 'pointer', background: active ? withAlpha(brand, 0.12) : 'transparent', border: `1px solid ${active ? withAlpha(brand, 0.4) : 'transparent'}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
                 <span style={{ fontSize: 10.5, fontWeight: 700, color: active ? brand : zn.dim, width: 14 }}>{String(i + 1).padStart(2, '0')}</span>
               </div>
@@ -247,12 +363,70 @@ function StepRail({ current, setCurrent, brand, session }: {
       })}
       {/* End screen entry */}
       <div style={{ height: 1, background: zn.border, margin: '4px 0' }} />
-      <div onClick={() => setCurrent(steps.length)} style={{ borderRadius: 8, padding: 5, cursor: 'pointer', background: current === steps.length ? withAlpha(brand, 0.12) : 'transparent', border: `1px solid ${current === steps.length ? withAlpha(brand, 0.4) : 'transparent'}` }}>
+      <div onClick={() => { setCurrent(steps.length); onSelectChapter(null); }} style={{ borderRadius: 8, padding: 5, cursor: 'pointer', background: current === steps.length && !selectedChapterId ? withAlpha(brand, 0.12) : 'transparent', border: `1px solid ${current === steps.length && !selectedChapterId ? withAlpha(brand, 0.4) : 'transparent'}` }}>
         <div style={{ aspectRatio: '16/10', borderRadius: 5, border: `1px solid ${zn.border}`, background: '#111', display: 'grid', placeItems: 'center' }}>
           <I.Check size={14} color={brand} />
         </div>
-        <div style={{ fontSize: 10.5, color: current === steps.length ? zn.ink : zn.mute, fontWeight: current === steps.length ? 600 : 450, marginTop: 4 }}>End screen</div>
+        <div style={{ fontSize: 10.5, color: current === steps.length && !selectedChapterId ? zn.ink : zn.mute, fontWeight: current === steps.length && !selectedChapterId ? 600 : 450, marginTop: 4 }}>End screen</div>
       </div>
+    </div>
+  );
+}
+
+// ─── Chapter editor panel ─────────────────────────────────────────────────────
+
+function ChapterEditor({ afterStepId, session, brand, onClose }: {
+  afterStepId: string; session: any; brand: string; onClose: () => void;
+}) {
+  const saveChapterBreaks = useStudioStore((s) => s.saveChapterBreaks);
+  const chapterBreaks: { afterStepId: string; chapterTitle: string }[] = session?.metadata?.chapterBreaks ?? [];
+  const chapter = chapterBreaks.find((b: any) => b.afterStepId === afterStepId);
+  const [title, setTitle] = useState(chapter?.chapterTitle ?? '');
+
+  const handleSave = async () => {
+    const updated = chapterBreaks.map((b: any) =>
+      b.afterStepId === afterStepId ? { ...b, chapterTitle: title } : b
+    );
+    await saveChapterBreaks(updated);
+  };
+
+  return (
+    <div className="dm-scroll" style={{ width: 340, flex: 'none', borderLeft: `1px solid ${zn.border}`, background: zn.bg, padding: 14, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 11 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <I.BookOpen size={14} color={brand} />
+          <span style={{ fontSize: 13.5, fontWeight: 700, color: zn.ink }}>Chapter screen</span>
+        </div>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: zn.dim, display: 'grid', placeItems: 'center' }}>
+          <I.X size={15} />
+        </button>
+      </div>
+      <p style={{ fontSize: 11.5, color: zn.dim, lineHeight: 1.5 }}>
+        This interstitial screen appears between steps in the viewer.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: zn.mute, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Chapter title</label>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={handleSave}
+          placeholder="e.g. Getting started"
+          style={{
+            background: zn.panel2, border: `1px solid ${zn.border2}`, borderRadius: 8,
+            padding: '8px 10px', fontSize: 13, color: zn.ink, outline: 'none', width: '100%',
+          }}
+          onFocus={(e) => (e.currentTarget.style.borderColor = brand)}
+        />
+      </div>
+      <button
+        onClick={handleSave}
+        style={{
+          padding: '8px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
+          background: brand, color: '#fff', fontSize: 12.5, fontWeight: 600,
+        }}
+      >
+        Save chapter title
+      </button>
     </div>
   );
 }
@@ -752,16 +926,37 @@ function EndScreenEditor({ brand }: { brand: string }) {
   );
 }
 
-function BottomBar({ current, total, brand, onPrev, onNext, onStylePicker }: {
+function BottomBar({ current, total, brand, onPrev, onNext, onStylePicker, transitionStyle, onTransitionChange }: {
   current: number; total: number; brand: string;
   onPrev: () => void; onNext: () => void; onStylePicker: () => void;
+  transitionStyle: 'cut' | 'crossfade'; onTransitionChange: (s: 'cut' | 'crossfade') => void;
 }) {
   return (
     <div style={{ height: 46, flex: 'none', borderTop: `1px solid ${zn.border}`, background: zn.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '0 16px', position: 'relative' }}>
-      <button onClick={onStylePicker} title="Hotspot style"
-        style={{ position: 'absolute', left: 14, height: 28, padding: '0 10px', borderRadius: 7, border: `1px solid ${zn.border}`, background: 'transparent', color: zn.mute, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
-        <I.Cursor size={13} /> Hotspot style
-      </button>
+      <div style={{ position: 'absolute', left: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button onClick={onStylePicker} title="Hotspot style"
+          style={{ height: 28, padding: '0 10px', borderRadius: 7, border: `1px solid ${zn.border}`, background: 'transparent', color: zn.mute, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <I.Cursor size={13} /> Hotspot style
+        </button>
+        {/* Transition style picker */}
+        <div style={{ display: 'flex', alignItems: 'center', background: zn.panel2, borderRadius: 7, border: `1px solid ${zn.border}`, padding: 2, gap: 2 }}>
+          {(['cut', 'crossfade'] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => onTransitionChange(s)}
+              title={s === 'cut' ? 'Instant cut between steps' : 'Crossfade between steps'}
+              style={{
+                height: 22, padding: '0 9px', borderRadius: 5, border: 'none', cursor: 'pointer',
+                background: transitionStyle === s ? brand : 'transparent',
+                color: transitionStyle === s ? '#fff' : zn.mute,
+                fontSize: 11, fontWeight: 600, transition: 'all 0.12s',
+              }}
+            >
+              {s === 'cut' ? 'Cut' : 'Fade'}
+            </button>
+          ))}
+        </div>
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <button onClick={onPrev} style={{ width: 30, height: 28, borderRadius: 7, border: `1px solid ${zn.border}`, background: 'transparent', display: 'grid', placeItems: 'center', color: zn.mute, cursor: 'pointer' }}>
           <I.ChevronLeft size={16} />
@@ -782,24 +977,27 @@ export const DemoCanvas: React.FC = () => {
   const brandState          = useStudioStore((s) => s.brand);
   const saveStep            = useStudioStore((s) => s.saveStep);
   const updateStep          = useStudioStore((s) => s.updateStep);
-  const saveAnimationTarget = useStudioStore((s) => s.saveAnimationTarget);
-  const saveAutoplay        = useStudioStore((s) => s.saveAutoplay);
+  const saveAnimationTarget  = useStudioStore((s) => s.saveAnimationTarget);
+  const saveAutoplay         = useStudioStore((s) => s.saveAutoplay);
+  const saveTransitionStyle  = useStudioStore((s) => s.saveTransitionStyle);
   const brand               = brandState.primaryColor || '#6366f1';
 
   const savedAutoplay = (session?.metadata as any)?.autoplay?.enabled ?? false;
 
-  const [current,           setCurrent]          = useState(0);
-  const [hotspotStyle,      setHotspotStyle]     = useState<HotspotStyle>('pulse');
-  const [showHsPicker,      setShowHsPicker]     = useState(false);
-  const [activeTool,        setActiveTool]       = useState<OverlayTool | null>(null);
-  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
-  const [showPreview,       setShowPreview]      = useState(false);
+  const [current,            setCurrent]           = useState(0);
+  const [hotspotStyle,       setHotspotStyle]      = useState<HotspotStyle>('pulse');
+  const [showHsPicker,       setShowHsPicker]      = useState(false);
+  const [activeTool,         setActiveTool]        = useState<OverlayTool | null>(null);
+  const [selectedOverlayId,  setSelectedOverlayId] = useState<string | null>(null);
+  const [showPreview,        setShowPreview]       = useState(false);
+  const [selectedChapterId,  setSelectedChapterId] = useState<string | null>(null);
 
   const steps = session?.steps ?? [];
   const step  = steps[current];
   const total = steps.length;
 
-  const autoplayInterval = (session?.metadata as any)?.autoplay?.intervalSeconds ?? 5;
+  const autoplayInterval  = (session?.metadata as any)?.autoplay?.intervalSeconds ?? 5;
+  const transitionStyle   = ((session?.metadata as any)?.transitionStyle ?? 'crossfade') as 'cut' | 'crossfade';
   useEffect(() => {
     if (!savedAutoplay || total === 0) return;
     const t = setInterval(() => setCurrent((c) => (c + 1) % total), autoplayInterval * 1000);
@@ -815,10 +1013,10 @@ export const DemoCanvas: React.FC = () => {
   // End screen editor view
   if (current === steps.length) return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v)} onPreview={() => setShowPreview(true)} />
+      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v, autoplayInterval)} intervalSeconds={autoplayInterval} setIntervalSeconds={(s) => saveAutoplay(savedAutoplay, s)} onPreview={() => setShowPreview(true)} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} />
-        <div style={{ flex: 1, background: '#111', display: 'grid', placeItems: 'center' }}>
+        <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} selectedChapterId={selectedChapterId} onSelectChapter={setSelectedChapterId} />
+        <div style={{ flex: 1, background: '#111', display: 'grid', placeItems: 'center' }} >
           <div style={{ textAlign: 'center', color: zn.dim, fontSize: 13 }}>
             <I.Check size={28} color={brand} style={{ marginBottom: 8 }} />
             <div>End screen preview in the viewer</div>
@@ -826,7 +1024,7 @@ export const DemoCanvas: React.FC = () => {
         </div>
         <EndScreenEditor brand={brand} />
       </div>
-      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(steps.length, c + 1))} onStylePicker={() => setShowHsPicker(true)} />
+      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(steps.length, c + 1))} onStylePicker={() => setShowHsPicker(true)} transitionStyle={transitionStyle} onTransitionChange={saveTransitionStyle} />
     </div>
   );
 
@@ -885,17 +1083,26 @@ export const DemoCanvas: React.FC = () => {
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v)} onPreview={() => setShowPreview(true)} />
+      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v, autoplayInterval)} intervalSeconds={autoplayInterval} setIntervalSeconds={(s) => saveAutoplay(savedAutoplay, s)} onPreview={() => setShowPreview(true)} activeTool={activeTool} onSelectTool={(t) => setActiveTool((prev) => prev === t ? null : t)} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <OverlayToolbar activeTool={activeTool} onSelectTool={(t) => setActiveTool((prev) => prev === t ? null : t)} onPreview={() => setShowPreview(true)} brand={brand} />
         <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }} onClick={() => setSelectedOverlayId(null)}>
-          <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} />
+          <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} selectedChapterId={selectedChapterId} onSelectChapter={setSelectedChapterId} />
           <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} onClearTool={() => setActiveTool(null)} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} />
-          {selectedOverlay ? (
-            <OverlaySidebar overlay={selectedOverlay as any} onUpdate={handleOverlayUpdate as any} onDelete={handleOverlayDelete} onTypeChange={(t) => handleOverlayUpdate({ type: t })} brand={brand} />
-          ) : (
-            <ContentPanel step={step} stepIndex={current} brand={brand} onSave={handleSave} />
-          )}
+          <AnimatePresence mode="wait">
+            {selectedChapterId ? (
+              <motion.div key={`chapter-${selectedChapterId}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <ChapterEditor afterStepId={selectedChapterId} session={session} brand={brand} onClose={() => setSelectedChapterId(null)} />
+              </motion.div>
+            ) : selectedOverlay ? (
+              <motion.div key="overlay-sidebar" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <OverlaySidebar overlay={selectedOverlay as any} onUpdate={handleOverlayUpdate as any} onDelete={handleOverlayDelete} onTypeChange={(t) => handleOverlayUpdate({ type: t })} brand={brand} />
+              </motion.div>
+            ) : (
+              <motion.div key="content-panel" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <ContentPanel step={step} stepIndex={current} brand={brand} onSave={handleSave} />
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {showHsPicker && (
             <div style={{ position: 'absolute', bottom: 60, right: 360, zIndex: 60 }}>
