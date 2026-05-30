@@ -1,4 +1,3 @@
-import React from 'react';
 import { brand as defaultBrand } from './tokens';
 
 export type SpotlightShape = 'square' | 'rounded' | 'circle';

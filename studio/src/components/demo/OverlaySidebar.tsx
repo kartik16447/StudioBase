@@ -129,7 +129,7 @@ export function OverlaySidebar({
           />
 
           <div style={{ marginTop: 8 }}>
-            <FormatBar brand={brand} textColor={overlay.textColor} onTextColor={(c) => onUpdate({ textColor: c })} />
+            <FormatBar textColor={overlay.textColor} onTextColor={(c) => onUpdate({ textColor: c })} />
             <textarea
               value={overlay.body ?? ''}
               placeholder="Body text…"
@@ -381,11 +381,9 @@ function LinkBtn({ children, style }: { children: React.ReactNode; style?: React
 }
 
 function FormatBar({
-  brand,
   textColor,
   onTextColor,
 }: {
-  brand: string;
   textColor?: string;
   onTextColor: (c: string) => void;
 }) {

@@ -238,7 +238,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
     setPos({ x, y });
   };
 
-  const onScreenshotMouseUp = (e: React.MouseEvent) => {
+  const onScreenshotMouseUp = (_e: React.MouseEvent) => {
     if (focusDragging.current && focusRect) {
       focusDragging.current = false;
       const x1 = Math.min(focusRect.x1, focusRect.x2);
@@ -705,7 +705,7 @@ export const DemoCanvas: React.FC = () => {
   };
 
   const handlePlaceOverlay = (pctX: number, pctY: number) => {
-    if (!activeTool) return;
+    if (!activeTool || activeTool === 'zoomFocus') return;
     const id = crypto.randomUUID();
     const base: Overlay = { id, type: activeTool, pctX, pctY };
     if (activeTool === 'spotlight') { base.w = 25; base.h = 20; base.shape = 'rounded'; base.overlayOpacity = 55; }
