@@ -300,7 +300,13 @@ export class PipelineProcessor {
 
       // ── SOP generation ──────────────────────────────────────────────────────
       if (job.requestedOutputs?.sop !== false && envelope.steps?.length > 0) {
-        const { payload, budgetMap } = buildStepPayload(envelope.steps);
+        const unlockedSteps = envelope.steps.filter(s => !s.locked);
+        if (unlockedSteps.length === 0) {
+          console.log('[PIPELINE] All steps are locked — skipping AI narration generation');
+        }
+        const { payload, budgetMap } = unlockedSteps.length > 0 ? buildStepPayload(unlockedSteps) : { payload: [], budgetMap: new Map() };
+
+        if (unlockedSteps.length > 0) {
         const userMessage = JSON.stringify(payload);
         console.log(`[PIPELINE] calling Workers AI -- model:@cf/meta/llama-4-scout-17b-16e-instruct steps:${payload.length} inputChars:${userMessage.length}`);
 
@@ -367,6 +373,7 @@ export class PipelineProcessor {
         };
 
         console.log(`[PIPELINE] AI generated title: "${generated.title}" for ${sessionId}`);
+        } // end if (unlockedSteps.length > 0)
       }
 
       envelope.metadata = envelope.metadata ?? {};

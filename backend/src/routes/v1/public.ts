@@ -9,7 +9,7 @@ export const publicRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 async function resolveSession(db: Env['DB'], token: string) {
   // Try shareToken first (production share links — must be public)
   let row = await db.prepare(
-    `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, r2VideoKey, status, ownerId, shareToken,
+    `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, r2VideoKey, status, ownerId, workspaceId, shareToken,
             cinematicEnabled, sopEnabled, rawEnabled
      FROM sessions WHERE shareToken = ? AND isPublic = 1`
   ).bind(token).first<any>();
@@ -17,7 +17,7 @@ async function resolveSession(db: Env['DB'], token: string) {
   // Fallback: treat token as session id — allows direct links without Publish step
   if (!row) {
     row = await db.prepare(
-      `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, r2VideoKey, status, ownerId, shareToken,
+      `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, r2VideoKey, status, ownerId, workspaceId, shareToken,
               cinematicEnabled, sopEnabled, rawEnabled
        FROM sessions WHERE id = ? AND deletedAt IS NULL`
     ).bind(token).first<any>();
@@ -375,5 +375,35 @@ publicRoutes.get('/docs/:shareToken', async (c) => {
     emoji: doc.emoji,
     blocks: JSON.parse(doc.blocks),
   });
+});
+
+// POST /v1/public/:shareToken/request-access — no auth required
+publicRoutes.post('/:shareToken/request-access', async (c) => {
+  const { shareToken } = c.req.param();
+  const body = await c.req.json().catch(() => ({})) as any;
+  const requestedFormat: string = body.requestedFormat || 'cinematic';
+  const requesterEmail: string | null = body.requesterEmail || null;
+
+  const session = await resolveSession(c.env.DB, shareToken);
+  if (!session) return c.json({ error: 'Not found' }, 404);
+
+  const owner = await c.env.DB.prepare('SELECT id FROM users WHERE id = ?').bind(session.ownerId).first<any>();
+  if (!owner) return c.json({ ok: true }); // silently succeed
+
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  await c.env.DB.prepare(
+    `INSERT INTO notifications (id, userId, workspaceId, type, metadata, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(
+    id,
+    session.ownerId,
+    session.workspaceId || '',
+    'format.access_requested',
+    JSON.stringify({ sessionId: session.id, requestedFormat, requesterEmail }),
+    now,
+  ).run().catch(() => {});
+
+  return c.json({ ok: true });
 });
 

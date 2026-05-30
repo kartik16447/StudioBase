@@ -63,28 +63,47 @@ export const SOPCanvas: React.FC = () => {
     el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [scrollTrigger]);
 
-  // ArrowUp / ArrowDown keyboard navigation
+  // ArrowUp / ArrowDown / Enter / Escape keyboard navigation
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!session || !focusedStepId) return;
-      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-      // Don't steal arrow keys from text inputs / textareas
-      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
-      e.preventDefault();
-      const currentIndex = session.steps.findIndex(s => s.id === focusedStepId);
-      if (currentIndex === -1) return;
-      const nextIndex = e.key === 'ArrowDown'
-        ? Math.min(session.steps.length - 1, currentIndex + 1)
-        : Math.max(0, currentIndex - 1);
-      if (nextIndex !== currentIndex) {
-        setFocusStep(session.steps[nextIndex].id);
-        setStepIndex(nextIndex);
-        triggerScroll();
+      const tag = (e.target as HTMLElement).tagName;
+      const inInput = tag === 'INPUT' || tag === 'TEXTAREA';
+
+      if (e.key === 'Escape') {
+        // Close any open annotation; blur any focused input
+        if (annotatingStepId) { exitAnnotation(); return; }
+        (document.activeElement as HTMLElement)?.blur();
+        return;
+      }
+
+      if (inInput) return; // don't steal arrow/enter from text inputs
+
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        const currentIndex = session.steps.findIndex(s => s.id === focusedStepId);
+        if (currentIndex === -1) return;
+        const nextIndex = e.key === 'ArrowDown'
+          ? Math.min(session.steps.length - 1, currentIndex + 1)
+          : Math.max(0, currentIndex - 1);
+        if (nextIndex !== currentIndex) {
+          setFocusStep(session.steps[nextIndex].id);
+          setStepIndex(nextIndex);
+          triggerScroll();
+        }
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        // Focus the narration textarea inside the focused StepCard
+        const el = stepRefs.current.get(focusedStepId);
+        el?.querySelector('textarea')?.focus();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [session, focusedStepId, setFocusStep, setStepIndex, triggerScroll]);
+  }, [session, focusedStepId, annotatingStepId, setFocusStep, setStepIndex, triggerScroll, exitAnnotation]);
 
   const sopVideoRef = React.useRef<HTMLDivElement>(null);
   const [embedOpen, setEmbedOpen] = React.useState(false);

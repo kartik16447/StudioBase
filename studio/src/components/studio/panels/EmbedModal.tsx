@@ -32,6 +32,13 @@ export const EmbedModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   const [activeTab, setActiveTab] = useState<EmbedTab>('sop');
   const [copied, setCopied] = useState(false);
 
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
   const title = session?.aiOutputs?.title ?? 'StudioBase Walkthrough';
   const embedUrl = buildEmbedUrl(activeTab);
   const snippet = iframeSnippet(embedUrl, title);
@@ -140,6 +147,9 @@ export const EmbedModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
 
                 <p className="text-[11px] text-white/25">
                   Paste into Notion (as /embed), Confluence, or any HTML page. Viewers don't need to be signed in.
+                </p>
+                <p className="text-[11px] text-white/25 mt-2">
+                  Note: iframes do not render in Gmail or most email clients. For email, use a linked image or thumbnail that links to the share URL instead.
                 </p>
               </div>
             </div>

@@ -265,4 +265,6 @@ export interface SessionEnvelope {
   workspaceId?: string;
   sopId?: string | null;
   sopStatus?: 'draft' | 'review' | 'published' | null;
+  lastEditedBy?: string | null;
+  lastEditedAt?: string | null;
 }

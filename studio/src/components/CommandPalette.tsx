@@ -10,6 +10,9 @@ export const CommandPalette: React.FC = () => {
   const setCommandOpen = useStudioStore(state => state.setCommandOpen);
   const navigate = useStudioStore(state => state.navigate);
   const setActiveTab = useStudioStore(state => state.setActiveTab);
+  const triggerPipeline = useStudioStore(state => state.triggerPipeline);
+  const publishSOP = useStudioStore(state => state.publishSOP);
+  const session = useStudioStore(state => state.session);
   const [q, setQ] = useState('');
 
   const items = [
@@ -21,6 +24,8 @@ export const CommandPalette: React.FC = () => {
     { id: 'tab-script',   label: 'Studio: Script tab',   icon: I.FileText, run: () => { navigate('studio'); setActiveTab('script'); } },
     { id: 'tab-brand',    label: 'Studio: Brand tab',    icon: I.Palette,  run: () => { navigate('studio'); setActiveTab('brand'); } },
     { id: 'tab-chapters', label: 'Studio: Chapters tab', icon: I.Bookmark, run: () => { navigate('studio'); setActiveTab('chapters'); } },
+    { id: 'regenerate', label: 'Regenerate narration', icon: I.Sparkles, run: () => triggerPipeline() },
+    ...(session?.sopId ? [{ id: 'publish', label: 'Publish SOP', icon: I.Send, run: () => publishSOP(session.sopId!, 'published') }] : []),
   ].filter(it => !q || it.label.toLowerCase().includes(q.toLowerCase()));
 
   return (

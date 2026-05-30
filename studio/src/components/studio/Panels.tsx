@@ -33,6 +33,13 @@ export const ScriptPanel: React.FC = () => {
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
+    if (!regenModalOpen) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setRegenModalOpen(false); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [regenModalOpen]);
+
+  useEffect(() => {
     if (!focusedStepId) return;
     const el = stepRefs.current.get(focusedStepId);
     el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

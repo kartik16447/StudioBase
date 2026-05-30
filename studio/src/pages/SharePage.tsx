@@ -158,13 +158,27 @@ export const SharePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab | null>(null);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab);
+    const token = new URLSearchParams(window.location.search).get('share') || new URLSearchParams(window.location.search).get('session');
+    if (token) localStorage.setItem(`sb_share_tab_${token}`, tab);
+  };
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [accessRequestSent, setAccessRequestSent] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const shareToken = params.get('share') || params.get('session');
+    const token = params.get('share') || params.get('session');
+    if (token) {
+      setShareToken(token);
+      const savedTab = localStorage.getItem(`sb_share_tab_${token}`) as Tab | null;
+      if (savedTab) setActiveTab(savedTab);
+    }
 
-    if (!shareToken) {
+    if (!token) {
       setError('Invalid share link.');
       setLoading(false);
       return;
@@ -178,9 +192,10 @@ export const SharePage: React.FC = () => {
     };
 
     const fetchMeta = async (): Promise<boolean> => {
-      const meta = await fetch(`${BACKEND_URL}/v1/public/${shareToken}`).then(r => r.json()) as any;
+      const meta = await fetch(`${BACKEND_URL}/v1/public/${token}`).then(r => r.json()) as any;
       if (meta.error) throw new Error(meta.error);
 
+      if (meta.id) setSessionId(meta.id);
       setOwnerName(meta.owner?.name || 'Anonymous');
       setCapturedAt(meta.capturedAt);
       setCinematicEnabled(!!meta.cinematicEnabled);
@@ -236,6 +251,20 @@ export const SharePage: React.FC = () => {
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const requestAccess = async (requestedFormat: string) => {
+    if (!shareToken || accessRequestSent) return;
+    try {
+      await fetch(`${BACKEND_URL}/v1/public/${shareToken}/request-access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestedFormat }),
+      });
+    } catch {
+      // silent — best-effort
+    }
+    setAccessRequestSent(true);
   };
 
   // ── Loading ──
@@ -433,7 +462,7 @@ export const SharePage: React.FC = () => {
             {tabs.map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
                 className={cn(
                   'flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 rounded-lg text-[12px] sm:text-[13px] font-semibold transition-all',
                   resolvedTab === tab.id
@@ -448,6 +477,28 @@ export const SharePage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* ── Locked cinematic notice ── */}
+      {!cinematicEnabled && session && (
+        <div className="max-w-[760px] mx-auto px-4 sm:px-6 mb-4">
+          <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-indigo-50 border border-indigo-100">
+            <div className="flex items-center gap-2 text-[13px] text-indigo-700">
+              <I.Lock size={14} />
+              <span>Cinematic AI view is not enabled for this session.</span>
+            </div>
+            {accessRequestSent ? (
+              <span className="text-[12px] text-green-600 font-medium whitespace-nowrap">Request sent ✓</span>
+            ) : (
+              <button
+                onClick={() => requestAccess('cinematic')}
+                className="flex-shrink-0 text-[12px] font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors whitespace-nowrap"
+              >
+                Request access
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Nothing shared ── */}
       {tabs.length === 0 && (
@@ -464,8 +515,27 @@ export const SharePage: React.FC = () => {
 
       {/* ── Guide Tab ── (narrow column) */}
       {resolvedTab === 'guide' && (
-        <div className="max-w-[760px] mx-auto px-4 sm:px-6 pb-20 sm:pb-24">
-          <div className="space-y-3 sm:space-y-4">
+        <div className={cn('mx-auto px-4 sm:px-6 pb-20 sm:pb-24', steps.length > 10 ? 'max-w-[1100px] flex gap-8' : 'max-w-[760px]')}>
+          {/* Jump sidebar — only when >10 steps */}
+          {steps.length > 10 && (
+            <aside className="hidden lg:block w-52 flex-shrink-0">
+              <div className="sticky top-20">
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Steps</p>
+                <nav className="space-y-0.5 max-h-[70vh] overflow-y-auto pr-2">
+                  {steps.map((step, i) => (
+                    <button
+                      key={step.id || i}
+                      onClick={() => document.getElementById(`step-${step.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                      className="w-full text-left px-2 py-1.5 rounded text-[12px] text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors truncate"
+                    >
+                      {i + 1}. {(step as any).stepTitle || (step as any).elementText || `Step ${i + 1}`}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+            </aside>
+          )}
+          <div className={cn('space-y-3 sm:space-y-4', steps.length > 10 ? 'flex-1 min-w-0' : '')}>
             {steps.map((step, i) => (
               <React.Fragment key={step.id || i}>
                 {chapterMap.has(step.id) && (
@@ -474,7 +544,9 @@ export const SharePage: React.FC = () => {
                     index={chapterIndex++}
                   />
                 )}
-                <PublicStepCard step={step} index={i} assets={session.assets} />
+                <div id={`step-${step.id}`}>
+                  <PublicStepCard step={step} index={i} assets={session.assets} />
+                </div>
               </React.Fragment>
             ))}
           </div>

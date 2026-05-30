@@ -23,6 +23,8 @@ export const UpdateSessionSchema = z.object({
   isPublic: z.boolean().optional(),
   metadata: z.record(z.string(), z.any()).optional(),
   generatedOutputs: z.record(z.string(), z.any()).optional(),
+  lastEditedBy: z.string().optional(),
+  lastEditedAt: z.string().optional(),
 });
 
 export const GetSessionsQuerySchema = z.object({

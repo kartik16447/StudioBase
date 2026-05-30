@@ -107,8 +107,8 @@ sessions.patch('/:id', requirePermission('sop:edit'), zValidator('json', UpdateS
   const body = c.req.valid('json');
   
   const service = new SessionService(c.env, c.executionCtx);
-  const success = await service.update(id, ws.id, user.id, body);
-  
+  const success = await service.update(id, ws.id, user.id, { ...body, _editorName: (user as any).name ?? user.id });
+
   if (!success) throw new HTTPException(404, { message: 'Not found' });
 
   return c.json({ success: true });

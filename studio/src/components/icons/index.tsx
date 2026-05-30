@@ -13,6 +13,7 @@ import {
   Bold, Italic, Underline, Strikethrough, Link2, Baseline,
   ListOrdered, CheckSquare, Quote, Minus, Unlink, ExternalLink,
   Pencil, CornerUpRight, FileDown, Heading1, Heading2, Heading3, LayoutTemplate,
+  Unlock, Send,
 } from 'lucide-react';
 
 export const I = {
@@ -30,4 +31,5 @@ export const I = {
   Bold, Italic, Underline, Strikethrough, Link2, Baseline,
   ListOrdered, CheckSquare, Quote, Minus, Unlink, ExternalLink,
   Pencil, CornerUpRight, FileDown, Heading1, Heading2, Heading3, LayoutTemplate,
+  Unlock, Send,
 };

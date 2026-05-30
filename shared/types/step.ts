@@ -109,6 +109,7 @@ export const StepSchema = z.object({
   cards: z.array(DemoCardSchema).optional(),
   overlays: z.array(OverlaySchema).optional(),
   data: z.record(z.string(), z.unknown()).optional(),
+  locked: z.boolean().optional(),
 });
 
 export type Step = z.infer<typeof StepSchema>;

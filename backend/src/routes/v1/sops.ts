@@ -58,9 +58,18 @@ sops.patch('/:sopId/steps/:stepId', requireWorkspaceMembership('editor'), async 
   AuditService.record(c.env, {
     actorId,
     workspaceId,
-    event: 'sop.step.edited',
+    event: 'step_updated',
     metadata: { sopId, stepId },
   }).catch(() => {});
+
+  if ('textOverride' in parsed.data || 'generatedText' in parsed.data) {
+    AuditService.record(c.env, {
+      actorId,
+      workspaceId,
+      event: 'step_narration_edited',
+      metadata: { sopId, stepId },
+    }).catch(() => {});
+  }
 
   return c.json({ ok: true });
 });

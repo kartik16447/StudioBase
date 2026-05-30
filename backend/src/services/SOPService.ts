@@ -132,9 +132,9 @@ export class SOPService {
 
     const now = Date.now();
     await this.db
-      .prepare(`UPDATE steps SET content = ?, version = version + 1, updatedAt = ?
+      .prepare(`UPDATE steps SET content = ?, locked = ?, version = version + 1, updatedAt = ?
                 WHERE id = ? AND sopId = ? AND workspaceId = ?`)
-      .bind(JSON.stringify(validated.data), now, stepId, sopId, workspaceId)
+      .bind(JSON.stringify(validated.data), validated.data.locked ? 1 : 0, now, stepId, sopId, workspaceId)
       .run();
   }
 

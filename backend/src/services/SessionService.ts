@@ -165,8 +165,8 @@ export class SessionService {
 
   async update(id: string, workspaceId: string, userId: string, data: any) {
     const now = Date.now();
-    const sets = ['updatedAt = ?'];
-    const params: any[] = [now];
+    const sets = ['updatedAt = ?', 'lastEditedAt = ?', 'lastEditedBy = ?'];
+    const params: any[] = [now, new Date(now).toISOString(), data._editorName ?? userId];
 
     const fieldMap: Record<string, any> = {
       status: data.status,

@@ -23,6 +23,8 @@ interface BackendSession {
   capturedUrl: string | null;
   stepCount: number;
   durationMs: number;
+  lastEditedBy?: string | null;
+  lastEditedAt?: string | null;
 }
 
 export const HomePage: React.FC = () => {
@@ -101,7 +103,9 @@ export const HomePage: React.FC = () => {
             pipelineStatus: s.status,
             errorReason: s.errorReason,
             r2ExportKey: s.r2ExportKey,
-          }
+          },
+          lastEditedBy: s.lastEditedBy,
+          lastEditedAt: s.lastEditedAt,
         }));
         
         setSessions(mapped);

@@ -148,6 +148,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   // Cinematic unlock
   const [cinematicLoading, setCinematicLoading] = useState(false);
   const [cinematicError,   setCinematicError]   = useState<string | null>(null);
+  const [cinematicConfirmOpen, setCinematicConfirmOpen] = useState(false);
 
   // Credit balance
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
@@ -175,6 +176,15 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
       .then(res => setCreditBalance(res.creditsBalance))
       .catch(() => setCreditBalance(null));
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setCinematicConfirmOpen(false); onClose(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose]);
 
   // ── Public link toggle ──────────────────────────────────────────────────────
   const togglePublic = async () => {
@@ -209,7 +219,13 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   };
 
   // ── Cinematic unlock ────────────────────────────────────────────────────────
+  const requestUnlock = () => {
+    if (!sessionId || formats.cinematicEnabled) return;
+    setCinematicConfirmOpen(true);
+  };
+
   const unlockCinematic = async () => {
+    setCinematicConfirmOpen(false);
     if (!sessionId || formats.cinematicEnabled) return;
     setCinematicLoading(true);
     setCinematicError(null);
@@ -372,7 +388,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
                       enabled={formats.cinematicEnabled}
                       disabled={!isPublic}
                       locked={!formats.cinematicEnabled}
-                      onUnlock={!formats.cinematicEnabled ? unlockCinematic : undefined}
+                      onUnlock={!formats.cinematicEnabled ? requestUnlock : undefined}
                       unlockLoading={cinematicLoading}
                       creditBalance={creditBalance}
                     />
@@ -449,6 +465,83 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
           </motion.div>
         </>
       )}
+
+      {/* Cinematic unlock confirmation */}
+      <AnimatePresence>
+        {cinematicConfirmOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/70 z-[300]"
+              onClick={() => setCinematicConfirmOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 8 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+              className="fixed inset-0 z-[310] flex items-center justify-center p-4"
+              onClick={e => e.stopPropagation()}
+            >
+              <div
+                className="w-full max-w-sm rounded-2xl overflow-hidden"
+                style={{ background: 'rgba(18,18,28,0.98)', border: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                {/* Blurred preview */}
+                {session?.steps?.[0] && (
+                  <div className="relative h-36 overflow-hidden">
+                    <div
+                      className="absolute inset-0 bg-cover bg-center"
+                      style={{
+                        backgroundImage: `url(${(session.steps[0] as any).screenshotUrl || (session.steps[0] as any).url || ''})`,
+                        filter: 'blur(8px) saturate(0.5)',
+                        transform: 'scale(1.1)',
+                      }}
+                    />
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                      <I.Play size={32} className="text-white/60" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="p-5">
+                  <h3 className="text-[15px] font-semibold text-white mb-1">Unlock Cinematic AI</h3>
+                  <p className="text-[12.5px] text-white/55 mb-4">
+                    Cinematic mode adds smooth AI camera movements, animated transitions, and a polished video experience for your viewers.
+                  </p>
+
+                  <div className="flex items-center justify-between mb-5 px-3 py-2.5 rounded-lg" style={{ background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.25)' }}>
+                    <span className="text-[12px] text-purple-300 font-medium">Cost</span>
+                    <span className="text-[13px] text-white font-semibold">{CINEMATIC_CREDIT_COST} credit</span>
+                    {creditBalance !== null && (
+                      <span className="text-[11px] text-white/40">{creditBalance} remaining</span>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setCinematicConfirmOpen(false)}
+                      className="flex-1 py-2.5 rounded-lg text-[13px] font-medium text-white/60 hover:text-white transition-colors"
+                      style={{ background: 'rgba(255,255,255,0.06)' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={unlockCinematic}
+                      disabled={cinematicLoading}
+                      className="flex-1 py-2.5 rounded-lg text-[13px] font-semibold text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-50 transition-colors"
+                    >
+                      {cinematicLoading ? 'Unlocking…' : 'Confirm & Unlock'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </AnimatePresence>
   );
 };

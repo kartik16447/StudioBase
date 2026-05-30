@@ -58,6 +58,13 @@ export const HotspotStylePicker: React.FC<Props> = ({
   const [sel, setSel] = useState<HotspotStyle>(selected);
   useEffect(() => setSel(selected), [selected]);
 
+  useEffect(() => {
+    if (!onClose) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
   const pick = (id: HotspotStyle) => {
     setSel(id);
     onPick?.(id);

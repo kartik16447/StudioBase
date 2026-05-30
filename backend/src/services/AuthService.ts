@@ -1,6 +1,7 @@
 import { Env } from '../types/hono';
 import { AuditService } from './AuditService';
 import { Events } from '../telemetry/events';
+import sampleSession from '../fixtures/sample-session.json';
 
 import { sign } from 'hono/jwt';
 
@@ -114,6 +115,40 @@ export class AuthService {
         // Repair orphaned sessions
         await this.env.DB.prepare('UPDATE sessions SET ownerId = ?, workspaceId = ? WHERE ownerId IS NULL AND workspaceId IS NULL')
           .bind(userId, wsId).run();
+
+        // Seed one example session so new users see content immediately
+        try {
+          const seedId = crypto.randomUUID();
+          const seedShareToken = crypto.randomUUID();
+          const seedR2Key = `sessions/${seedId}/session.json`;
+          const seedEnvelope = {
+            ...sampleSession,
+            sessionId: seedId,
+            steps: sampleSession.steps.map((s, i) => ({
+              ...s,
+              id: crypto.randomUUID(),
+              sequence: i + 1,
+            })),
+          };
+          await this.env.R2.put(seedR2Key, JSON.stringify(seedEnvelope), {
+            httpMetadata: { contentType: 'application/json' },
+          });
+          await this.env.DB.prepare(
+            `INSERT INTO sessions (id, ownerId, workspaceId, sessionType, status, title, capturedUrl, capturedTitle,
+              stepCount, durationMs, shareToken, r2JsonKey, isPublic, createdAt, updatedAt)
+             VALUES (?, ?, ?, 'steps', 'ready', ?, ?, ?, 5, 45000, ?, ?, 0, ?, ?)`
+          ).bind(
+            seedId, userId, wsId,
+            sampleSession.aiOutputs.title,
+            sampleSession.capturedUrl,
+            sampleSession.capturedTitle,
+            seedShareToken,
+            seedR2Key,
+            now, now,
+          ).run();
+        } catch (seedErr) {
+          console.warn('[AuthService] Failed to seed example session:', seedErr);
+        }
       }
 
       // Link account

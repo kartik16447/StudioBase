@@ -479,6 +479,7 @@ export const StepCard: React.FC<{
 }> = ({ step, hue = 244, onEdit, onAnnotate, onDelete, focused, onFocus, isAnnotating = false, onAnnotationsChange, onExit }) => {
   const session = useStudioStore(state => state.session);
   const updateStep = useStudioStore(state => state.updateStep);
+  const saveStep = useStudioStore(state => state.saveStep);
   const sopStatus = useStudioStore(state => state.sopStatus);
   const text = step.textOverride || step.generatedText || '';
   const stepLabel = `Step ${step.sequence ?? (step as any).index + 1}`;
@@ -527,6 +528,15 @@ export const StepCard: React.FC<{
           </Tooltip>
           <Tooltip content="Translate (coming soon)" side="top">
             <IconButton icon={I.Languages} label="Translate" onClick={(e) => e.stopPropagation()} size={28} className="opacity-40 cursor-not-allowed" />
+          </Tooltip>
+          <Tooltip content={step.locked ? 'Unlock step (pipeline will regenerate)' : 'Lock step (pipeline will skip this narration)'} side="top">
+            <IconButton
+              icon={step.locked ? I.Lock : I.Unlock}
+              label={step.locked ? 'Unlock' : 'Lock'}
+              onClick={(e) => { e.stopPropagation(); saveStep(step.id, { locked: !step.locked }); }}
+              size={28}
+              className={step.locked ? 'text-amber-500 opacity-100' : ''}
+            />
           </Tooltip>
           <Tooltip content="Delete step" side="top">
             <IconButton icon={I.Trash2} label="Delete" onClick={(e) => { e.stopPropagation(); onDelete?.(step); }} size={28} className="hover:text-red-500" />
@@ -729,10 +739,19 @@ export const SessionCard: React.FC<{
         </div>
 
         <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
-          <div className="flex -space-x-1.5">
-            <Avatar name="Kartik Upadhyay" size={22} hue={244} />
-            <Avatar name="Maya Chen" size={22} hue={198} />
-            <Avatar name="Diego Ramos" size={22} hue={22} />
+          <div className="flex items-center gap-1.5 text-[11px] text-text-3 min-w-0">
+            {session.lastEditedBy ? (
+              <>
+                <I.Pencil size={11} strokeWidth={2} />
+                <span className="truncate">{session.lastEditedBy}</span>
+                {session.lastEditedAt && <span>· {formatDate(session.lastEditedAt)}</span>}
+              </>
+            ) : (
+              <>
+                <I.Clock size={11} strokeWidth={2} />
+                <span>{formatDate(session.capturedAt)}</span>
+              </>
+            )}
           </div>
           
           <div className="flex items-center gap-2">

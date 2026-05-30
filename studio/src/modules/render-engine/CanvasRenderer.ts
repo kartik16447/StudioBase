@@ -399,6 +399,15 @@ export class CanvasRenderer implements IRenderer {
 
       ctx.save();
       ctx.globalAlpha = alpha;
+
+      if (anno.shape === 'redact' || anno.shape === 'blur') {
+        // Solid black redaction rectangle — bakes into export
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(ax, ay, aw, ah);
+        ctx.restore();
+        return;
+      }
+
       ctx.fillStyle   = 'rgba(10,10,20,0.82)';
       ctx.strokeStyle = '#fff';
       ctx.lineWidth   = 1.5;
