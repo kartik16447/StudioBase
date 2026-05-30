@@ -98,6 +98,9 @@ interface StudioState {
   saveChapterBreaks: (chapterBreaks: { afterStepId: string; chapterTitle: string }[]) => Promise<void>;
   saveDemoBackground: (bg: { type: 'color' | 'gradient' | 'image'; value: string } | null) => Promise<void>;
   saveAutoplay: (enabled: boolean, intervalSeconds?: number) => Promise<void>;
+  saveDemoBrand: (patch: { logoUrl?: string | null; fontFamily?: string | null; watermark?: boolean }) => Promise<void>;
+  saveEndScreen: (endScreen: { headline?: string; subheadline?: string; ctaLabel?: string; ctaUrl?: string } | null) => Promise<void>;
+  savePassword: (password: string | null) => Promise<void>;
   publishSOP: (sopId: string, status: 'review' | 'published') => Promise<void>;
   forkSOP: (sopId: string) => Promise<string>; // returns new sopId
   shareSession: () => Promise<{ shareUrl: string; shareToken: string }>;
@@ -809,6 +812,54 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify({ metadata: updatedMetadata }),
     }).catch(err => console.warn('[saveAutoplay] PATCH failed:', err));
+  },
+
+  saveDemoBrand: async (patch) => {
+    const { session } = get();
+    if (!session) return;
+    const sessionId = (session as any).id || (session as any).sessionId;
+    const workspaceId = (session as any).workspaceId;
+    if (!sessionId || !workspaceId) return;
+    const existing = (session as any).metadata || {};
+    const updatedMetadata = { ...existing, demoBrand: { ...(existing.demoBrand ?? {}), ...patch } };
+    set({ session: { ...session, metadata: updatedMetadata } });
+    await apiClient.request(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ metadata: updatedMetadata }),
+    }).catch(err => console.warn('[saveDemoBrand] PATCH failed:', err));
+  },
+
+  saveEndScreen: async (endScreen) => {
+    const { session } = get();
+    if (!session) return;
+    const sessionId = (session as any).id || (session as any).sessionId;
+    const workspaceId = (session as any).workspaceId;
+    if (!sessionId || !workspaceId) return;
+    const existing = (session as any).metadata || {};
+    const updatedMetadata = endScreen ? { ...existing, endScreen } : (({ endScreen: _, ...rest }) => rest)(existing);
+    set({ session: { ...session, metadata: updatedMetadata } });
+    await apiClient.request(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ metadata: updatedMetadata }),
+    }).catch(err => console.warn('[saveEndScreen] PATCH failed:', err));
+  },
+
+  savePassword: async (password) => {
+    const { session } = get();
+    if (!session) return;
+    const sessionId = (session as any).id || (session as any).sessionId;
+    const workspaceId = (session as any).workspaceId;
+    if (!sessionId || !workspaceId) return;
+    const existing = (session as any).metadata || {};
+    const updatedMetadata = password ? { ...existing, password } : (({ password: _, ...rest }) => rest)(existing);
+    set({ session: { ...session, metadata: updatedMetadata } });
+    await apiClient.request(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ metadata: updatedMetadata }),
+    }).catch(err => console.warn('[savePassword] PATCH failed:', err));
   },
 
   publishSOP: async (sopId, status) => {

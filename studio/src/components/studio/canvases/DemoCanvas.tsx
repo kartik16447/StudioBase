@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useStudioStore } from '../../../store/useStudioStore';
+import { apiClient } from '../../../lib/apiClient';
 import { I } from '../../../components/icons';
 import { ScreenshotPlaceholder } from '../../../components/ui';
 import { Hotspot } from '../../../components/demo/Hotspot';
@@ -58,38 +59,123 @@ const BG_PRESETS: { label: string; type: 'color' | 'gradient'; value: string }[]
   { label: 'Ocean',    type: 'gradient', value: 'radial-gradient(120% 80% at 50% -10%, rgba(7,89,133,0.3) 0%, rgba(10,10,11,0) 55%), #08080a' },
 ];
 
+const FONTS = ['Inter', 'DM Sans', 'Lato', 'Geist', 'System'];
+
+async function uploadLogo(session: any, file: File): Promise<string | null> {
+  const sessionId = session?.id || session?.sessionId;
+  const workspaceId = session?.workspaceId;
+  if (!sessionId || !workspaceId) return null;
+  try {
+    const ext = file.name.split('.').pop() ?? 'png';
+    const key = `${sessionId}/logo-${Date.now()}.${ext}`;
+    const presign = await apiClient.request<{ files: { key: string; uploadUrl: string }[] }>('/assets/upload/presign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ sessionId, files: [{ key, contentType: file.type }] }),
+    });
+    const { uploadUrl } = presign.files[0];
+    await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+    return uploadUrl.split('?')[0]; // bare URL without presign params
+  } catch { return null; }
+}
+
 function BrandingPopover({ brand, onClose }: { brand: string; onClose: () => void }) {
   const session = useStudioStore((s) => s.session);
   const saveDemoBackground = useStudioStore((s) => s.saveDemoBackground);
-  const current = (session?.metadata as any)?.demoBackground ?? null;
-  const currentValue = current?.value ?? 'default';
+  const saveDemoBrand = useStudioStore((s) => s.saveDemoBrand);
+  const savePassword = useStudioStore((s) => s.savePassword);
+  const meta = (session?.metadata as any) ?? {};
+  const demoBrand = meta.demoBrand ?? {};
+  const [tab, setTab] = useState<'bg' | 'brand' | 'settings'>('bg');
+  const [uploading, setUploading] = useState(false);
+  const currentValue = meta.demoBackground?.value ?? 'default';
+
+  const tabBtn = (id: typeof tab, label: string) => (
+    <button onClick={() => setTab(id)} style={{ flex: 1, height: 26, borderRadius: 6, border: 'none', background: tab === id ? zn.panel2 : 'transparent', color: tab === id ? zn.ink : zn.dim, fontSize: 12, fontWeight: tab === id ? 600 : 400, cursor: 'pointer' }}>{label}</button>
+  );
 
   return (
-    <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, width: 260, background: '#161618', border: `1px solid ${zn.border}`, borderRadius: 12, boxShadow: '0 20px 50px rgba(0,0,0,0.6)', zIndex: 80, padding: 14 }}
+    <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, width: 280, background: '#161618', border: `1px solid ${zn.border}`, borderRadius: 12, boxShadow: '0 20px 50px rgba(0,0,0,0.6)', zIndex: 80, padding: 14 }}
       onClick={(e) => e.stopPropagation()}>
-      <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: zn.dim, marginBottom: 10 }}>Viewer background</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-        {BG_PRESETS.map((p) => {
-          const active = currentValue === p.value;
-          const swatch = p.type === 'color' ? p.value : (p.value === 'default' ? `radial-gradient(circle at 50% 0%, ${withAlpha(brand, 0.3)} 0%, #08080a 60%)` : p.value);
-          return (
-            <button key={p.value} title={p.label} onClick={() => {
-              if (p.value === 'default') { saveDemoBackground(null); }
-              else { saveDemoBackground({ type: p.type, value: p.value }); }
-              onClose();
-            }} style={{ aspectRatio: '3/2', borderRadius: 7, border: `2px solid ${active ? brand : 'transparent'}`, background: swatch, cursor: 'pointer', outline: 'none', boxShadow: active ? `0 0 0 1px ${withAlpha(brand, 0.5)}` : 'none' }} />
-          );
-        })}
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 2, background: zn.bg, borderRadius: 8, padding: 3, marginBottom: 14 }}>
+        {tabBtn('bg', 'Background')}
+        {tabBtn('brand', 'Brand')}
+        {tabBtn('settings', 'Settings')}
       </div>
-      <div style={{ marginTop: 12, borderTop: `1px solid ${zn.border}`, paddingTop: 12 }}>
-        <div style={{ fontSize: 11, color: zn.dim, marginBottom: 6 }}>Custom color</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input type="color" defaultValue={current?.type === 'color' ? current.value : '#08080a'}
-            onChange={(e) => saveDemoBackground({ type: 'color', value: e.target.value })}
-            style={{ width: 34, height: 28, borderRadius: 6, border: `1px solid ${zn.border}`, padding: 2, background: 'transparent', cursor: 'pointer' }} />
-          <span style={{ fontSize: 11.5, color: zn.mute }}>Pick any solid color</span>
+
+      {tab === 'bg' && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+            {BG_PRESETS.map((p) => {
+              const active = currentValue === p.value;
+              const swatch = p.type === 'color' ? p.value : (p.value === 'default' ? `radial-gradient(circle at 50% 0%, ${withAlpha(brand, 0.3)} 0%, #08080a 60%)` : p.value);
+              return (
+                <button key={p.value} title={p.label} onClick={() => {
+                  if (p.value === 'default') saveDemoBackground(null);
+                  else saveDemoBackground({ type: p.type, value: p.value });
+                }} style={{ aspectRatio: '3/2', borderRadius: 7, border: `2px solid ${active ? brand : 'transparent'}`, background: swatch, cursor: 'pointer', outline: 'none' }} />
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 10, borderTop: `1px solid ${zn.border}`, paddingTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input type="color" defaultValue={meta.demoBackground?.type === 'color' ? meta.demoBackground.value : '#08080a'}
+              onChange={(e) => saveDemoBackground({ type: 'color', value: e.target.value })}
+              style={{ width: 34, height: 28, borderRadius: 6, border: `1px solid ${zn.border}`, padding: 2, background: 'transparent', cursor: 'pointer' }} />
+            <span style={{ fontSize: 11.5, color: zn.mute }}>Custom color</span>
+          </div>
+        </>
+      )}
+
+      {tab === 'brand' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Logo */}
+          <div>
+            <div style={{ fontSize: 11, color: zn.dim, marginBottom: 6 }}>Logo</div>
+            {demoBrand.logoUrl && <img src={demoBrand.logoUrl} alt="logo" style={{ height: 32, borderRadius: 6, marginBottom: 8, objectFit: 'contain', background: '#fff', padding: '2px 6px' }} />}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 7, height: 30, padding: '0 10px', borderRadius: 7, border: `1px solid ${zn.border}`, background: zn.panel2, color: uploading ? zn.dim : zn.ink, fontSize: 12, cursor: uploading ? 'default' : 'pointer' }}>
+              <I.Upload size={13} /> {uploading ? 'Uploading…' : 'Upload logo'}
+              <input type="file" accept="image/*" style={{ display: 'none' }} disabled={uploading} onChange={async (e) => {
+                const file = e.target.files?.[0]; if (!file) return;
+                setUploading(true);
+                const url = await uploadLogo(session, file);
+                if (url) saveDemoBrand({ logoUrl: url });
+                setUploading(false);
+              }} />
+            </label>
+            {demoBrand.logoUrl && <button onClick={() => saveDemoBrand({ logoUrl: null })} style={{ marginTop: 4, fontSize: 11, color: zn.dim, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Remove logo</button>}
+          </div>
+          {/* Font */}
+          <div>
+            <div style={{ fontSize: 11, color: zn.dim, marginBottom: 6 }}>Font</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {FONTS.map((f) => {
+                const active = (demoBrand.fontFamily ?? 'Inter') === f;
+                return <button key={f} onClick={() => saveDemoBrand({ fontFamily: f })} style={{ height: 26, padding: '0 10px', borderRadius: 6, border: `1px solid ${active ? brand : zn.border}`, background: active ? withAlpha(brand, 0.12) : 'transparent', color: active ? brand : zn.mute, fontSize: 12, cursor: 'pointer' }}>{f}</button>;
+              })}
+            </div>
+          </div>
+          {/* Watermark */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: zn.ink }}>Show watermark</span>
+            <div onClick={() => saveDemoBrand({ watermark: !(demoBrand.watermark ?? true) })} style={{ width: 34, height: 19, borderRadius: 99, background: (demoBrand.watermark ?? true) ? brand : zn.border2, position: 'relative', cursor: 'pointer', transition: 'background 0.18s' }}>
+              <span style={{ position: 'absolute', top: 2, left: (demoBrand.watermark ?? true) ? 17 : 2, width: 15, height: 15, borderRadius: '50%', background: '#fff', transition: 'left 0.18s', boxShadow: '0 1px 2px rgba(0,0,0,0.4)' }} />
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {tab === 'settings' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, color: zn.dim, marginBottom: 6 }}>Password protection</div>
+            <input defaultValue={meta.password ?? ''} placeholder="Leave blank for no gate"
+              onBlur={(e) => savePassword(e.target.value.trim() || null)}
+              style={{ width: '100%', background: zn.bg, border: `1px solid ${zn.border}`, borderRadius: 7, color: zn.ink, fontSize: 12.5, padding: '8px 10px', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+            {meta.password && <div style={{ marginTop: 4, fontSize: 10.5, color: zn.dim }}>Share link with <code style={{ background: zn.panel2, padding: '1px 4px', borderRadius: 3 }}>?pw={meta.password}</code> to bypass</div>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -159,6 +245,14 @@ function StepRail({ current, setCurrent, brand, session }: {
           </div>
         );
       })}
+      {/* End screen entry */}
+      <div style={{ height: 1, background: zn.border, margin: '4px 0' }} />
+      <div onClick={() => setCurrent(steps.length)} style={{ borderRadius: 8, padding: 5, cursor: 'pointer', background: current === steps.length ? withAlpha(brand, 0.12) : 'transparent', border: `1px solid ${current === steps.length ? withAlpha(brand, 0.4) : 'transparent'}` }}>
+        <div style={{ aspectRatio: '16/10', borderRadius: 5, border: `1px solid ${zn.border}`, background: '#111', display: 'grid', placeItems: 'center' }}>
+          <I.Check size={14} color={brand} />
+        </div>
+        <div style={{ fontSize: 10.5, color: current === steps.length ? zn.ink : zn.mute, fontWeight: current === steps.length ? 600 : 450, marginTop: 4 }}>End screen</div>
+      </div>
     </div>
   );
 }
@@ -628,6 +722,36 @@ function ContentPanel({ step, stepIndex, brand, onSave }: {
 
 // ─── Bottom bar ───────────────────────────────────────────────────────────────
 
+function EndScreenEditor({ brand }: { brand: string }) {
+  const session = useStudioStore((s) => s.session);
+  const saveEndScreen = useStudioStore((s) => s.saveEndScreen);
+  const es = (session?.metadata as any)?.endScreen ?? {};
+  const [fields, setFields] = useState({ headline: es.headline ?? '', subheadline: es.subheadline ?? '', ctaLabel: es.ctaLabel ?? '', ctaUrl: es.ctaUrl ?? '' });
+  const save = (patch: Partial<typeof fields>) => {
+    const updated = { ...fields, ...patch };
+    setFields(updated);
+    saveEndScreen(Object.values(updated).some(Boolean) ? updated : null);
+  };
+  return (
+    <div className="dm-scroll" style={{ width: 340, flex: 'none', borderLeft: `1px solid ${zn.border}`, background: zn.bg, padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 13 }}>
+      <span style={{ fontSize: 13.5, fontWeight: 700, color: zn.ink }}>End screen</span>
+      {([['headline', 'Headline', "That's a wrap!"], ['subheadline', 'Subheadline', 'You just saw the whole flow.'], ['ctaLabel', 'CTA button label', 'Book a demo'], ['ctaUrl', 'CTA URL', 'https://…']] as const).map(([key, label, ph]) => (
+        <div key={key}>
+          <label style={fieldLabel}>{label}</label>
+          <input value={(fields as any)[key]} onChange={(e) => save({ [key]: e.target.value })}
+            placeholder={ph} style={inputStyle} />
+        </div>
+      ))}
+      <div style={{ padding: 12, borderRadius: 10, background: zn.panel2, border: `1px solid ${zn.border}` }}>
+        <div style={{ fontSize: 11, color: zn.dim, marginBottom: 4 }}>Preview</div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: zn.ink }}>{fields.headline || "That's a wrap!"}</div>
+        <div style={{ fontSize: 12, color: zn.mute, marginTop: 4 }}>{fields.subheadline || 'You just saw the whole flow.'}</div>
+        {fields.ctaLabel && <div style={{ marginTop: 10, display: 'inline-block', padding: '7px 14px', borderRadius: 8, background: brand, color: '#fff', fontSize: 12, fontWeight: 600 }}>{fields.ctaLabel}</div>}
+      </div>
+    </div>
+  );
+}
+
 function BottomBar({ current, total, brand, onPrev, onNext, onStylePicker }: {
   current: number; total: number; brand: string;
   onPrev: () => void; onNext: () => void; onStylePicker: () => void;
@@ -682,11 +806,31 @@ export const DemoCanvas: React.FC = () => {
     return () => clearInterval(t);
   }, [savedAutoplay, total, autoplayInterval]);
 
-  if (!session || !step) return (
+  if (!session) return (
     <div style={{ flex: 1, display: 'grid', placeItems: 'center', background: zn.bg, color: zn.dim, fontSize: 13 }}>
       No steps yet
     </div>
   );
+
+  // End screen editor view
+  if (current === steps.length) return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v)} onPreview={() => setShowPreview(true)} />
+      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} />
+        <div style={{ flex: 1, background: '#111', display: 'grid', placeItems: 'center' }}>
+          <div style={{ textAlign: 'center', color: zn.dim, fontSize: 13 }}>
+            <I.Check size={28} color={brand} style={{ marginBottom: 8 }} />
+            <div>End screen preview in the viewer</div>
+          </div>
+        </div>
+        <EndScreenEditor brand={brand} />
+      </div>
+      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(steps.length, c + 1))} onStylePicker={() => setShowHsPicker(true)} />
+    </div>
+  );
+
+  if (!step) return null;
 
   const handleSave = async (updates: { stepTitle?: string | null; textOverride?: string | null; cards?: DemoCard[] }) => {
     updateStep(step.id, updates as any);

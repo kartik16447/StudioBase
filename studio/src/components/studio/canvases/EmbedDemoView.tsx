@@ -177,22 +177,29 @@ function ChapterScreen({ title, chapterNum, brand, onContinue }: { title: string
 
 // ─── End screen ───────────────────────────────────────────────────────────────
 
-function EndScreen({ brand, onReplay }: { brand: string; onReplay: () => void }) {
+function EndScreen({ brand, onReplay, session }: { brand: string; onReplay: () => void; session: any }) {
+  const es = session?.metadata?.endScreen ?? {};
+  const headline    = es.headline    || "That's a wrap!";
+  const subheadline = es.subheadline || 'You just saw the whole flow — in under two minutes.';
+  const ctaLabel    = es.ctaLabel;
+  const ctaUrl      = es.ctaUrl;
   return (
     <div className="dm-fade-up" style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: 40, background: `radial-gradient(110% 90% at 50% 12%, ${withAlpha(brand, 0.42)} 0%, rgba(8,8,10,0.7) 50%, #08080a 100%)` }}>
       <div style={{ maxWidth: 560 }}>
         <div style={{ width: 60, height: 60, borderRadius: 16, background: brand, display: 'grid', placeItems: 'center', margin: '0 auto 26px', boxShadow: `0 14px 40px ${withAlpha(brand, 0.5)}`, color: '#fff' }}>
           <I.Check size={30} strokeWidth={2.5} />
         </div>
-        <div style={{ fontSize: 50, fontWeight: 700, color: '#fff', letterSpacing: '-0.03em', lineHeight: 1 }}>That's a wrap!</div>
-        <div style={{ fontSize: 17, color: 'rgba(255,255,255,0.62)', marginTop: 16, lineHeight: 1.5 }}>You just saw the whole flow — in under two minutes.</div>
+        <div style={{ fontSize: 50, fontWeight: 700, color: '#fff', letterSpacing: '-0.03em', lineHeight: 1 }}>{headline}</div>
+        <div style={{ fontSize: 17, color: 'rgba(255,255,255,0.62)', marginTop: 16, lineHeight: 1.5 }}>{subheadline}</div>
         <div style={{ marginTop: 32, display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+          {ctaLabel && ctaUrl && (
+            <a href={ctaUrl} target="_blank" rel="noopener noreferrer" style={{ padding: '14px 26px', borderRadius: 12, border: 'none', background: brand, color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, textDecoration: 'none', boxShadow: `0 12px 32px ${withAlpha(brand, 0.45)}` }}>
+              {ctaLabel} <I.ArrowRight size={16} />
+            </a>
+          )}
           <button onClick={onReplay} style={{ padding: '14px 22px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.14)', background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: 15, fontWeight: 500, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <I.RotateCcw size={16} /> Replay
           </button>
-        </div>
-        <div style={{ marginTop: 30, fontSize: 12, color: 'rgba(255,255,255,0.3)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          Made with <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>StudioBase</span>
         </div>
       </div>
     </div>
@@ -316,11 +323,70 @@ function ShortcutsHint() {
 
 // ─── Watermark ────────────────────────────────────────────────────────────────
 
-export function Watermark() {
+export function Watermark({ hidden }: { hidden?: boolean }) {
+  if (hidden) return null;
   return (
     <div style={{ position: 'absolute', bottom: 12, left: 16, fontSize: 11, color: 'rgba(255,255,255,0.22)', display: 'flex', alignItems: 'center', gap: 4, pointerEvents: 'none', zIndex: 30 }}>
       Made with <span style={{ fontWeight: 600, color: 'rgba(255,255,255,0.35)' }}>StudioBase</span>
     </div>
+  );
+}
+
+// ─── Password gate ────────────────────────────────────────────────────────────
+
+function PasswordGate({ brand, onUnlock }: { brand: string; onUnlock: () => void }) {
+  const [val, setVal] = useState('');
+  const [err, setErr] = useState(false);
+  const session = useStudioStore((s) => s.session);
+  const check = () => {
+    if (val === (session?.metadata as any)?.password) { onUnlock(); }
+    else { setErr(true); setTimeout(() => setErr(false), 1200); }
+  };
+  return (
+    <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: '#08080a' }}>
+      <div style={{ width: 320, textAlign: 'center' }}>
+        <div style={{ width: 48, height: 48, borderRadius: 14, background: withAlpha(brand, 0.15), border: `1px solid ${withAlpha(brand, 0.3)}`, display: 'grid', placeItems: 'center', margin: '0 auto 20px' }}>
+          <I.Lock size={22} color={brand} />
+        </div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 6 }}>Protected demo</div>
+        <div style={{ fontSize: 13.5, color: 'rgba(255,255,255,0.45)', marginBottom: 24 }}>Enter the password to continue</div>
+        <input autoFocus value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && check()}
+          type="password" placeholder="Password"
+          style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: `1px solid ${err ? '#f87171' : 'rgba(255,255,255,0.12)'}`, borderRadius: 10, color: '#fff', fontSize: 15, padding: '12px 14px', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', transition: 'border-color 0.2s', marginBottom: 10 }} />
+        <button onClick={check} style={{ width: '100%', padding: '12px', borderRadius: 10, border: 'none', background: brand, color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', boxShadow: `0 8px 24px ${withAlpha(brand, 0.4)}` }}>
+          Unlock
+        </button>
+        {err && <div style={{ marginTop: 10, fontSize: 12, color: '#f87171' }}>Incorrect password</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Countdown ring ───────────────────────────────────────────────────────────
+
+function CountdownRing({ seconds, brand }: { seconds: number; brand: string }) {
+  const r = 20;
+  const circ = 2 * Math.PI * r;
+  const [offset, setOffset] = useState(0);
+  useEffect(() => {
+    setOffset(0);
+    const start = Date.now();
+    const raf = () => {
+      const elapsed = (Date.now() - start) / 1000;
+      const progress = Math.min(elapsed / seconds, 1);
+      setOffset(circ * (1 - progress));
+      if (progress < 1) requestAnimationFrame(raf);
+    };
+    const id = requestAnimationFrame(raf);
+    return () => cancelAnimationFrame(id);
+  }, [seconds, circ]);
+  return (
+    <svg width={48} height={48} style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 24, pointerEvents: 'none' }}>
+      <circle cx={24} cy={24} r={r} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth={2.5} />
+      <circle cx={24} cy={24} r={r} fill="none" stroke={brand} strokeWidth={2.5}
+        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+        style={{ transform: 'rotate(-90deg)', transformOrigin: '24px 24px', transition: 'stroke-dashoffset 0.1s linear' }} />
+    </svg>
   );
 }
 
@@ -348,19 +414,33 @@ export const EmbedDemoView: React.FC = () => {
   const session  = useStudioStore((s) => s.session);
   const brand    = useStudioStore((s) => s.brand.primaryColor) || '#6366f1';
 
+  const meta        = (session?.metadata as any) ?? {};
+  const demoBrand   = meta.demoBrand ?? {};
+  const fontFamily  = demoBrand.fontFamily ? `${demoBrand.fontFamily}, Inter, system-ui, sans-serif` : undefined;
+  const showWatermark = demoBrand.watermark !== false;
+  const logoUrl     = demoBrand.logoUrl ?? null;
+  const pwRequired  = !!meta.password;
+  const autoplayCfg = meta.autoplay ?? { enabled: false, intervalSeconds: 5 };
+
   const [hotspotStyle] = useState<HotspotStyle>('pulse');
   const [idx, setIdx]  = useState(0);
   const [fs,  setFs]   = useState(false);
+  const [unlocked, setUnlocked] = useState(() => {
+    if (!pwRequired) return true;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('pw') === meta.password;
+  });
 
   // Cursor tween tracking
   const prevHotspotRef = useRef<{ x: number; y: number } | null>(null);
   const [activeTween, setActiveTween] = useState<CursorTween | null>(null);
 
   const steps = session?.steps ?? [];
-  const seq   = React.useMemo(() => buildSequence(steps, session?.metadata?.chapterBreaks), [steps, session?.metadata?.chapterBreaks]);
+  const seq   = React.useMemo(() => buildSequence(steps, meta.chapterBreaks), [steps, meta.chapterBreaks]);
 
   const go = useCallback((d: number) => setIdx((i) => Math.max(0, Math.min(seq.length - 1, i + d))), [seq.length]);
 
+  // Keyboard nav
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); go(1); }
@@ -372,9 +452,16 @@ export const EmbedDemoView: React.FC = () => {
     return () => window.removeEventListener('keydown', h);
   }, [go]);
 
+  // Autoplay
+  useEffect(() => {
+    if (!autoplayCfg.enabled || !unlocked) return;
+    const t = setInterval(() => go(1), autoplayCfg.intervalSeconds * 1000);
+    return () => clearInterval(t);
+  }, [autoplayCfg.enabled, autoplayCfg.intervalSeconds, go, unlocked]);
+
   const frame = seq[idx];
 
-  // Cursor tween: fire when step changes to a step frame
+  // Cursor tween
   useEffect(() => {
     if (frame?.type !== 'step') { prevHotspotRef.current = null; return; }
     const to = getHotspotCoords(frame.step);
@@ -386,14 +473,23 @@ export const EmbedDemoView: React.FC = () => {
     prevHotspotRef.current = to;
   }, [idx]);
 
-  if (!frame || !session) return null;
+  if (!session) return null;
+  if (!unlocked) return <PasswordGate brand={brand} onUnlock={() => setUnlocked(true)} />;
+  if (!frame) return null;
 
   const progress = frame.type === 'step' ? (frame.stepIndex + 1) / steps.length : frame.type === 'end' ? 1 : 0;
   const cardWidth = fs ? 'min(1120px, 92%)' : 'min(940px, 78%)';
   const background = resolveBackground(session, brand);
 
   return (
-    <div style={{ position: 'absolute', inset: 0, background, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'absolute', inset: 0, background, overflow: 'hidden', display: 'flex', flexDirection: 'column', fontFamily }} onClick={() => {}}>
+      {/* Logo top-left */}
+      {logoUrl && (
+        <div style={{ position: 'absolute', top: 16, left: 20, zIndex: 40 }}>
+          <img src={logoUrl} alt="logo" style={{ height: 28, objectFit: 'contain' }} />
+        </div>
+      )}
+
       {/* Top-right chrome */}
       {frame.type === 'step' && (
         <div style={{ position: 'absolute', top: 18, right: 20, display: 'flex', gap: 8, zIndex: 40 }}>
@@ -404,16 +500,21 @@ export const EmbedDemoView: React.FC = () => {
         </div>
       )}
 
-      <Watermark />
+      <Watermark hidden={!showWatermark} />
 
       {frame.type === 'chapter' && <ChapterScreen title={frame.title} chapterNum={frame.chapterNum} brand={brand} onContinue={() => go(1)} />}
-      {frame.type === 'end'     && <EndScreen brand={brand} onReplay={() => setIdx(0)} />}
+      {frame.type === 'end'     && <EndScreen brand={brand} onReplay={() => setIdx(0)} session={session} />}
       {frame.type === 'step'    && (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '52px 24px 28px' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '52px 24px 28px' }} onClick={(e) => e.stopPropagation()}>
           <div style={{ width: cardWidth, transition: 'width 0.3s ease', display: 'flex', flexDirection: 'column' }}>
-            {/* Crossfade: key by stepIndex causes remount + dm-fade animation */}
-            <div key={frame.stepIndex} className="dm-fade">
+            <div key={frame.stepIndex} className="dm-fade" style={{ position: 'relative' }}>
               <ScreenshotCard step={frame.step} session={session} brand={brand} hotspotStyle={hotspotStyle} progress={progress} onHotspot={() => go(1)} cursorTween={activeTween} />
+              {/* Countdown ring overlays the hotspot when autoplay is on */}
+              {autoplayCfg.enabled && frame.stepIndex < steps.length - 1 && (
+                <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+                  <CountdownRing key={`${frame.stepIndex}-${idx}`} seconds={autoplayCfg.intervalSeconds} brand={brand} />
+                </div>
+              )}
             </div>
             <InfoPanel step={frame.step} stepIndex={frame.stepIndex} totalSteps={steps.length} brand={brand} onPrev={() => go(-1)} onNext={() => go(1)} atStart={idx === 0} />
           </div>

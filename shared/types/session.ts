@@ -214,6 +214,18 @@ export interface SessionMetadata {
   // Trupeer-equivalent
   chapterBreaks?: ChapterBreak[];       // chapter markers for long recordings
   demoBackground?: DemoBackground;      // viewer background customization
+  demoBrand?: {                         // creator branding overrides for this demo
+    logoUrl?: string | null;
+    fontFamily?: string | null;
+    watermark?: boolean;                // false = hide "Made with StudioBase"
+  };
+  endScreen?: {
+    headline?: string;
+    subheadline?: string;
+    ctaLabel?: string;
+    ctaUrl?: string;
+  };
+  password?: string;                   // plain-text gate; check against ?pw= param
   // Path 6
   scorm?: {
     courseId: string;
