@@ -718,4 +718,46 @@ steps.get('/:sessionId/narration-status', async (c) => {
   return c.json({ steps: results });
 });
 
+// POST /:sessionId/steps/:stepId/screenshot — replace screenshot for a step
+steps.post('/:sessionId/steps/:stepId/screenshot', async (c) => {
+  const user = c.get('user');
+  const { sessionId, stepId } = c.req.param();
+
+  const session = await requireSession(c.env, sessionId, user.id);
+
+  // Accept multipart/form-data with a 'file' field
+  const formData = await c.req.formData().catch(() => null);
+  const file = formData?.get('file') as File | null;
+  if (!file) return c.json({ error: 'Missing file field in form data' }, 400);
+
+  const ext = file.type.includes('png') ? 'png' : 'jpg';
+  const r2Key = `sessions/${sessionId}/screenshots/${stepId}.${ext}`;
+
+  await c.env.R2.put(r2Key, await file.arrayBuffer(), {
+    httpMetadata: { contentType: file.type },
+  });
+
+  // Patch step content in the SOP (find the SOP for this session)
+  const sopRow = await c.env.DB.prepare(
+    'SELECT id FROM sops WHERE sessionId = ? AND workspaceId = ? LIMIT 1'
+  ).bind(sessionId, session.workspaceId).first<{ id: string }>();
+
+  if (sopRow) {
+    const existing = await c.env.DB.prepare(
+      'SELECT content FROM steps WHERE id = ? AND sopId = ?'
+    ).bind(stepId, sopRow.id).first<{ content: string }>();
+
+    if (existing) {
+      const content = JSON.parse(existing.content);
+      content.screenshotKey = r2Key;
+      await c.env.DB.prepare(
+        'UPDATE steps SET content = ?, updatedAt = ? WHERE id = ? AND sopId = ?'
+      ).bind(JSON.stringify(content), Date.now(), stepId, sopRow.id).run();
+    }
+  }
+
+  const origin = new URL(c.req.url).origin;
+  return c.json({ screenshotKey: r2Key, screenshotUrl: `${origin}/v1/assets/${r2Key}` });
+});
+
 export default steps;

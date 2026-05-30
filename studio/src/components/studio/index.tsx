@@ -1,8 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import type { Step, SessionEnvelope, AnnotationShape, Annotation } from '../../../../shared/types/session';
+import { V1_API_URL } from '../../../../shared/constants';
 import { I } from '../icons';
-import { 
+import {
   cn, Badge, IconButton, Tooltip, ScreenshotPlaceholder,
   GlassPanel, Avatar, Button
 } from '../ui';
@@ -486,11 +487,35 @@ export const StepCard: React.FC<{
   const stepTitle = step.stepTitle || step.elementText || '';
 
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const screenshotInputRef = React.useRef<HTMLInputElement>(null);
   const [textValue, setTextValue] = React.useState(step.textOverride ?? step.generatedText ?? '');
+  const [screenshotUploading, setScreenshotUploading] = React.useState(false);
 
   React.useEffect(() => {
     setTextValue(step.textOverride ?? step.generatedText ?? '');
   }, [step.textOverride, step.generatedText]);
+
+  const handleScreenshotReplace = async (file: File) => {
+    const sessionId = (session as any)?.id || (session as any)?.sessionId;
+    if (!sessionId) return;
+    setScreenshotUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${V1_API_URL}/steps/${sessionId}/steps/${step.id}/screenshot`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      const data = await res.json() as { screenshotKey: string; screenshotUrl: string };
+      updateStep(step.id, { screenshotKey: data.screenshotKey } as any);
+    } catch (e) {
+      console.error('[StepCard] screenshot replace failed', e);
+    } finally {
+      setScreenshotUploading(false);
+    }
+  };
 
   return (
     <article
@@ -510,8 +535,29 @@ export const StepCard: React.FC<{
           onAnnotationsChange={onAnnotationsChange ?? ((annos) => updateStep(step.id, { annotations: annos }))}
           onExit={onExit ?? (() => {})}
         />
+        {/* Hidden file input for screenshot replacement */}
+        <input
+          ref={screenshotInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleScreenshotReplace(file);
+            e.target.value = '';
+          }}
+        />
         {/* Hover toolbar — top-right of screenshot */}
         <div className="absolute top-2 right-2 z-20 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-white/90 rounded-lg px-1 py-1 shadow-sm">
+          <Tooltip content="Replace screenshot" side="top">
+            <IconButton
+              icon={screenshotUploading ? I.Loader : I.Image}
+              label="Replace"
+              onClick={(e) => { e.stopPropagation(); screenshotInputRef.current?.click(); }}
+              size={28}
+              className={screenshotUploading ? 'animate-spin text-primary' : ''}
+            />
+          </Tooltip>
           <Tooltip content="Annotate (highlight, blur, shapes)" side="top">
             <IconButton icon={I.Wand} label="Annotate" onClick={(e) => { e.stopPropagation(); onAnnotate?.(step); }} size={28} />
           </Tooltip>

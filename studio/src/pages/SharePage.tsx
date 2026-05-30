@@ -167,6 +167,7 @@ export const SharePage: React.FC = () => {
   };
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [accessRequestSent, setAccessRequestSent] = useState(false);
+  const isPreview = new URLSearchParams(window.location.search).get('preview') === '1';
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -241,6 +242,16 @@ export const SharePage: React.FC = () => {
     };
 
     load();
+
+    // Record view — best effort, fire-and-forget
+    if (token) {
+      const fingerprint = [navigator.language, screen.width, screen.height, Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
+      fetch(`${BACKEND_URL}/v1/public/${token}/view`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ viewerFingerprint: btoa(fingerprint) }),
+      }).catch(() => {});
+    }
 
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -376,7 +387,18 @@ export const SharePage: React.FC = () => {
   })();
 
   return (
-    <div className="min-h-screen bg-[#fafafa]">
+    <div className={cn('min-h-screen bg-[#fafafa]', isPreview && 'pt-10')}>
+
+      {/* ── Preview mode banner ── */}
+      {isPreview && (
+        <div className="fixed top-0 inset-x-0 z-[999] h-10 bg-indigo-600 flex items-center justify-center gap-3 text-[13px] text-white font-medium">
+          <I.Eye size={15} />
+          <span>Preview mode — this is how your share page looks to viewers</span>
+          <button onClick={() => window.close()} className="ml-4 text-[12px] px-2.5 py-0.5 rounded-full bg-white/20 hover:bg-white/30 transition-colors">
+            Close preview
+          </button>
+        </div>
+      )}
 
       {/* ── Sticky Header ── */}
       <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur border-b border-gray-100">

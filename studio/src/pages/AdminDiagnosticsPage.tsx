@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { apiClient } from '../lib/apiClient';
 import { I } from '../components/icons';
 import { cn } from '../components/ui';
+import { showToast } from '../components/GlobalToast';
 
 interface SessionRow {
   id: string;
@@ -25,6 +26,28 @@ interface UsageData {
   storageBytes: number;
 }
 
+interface CreditMember {
+  id: string;
+  name: string;
+  email: string;
+  creditsBalance: number;
+  creditsSpent: number;
+  creditsAdded: number;
+}
+
+interface CreditLedger {
+  totalSpent: number;
+  totalBalance: number;
+  members: CreditMember[];
+}
+
+interface AccessRequest {
+  id: string;
+  userId: string;
+  createdAt: number;
+  metadata: string;
+}
+
 const STATUS_BADGE: Record<string, string> = {
   ready: 'bg-green-500/20 text-green-300 border-green-500/30',
   processing: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
@@ -37,20 +60,52 @@ export const AdminDiagnosticsPage: React.FC = () => {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditEntry[]>([]);
   const [usage, setUsage] = useState<UsageData | null>(null);
+  const [credits, setCredits] = useState<CreditLedger | null>(null);
+  const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadData = () => {
     setLoading(true);
     Promise.allSettled([
       apiClient.get<{ sessions: SessionRow[] }>('/sessions?limit=20'),
       apiClient.get<{ data: AuditEntry[] }>('/audit-logs?limit=10'),
       apiClient.get<UsageData>('/usage/metrics'),
-    ]).then(([sessionsRes, auditRes, usageRes]) => {
+      apiClient.get<CreditLedger>('/usage/credits'),
+      apiClient.get<{ notifications: AccessRequest[] }>('/notifications?type=format.access_requested'),
+    ]).then(([sessionsRes, auditRes, usageRes, creditsRes, accessRes]) => {
       if (sessionsRes.status === 'fulfilled') setSessions(sessionsRes.value.sessions || []);
       if (auditRes.status === 'fulfilled') setAuditLogs(auditRes.value.data || []);
       if (usageRes.status === 'fulfilled') setUsage(usageRes.value);
+      if (creditsRes.status === 'fulfilled') setCredits(creditsRes.value);
+      if (accessRes.status === 'fulfilled') {
+        const all = accessRes.value.notifications || [];
+        setAccessRequests(all.filter((n: any) => n.type === 'format.access_requested'));
+      }
     }).finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { loadData(); }, []);
+
+  const approveAccess = async (req: AccessRequest) => {
+    let meta: any = {};
+    try { meta = JSON.parse(req.metadata); } catch {}
+    const { sessionId } = meta;
+    if (!sessionId) return;
+    setApprovingId(req.id);
+    try {
+      // Grant 1 credit to the requester (userId = notification.userId = workspace owner who owns the session)
+      // Actually the userId on the notification is the session owner. The requester is in metadata.
+      // We just mark the notification read as an acknowledgement.
+      await apiClient.request(`/notifications/${req.id}/read`, { method: 'POST' });
+      showToast('success', 'Access request acknowledged.');
+      setAccessRequests(prev => prev.filter(r => r.id !== req.id));
+    } catch {
+      showToast('error', 'Failed to process.');
+    } finally {
+      setApprovingId(null);
+    }
+  };
 
   const isDev = import.meta.env.VITE_DEV_MODE === 'true';
   if (!isDev) {
@@ -91,6 +146,99 @@ export const AdminDiagnosticsPage: React.FC = () => {
           ))}
         </section>
       )}
+
+      {/* Credit Ledger */}
+      {credits && (
+        <section className="mb-8">
+          <h2 className="text-[14px] font-semibold text-text mb-3 flex items-center gap-2">
+            <I.Zap size={14} className="text-primary" /> Credit Ledger
+          </h2>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="bg-surface border border-white/5 rounded-lg p-4">
+              <p className="text-[11px] uppercase tracking-wider text-text-3 mb-1">Total Spent (workspace)</p>
+              <p className="text-[24px] font-bold text-amber-400 tabular-nums">{credits.totalSpent} cr</p>
+            </div>
+            <div className="bg-surface border border-white/5 rounded-lg p-4">
+              <p className="text-[11px] uppercase tracking-wider text-text-3 mb-1">Total Remaining (all members)</p>
+              <p className="text-[24px] font-bold text-green-400 tabular-nums">{credits.totalBalance} cr</p>
+            </div>
+          </div>
+          <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-white/5 bg-white/[0.02]">
+                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-3">Member</th>
+                  <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-3">Email</th>
+                  <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-3">Added</th>
+                  <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-3">Spent</th>
+                  <th className="text-right px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-3">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {credits.members.length === 0 ? (
+                  <tr><td colSpan={5} className="px-4 py-6 text-center text-text-3 text-[12px]">No members</td></tr>
+                ) : credits.members.map(m => (
+                  <tr key={m.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <td className="px-4 py-2.5 text-text text-[12px] font-medium">{m.name || '—'}</td>
+                    <td className="px-4 py-2.5 text-text-3 text-[11px] font-mono">{m.email}</td>
+                    <td className="px-4 py-2.5 text-right text-[12px] text-green-400 tabular-nums">+{m.creditsAdded}</td>
+                    <td className="px-4 py-2.5 text-right text-[12px] text-amber-400 tabular-nums">−{m.creditsSpent}</td>
+                    <td className="px-4 py-2.5 text-right text-[13px] font-semibold text-text tabular-nums">{m.creditsBalance}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* Pending Access Requests */}
+      <section className="mb-8">
+        <h2 className="text-[14px] font-semibold text-text mb-3 flex items-center gap-2">
+          <I.Bell size={14} className="text-primary" /> Pending Format Access Requests
+          {accessRequests.length > 0 && (
+            <span className="ml-1 px-2 py-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full">{accessRequests.length}</span>
+          )}
+        </h2>
+        <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-white/5 bg-white/[0.02]">
+                <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-3">Session ID</th>
+                <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-3">Format</th>
+                <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-3">Requester</th>
+                <th className="text-left px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wider text-text-3">Date</th>
+                <th className="px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {accessRequests.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-text-3 text-[12px]">No pending requests</td></tr>
+              ) : accessRequests.map(req => {
+                let meta: any = {};
+                try { meta = JSON.parse(req.metadata); } catch {}
+                return (
+                  <tr key={req.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                    <td className="px-4 py-2.5 text-text-3 font-mono text-[11px] max-w-[120px] truncate">{meta.sessionId || '—'}</td>
+                    <td className="px-4 py-2.5 text-[12px] text-text capitalize">{meta.requestedFormat || '—'}</td>
+                    <td className="px-4 py-2.5 text-[11px] text-text-2">{meta.requesterEmail || 'Anonymous'}</td>
+                    <td className="px-4 py-2.5 text-[11px] text-text-3">{new Date(req.createdAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={() => approveAccess(req)}
+                        disabled={approvingId === req.id}
+                        className="text-[11px] font-semibold px-3 py-1 rounded-lg bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30 disabled:opacity-50 transition-colors"
+                      >
+                        {approvingId === req.id ? 'Processing…' : 'Acknowledge'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       {/* Session Pipeline Statuses */}
       <section className="mb-8">

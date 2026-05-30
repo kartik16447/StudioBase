@@ -239,6 +239,7 @@ export interface SessionMetadata {
     forkDepth: number;
     isPublished: boolean;
   };
+  sopStepOrder?: string[];  // step IDs in display order for SOP view (does not affect video/demo)
 }
 
 export interface SessionEnvelope {

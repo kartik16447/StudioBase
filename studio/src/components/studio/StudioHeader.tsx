@@ -487,6 +487,17 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
               </Button>
             )}
 
+            {(session as any)?.shareToken && (
+              <button
+                onClick={() => window.open(`/s/${(session as any).shareToken}?preview=1`, '_blank')}
+                className="h-8 px-2.5 rounded-pill inline-flex items-center gap-1.5 border border-border text-text hover:bg-surface-2 transition-colors text-[13px] font-medium"
+                title="Open share preview in new tab"
+              >
+                <I.Eye size={14} />
+                <span className="hidden lg:inline">Preview</span>
+              </button>
+            )}
+
             <Button variant="primary" size="sm" icon={I.Share2} onClick={onShareClick}>
               <span className="hidden sm:inline">Share</span>
             </Button>

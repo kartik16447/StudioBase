@@ -105,24 +105,50 @@ export const SOPCanvas: React.FC = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [session, focusedStepId, annotatingStepId, setFocusStep, setStepIndex, triggerScroll, exitAnnotation]);
 
+  const saveSopStepOrder = useStudioStore(state => state.saveSopStepOrder);
   const sopVideoRef = React.useRef<HTMLDivElement>(null);
   const [embedOpen, setEmbedOpen] = React.useState(false);
+  const [dragOverId, setDragOverId] = React.useState<string | null>(null);
+  const dragIdRef = React.useRef<string | null>(null);
 
   if (!session) return null;
 
   const sopId = session.sopId ?? null;
 
   const chapterMap = new Map((session.metadata.chapterBreaks || []).map(c => [c.afterStepId, c]));
-  
-  type SOPItem = 
+
+  // Respect sopStepOrder if set, otherwise use natural step order
+  const sopOrder: string[] | undefined = (session.metadata as any).sopStepOrder;
+  const orderedSteps = sopOrder
+    ? sopOrder.map(id => session.steps.find(s => s.id === id)).filter(Boolean) as Step[]
+    : session.steps;
+
+  type SOPItem =
     | { kind: 'step'; step: Step; idx: number }
     | { kind: 'chapter'; chapter: IChapterBreak };
 
   const items: SOPItem[] = [];
-  session.steps.forEach((s, i) => {
+  orderedSteps.forEach((s, i) => {
     items.push({ kind: 'step', step: s, idx: i });
     if (chapterMap.has(s.id)) items.push({ kind: 'chapter', chapter: chapterMap.get(s.id)! });
   });
+
+  const handleDragStart = (stepId: string) => { dragIdRef.current = stepId; };
+
+  const handleDrop = (targetId: string) => {
+    const fromId = dragIdRef.current;
+    if (!fromId || fromId === targetId) { setDragOverId(null); return; }
+    const ids = orderedSteps.map(s => s.id);
+    const fromIdx = ids.indexOf(fromId);
+    const toIdx = ids.indexOf(targetId);
+    if (fromIdx === -1 || toIdx === -1) { setDragOverId(null); return; }
+    const next = [...ids];
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, fromId);
+    saveSopStepOrder(next);
+    setDragOverId(null);
+    dragIdRef.current = null;
+  };
 
   return (
     <div ref={sopVideoRef} className="flex-1 min-h-0 overflow-y-auto bg-bg relative" data-print="sop">
@@ -281,7 +307,16 @@ export const SOPCanvas: React.FC = () => {
             {items.map((it, i) => {
               const itemKey = it.kind === 'step' ? (it.step.id || `step-${it.idx}`) : `ch-${i}`;
               return it.kind === 'step' ? (
-                <div key={itemKey} ref={el => { if (el) stepRefs.current.set(it.step.id, el); else stepRefs.current.delete(it.step.id); }}>
+                <div
+                  key={itemKey}
+                  ref={el => { if (el) stepRefs.current.set(it.step.id, el); else stepRefs.current.delete(it.step.id); }}
+                  draggable
+                  onDragStart={() => handleDragStart(it.step.id)}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverId(it.step.id); }}
+                  onDragLeave={() => setDragOverId(null)}
+                  onDrop={() => handleDrop(it.step.id)}
+                  className={dragOverId === it.step.id ? 'ring-2 ring-primary ring-offset-2 ring-offset-bg rounded-xl' : ''}
+                >
                   <StepCard
                     step={it.step}
                     index={it.idx}

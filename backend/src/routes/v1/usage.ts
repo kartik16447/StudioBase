@@ -32,4 +32,28 @@ usage.get('/metrics', requirePermission('workspace:admin'), async (c) => {
   });
 });
 
+// 3. Credit ledger summary — total spent, remaining, per-member breakdown
+usage.get('/credits', requirePermission('workspace:admin'), async (c) => {
+  const ws = c.get('workspace');
+
+  // Per-member credit usage (sum of negative deltas = consumed)
+  const { results: members } = await c.env.DB.prepare(
+    `SELECT u.id, u.name, u.email,
+            u.creditsBalance,
+            COALESCE(SUM(CASE WHEN cl.delta < 0 THEN ABS(cl.delta) ELSE 0 END), 0) as creditsSpent,
+            COALESCE(SUM(CASE WHEN cl.delta > 0 THEN cl.delta ELSE 0 END), 0) as creditsAdded
+     FROM workspace_members wm
+     JOIN users u ON wm.userId = u.id
+     LEFT JOIN credits_ledger cl ON cl.userId = u.id
+     WHERE wm.workspaceId = ?
+     GROUP BY u.id
+     ORDER BY creditsSpent DESC`
+  ).bind(ws.id).all();
+
+  const totalSpent = (members as any[]).reduce((s, m) => s + (m.creditsSpent || 0), 0);
+  const totalBalance = (members as any[]).reduce((s, m) => s + (m.creditsBalance || 0), 0);
+
+  return c.json({ totalSpent, totalBalance, members });
+});
+
 export default usage;

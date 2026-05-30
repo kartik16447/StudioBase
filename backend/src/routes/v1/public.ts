@@ -58,6 +58,25 @@ publicRoutes.get('/:shareToken', async (c) => {
   });
 });
 
+// POST /v1/public/:shareToken/view — record a share page view (no auth)
+publicRoutes.post('/:shareToken/view', async (c) => {
+  const { shareToken } = c.req.param();
+  const session = await resolveSession(c.env.DB, shareToken);
+  if (!session) return c.json({ ok: true }); // silent
+
+  const body = await c.req.json().catch(() => ({})) as any;
+  const viewerEmail: string | null = body.viewerEmail || null;
+  const viewerFingerprint: string | null = body.viewerFingerprint || null;
+
+  const id = crypto.randomUUID();
+  await c.env.DB.prepare(
+    `INSERT INTO share_views (id, sessionId, shareToken, viewerEmail, viewerFingerprint, viewedAt)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(id, session.id, shareToken, viewerEmail, viewerFingerprint, Date.now()).run().catch(() => {});
+
+  return c.json({ ok: true });
+});
+
 // GET /v1/public/:shareToken/json — serve R2 session JSON publicly
 // Always merges live D1 data (zoom overrides + text edits) on top of the R2
 // snapshot so dashboard edits are immediately reflected on the share page.

@@ -44,4 +44,15 @@ analytics.get('/workspace', requirePermission('workspace:admin'), async (c) => {
   return c.json(data);
 });
 
+// GET /v1/analytics/views/:sessionId — viewer list for a specific session
+analytics.get('/views/:sessionId', requirePermission('workspace:admin'), async (c) => {
+  const { sessionId } = c.req.param();
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, viewerEmail, viewerFingerprint, viewedAt
+     FROM share_views WHERE sessionId = ?
+     ORDER BY viewedAt DESC LIMIT 100`
+  ).bind(sessionId).all();
+  return c.json({ views: results });
+});
+
 export default analytics;

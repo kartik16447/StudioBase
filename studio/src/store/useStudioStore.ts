@@ -96,6 +96,7 @@ interface StudioState {
   saveAnnotations: (stepId: string, annotations: any[]) => void;
   saveAnimationTarget: (stepId: string, animationTarget: any) => Promise<void>;
   saveChapterBreaks: (chapterBreaks: { afterStepId: string; chapterTitle: string }[]) => Promise<void>;
+  saveSopStepOrder: (stepIds: string[]) => Promise<void>;
   saveDemoBackground: (bg: { type: 'color' | 'gradient' | 'image'; value: string } | null) => Promise<void>;
   saveAutoplay: (enabled: boolean, intervalSeconds?: number) => Promise<void>;
   saveTransitionStyle: (style: 'cut' | 'crossfade') => Promise<void>;
@@ -804,6 +805,21 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify({ metadata: updatedMetadata }),
     }).catch(err => console.warn('[saveChapterBreaks] PATCH failed:', err));
+  },
+
+  saveSopStepOrder: async (stepIds) => {
+    const { session } = get();
+    if (!session) return;
+    const sessionId = (session as any).id || (session as any).sessionId;
+    const workspaceId = (session as any).workspaceId;
+    if (!sessionId || !workspaceId) return;
+    const updatedMetadata = { ...((session as any).metadata || {}), sopStepOrder: stepIds };
+    set({ session: { ...session, metadata: updatedMetadata } });
+    await apiClient.request(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ metadata: updatedMetadata }),
+    }).catch(err => console.warn('[saveSopStepOrder] PATCH failed:', err));
   },
 
   saveDemoBackground: async (bg) => {
