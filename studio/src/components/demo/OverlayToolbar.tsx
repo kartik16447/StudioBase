@@ -1,8 +1,8 @@
 import React from 'react';
 import { zn, brand as defaultBrand, withAlpha, FONT } from './tokens';
-import { Crosshair, MessageSquare, Scan, Paintbrush, Eye } from './icons';
+import { Crosshair, MessageSquare, Scan, ZoomIn, Paintbrush, Eye } from './icons';
 
-export type OverlayTool = 'hotspot' | 'callout' | 'spotlight';
+export type OverlayTool = 'hotspot' | 'callout' | 'spotlight' | 'zoomFocus';
 
 export type OverlayToolbarProps = {
   activeTool: OverlayTool | null;
@@ -17,12 +17,14 @@ const TOOLS: { id: OverlayTool; label: string; Icon: React.ComponentType<any> }[
   { id: 'hotspot', label: 'Hotspot', Icon: Crosshair },
   { id: 'callout', label: 'Callout', Icon: MessageSquare },
   { id: 'spotlight', label: 'Spotlight', Icon: Scan },
+  { id: 'zoomFocus', label: 'Focus', Icon: ZoomIn },
 ];
 
 const HINTS: Record<OverlayTool, string> = {
   hotspot: 'Click on the screenshot to place a hotspot',
   callout: 'Click on the screenshot to place a callout',
   spotlight: 'Click and drag on the screenshot to draw a spotlight',
+  zoomFocus: 'Drag a rectangle on the screenshot to set zoom focus',
 };
 
 export function OverlayToolbar({

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../icons';
 import { ScreenshotPlaceholder } from '../../ui';
@@ -201,8 +201,26 @@ function EndScreen({ brand, onReplay }: { brand: string; onReplay: () => void })
 
 // ─── Screenshot card ──────────────────────────────────────────────────────────
 
-function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspot }: {
+type CursorTween = { fromX: number; fromY: number; toX: number; toY: number };
+
+function CursorTweenOverlay({ tween, brand }: { tween: CursorTween; brand: string }) {
+  const [pos, setPos] = useState({ x: tween.fromX, y: tween.fromY });
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setPos({ x: tween.toX, y: tween.toY }));
+    return () => cancelAnimationFrame(raf);
+  }, [tween.toX, tween.toY]);
+  return (
+    <div style={{ position: 'absolute', left: `${pos.x}%`, top: `${pos.y}%`, transform: 'translate(-4px, -4px)', transition: 'left 400ms cubic-bezier(0.22,1,0.36,1), top 400ms cubic-bezier(0.22,1,0.36,1)', zIndex: 26, pointerEvents: 'none' }}>
+      <svg width="22" height="26" viewBox="0 0 22 26" fill="none">
+        <path d="M3 2.5l16 9.5-7.5 2.5L8 23z" fill={brand} stroke="#fff" strokeWidth="1.5" strokeLinejoin="round" />
+      </svg>
+    </div>
+  );
+}
+
+function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspot, cursorTween }: {
   step: Step; session: any; brand: string; hotspotStyle: HotspotStyle; progress: number; onHotspot: () => void;
+  cursorTween?: CursorTween | null;
 }) {
   const coords    = step.coordinates;
   const rawX      = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : null;
@@ -225,9 +243,21 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.12)', zIndex: 30 }}>
         <div style={{ height: '100%', width: `${progress * 100}%`, background: brand, transition: 'width 0.5s cubic-bezier(0.22,1,0.36,1)', boxShadow: `0 0 10px ${withAlpha(brand, 0.7)}` }} />
       </div>
-      {screenshotUrl ? (
-        <img src={screenshotUrl} alt={`Step ${step.sequence}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} draggable={false} />
-      ) : (
+      {screenshotUrl ? (() => {
+        const zoom = step.animationTarget?.zoomScale ?? 1;
+        const px   = hotspotX ?? 50;
+        const py   = hotspotY ?? 50;
+        const imgStyle: React.CSSProperties = zoom > 1 ? {
+          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+          transformOrigin: '0 0',
+          transform: `translate(${50 - zoom * px}%, ${50 - zoom * py}%) scale(${zoom})`,
+          transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)',
+        } : {
+          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+          transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)',
+        };
+        return <img src={screenshotUrl} alt={`Step ${step.sequence}`} style={imgStyle} draggable={false} />;
+      })() : (
         <ScreenshotPlaceholder step={step} session={session} showChrome={false} aspect="16/9" rounded="" mode="stage" className="w-full h-full !shadow-none" />
       )}
       {blurs.map((a, i) => <BlurMask key={i} x={a.x} y={a.y} w={a.width ?? 10} h={a.height ?? 5} />)}
@@ -253,9 +283,10 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
         }
         return null;
       })}
-      {hotspotX !== null && hotspotY !== null && (
+      {hotspotX !== null && hotspotY !== null && !cursorTween && (
         <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={hotspotSz} onClick={onHotspot} title="Next" />
       )}
+      {cursorTween && <CursorTweenOverlay tween={cursorTween} brand={brand} />}
     </div>
   );
 }
@@ -295,6 +326,24 @@ export function Watermark() {
 
 // ─── Main viewer ──────────────────────────────────────────────────────────────
 
+function resolveBackground(session: any, brand: string): string {
+  const bg = session?.metadata?.demoBackground;
+  if (!bg) return brandGradient(brand, 0.5);
+  if (bg.type === 'color') return bg.value;
+  if (bg.type === 'gradient') return bg.value;
+  if (bg.type === 'image') return `url(${bg.value}) center/cover no-repeat`;
+  return brandGradient(brand, 0.5);
+}
+
+function getHotspotCoords(step: Step): { x: number; y: number } | null {
+  const coords = step.coordinates;
+  const rawX = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : null;
+  const rawY = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
+  const x = step.animationTarget?.pctX ?? rawX;
+  const y = step.animationTarget?.pctY ?? rawY;
+  return x !== null && y !== null ? { x, y } : null;
+}
+
 export const EmbedDemoView: React.FC = () => {
   const session  = useStudioStore((s) => s.session);
   const brand    = useStudioStore((s) => s.brand.primaryColor) || '#6366f1';
@@ -302,6 +351,10 @@ export const EmbedDemoView: React.FC = () => {
   const [hotspotStyle] = useState<HotspotStyle>('pulse');
   const [idx, setIdx]  = useState(0);
   const [fs,  setFs]   = useState(false);
+
+  // Cursor tween tracking
+  const prevHotspotRef = useRef<{ x: number; y: number } | null>(null);
+  const [activeTween, setActiveTween] = useState<CursorTween | null>(null);
 
   const steps = session?.steps ?? [];
   const seq   = React.useMemo(() => buildSequence(steps, session?.metadata?.chapterBreaks), [steps, session?.metadata?.chapterBreaks]);
@@ -320,13 +373,27 @@ export const EmbedDemoView: React.FC = () => {
   }, [go]);
 
   const frame = seq[idx];
+
+  // Cursor tween: fire when step changes to a step frame
+  useEffect(() => {
+    if (frame?.type !== 'step') { prevHotspotRef.current = null; return; }
+    const to = getHotspotCoords(frame.step);
+    if (prevHotspotRef.current && to) {
+      setActiveTween({ fromX: prevHotspotRef.current.x, fromY: prevHotspotRef.current.y, toX: to.x, toY: to.y });
+      const t = setTimeout(() => { setActiveTween(null); prevHotspotRef.current = to; }, 450);
+      return () => clearTimeout(t);
+    }
+    prevHotspotRef.current = to;
+  }, [idx]);
+
   if (!frame || !session) return null;
 
   const progress = frame.type === 'step' ? (frame.stepIndex + 1) / steps.length : frame.type === 'end' ? 1 : 0;
   const cardWidth = fs ? 'min(1120px, 92%)' : 'min(940px, 78%)';
+  const background = resolveBackground(session, brand);
 
   return (
-    <div style={{ position: 'absolute', inset: 0, background: brandGradient(brand, 0.5), overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'absolute', inset: 0, background, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       {/* Top-right chrome */}
       {frame.type === 'step' && (
         <div style={{ position: 'absolute', top: 18, right: 20, display: 'flex', gap: 8, zIndex: 40 }}>
@@ -344,7 +411,10 @@ export const EmbedDemoView: React.FC = () => {
       {frame.type === 'step'    && (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '52px 24px 28px' }}>
           <div style={{ width: cardWidth, transition: 'width 0.3s ease', display: 'flex', flexDirection: 'column' }}>
-            <ScreenshotCard step={frame.step} session={session} brand={brand} hotspotStyle={hotspotStyle} progress={progress} onHotspot={() => go(1)} />
+            {/* Crossfade: key by stepIndex causes remount + dm-fade animation */}
+            <div key={frame.stepIndex} className="dm-fade">
+              <ScreenshotCard step={frame.step} session={session} brand={brand} hotspotStyle={hotspotStyle} progress={progress} onHotspot={() => go(1)} cursorTween={activeTween} />
+            </div>
             <InfoPanel step={frame.step} stepIndex={frame.stepIndex} totalSteps={steps.length} brand={brand} onPrev={() => go(-1)} onNext={() => go(1)} atStart={idx === 0} />
           </div>
         </div>

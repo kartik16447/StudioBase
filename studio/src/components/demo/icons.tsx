@@ -162,3 +162,22 @@ export const CircleShape = (p: IconProps) => (
     <circle cx="12" cy="12" r="7.5" />
   </Svg>
 );
+
+export const ZoomIn = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="10.5" cy="10.5" r="7" />
+    <line x1="10.5" y1="7.5" x2="10.5" y2="13.5" />
+    <line x1="7.5" y1="10.5" x2="13.5" y2="10.5" />
+    <line x1="16" y1="16" x2="21" y2="21" />
+  </Svg>
+);
+
+export const Palette = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9.5" />
+    <circle cx="8" cy="10" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="7.5" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="16" cy="10" r="1.4" fill="currentColor" stroke="none" />
+    <path d="M8.5 16c.8-1.5 2.2-2.5 3.5-2.5s2.7 1 3.5 2.5" />
+  </Svg>
+);

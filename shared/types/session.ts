@@ -203,11 +203,17 @@ export interface ChapterBreak {
   chapterTitle: string;
 }
 
+export interface DemoBackground {
+  type: 'color' | 'gradient' | 'image';
+  value: string;   // hex color, CSS gradient string, or image URL
+}
+
 export interface SessionMetadata {
   durationMs: number;
   stepCount: number;
   // Trupeer-equivalent
   chapterBreaks?: ChapterBreak[];       // chapter markers for long recordings
+  demoBackground?: DemoBackground;      // viewer background customization
   // Path 6
   scorm?: {
     courseId: string;

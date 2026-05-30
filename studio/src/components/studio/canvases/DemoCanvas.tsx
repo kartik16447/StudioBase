@@ -36,7 +36,7 @@ const zn = {
 
 function TopBtn({ children, icon, primary, ghost, brand, onClick }: {
   children?: React.ReactNode; icon?: React.ReactNode; primary?: boolean;
-  ghost?: boolean; brand?: string; onClick?: () => void;
+  ghost?: boolean; brand?: string; onClick?: (e?: React.MouseEvent) => void;
 }) {
   const [h, setH] = useState(false);
   return (
@@ -47,11 +47,59 @@ function TopBtn({ children, icon, primary, ghost, brand, onClick }: {
   );
 }
 
+const BG_PRESETS: { label: string; type: 'color' | 'gradient'; value: string }[] = [
+  { label: 'Default', type: 'gradient', value: 'default' },
+  { label: 'Midnight', type: 'color',   value: '#08080a' },
+  { label: 'Slate',    type: 'color',   value: '#0f172a' },
+  { label: 'Zinc',     type: 'color',   value: '#18181b' },
+  { label: 'Forest',   type: 'gradient', value: 'radial-gradient(120% 80% at 50% -10%, rgba(20,83,45,0.28) 0%, rgba(10,10,11,0) 55%), #08080a' },
+  { label: 'Violet',   type: 'gradient', value: 'radial-gradient(120% 80% at 50% -10%, rgba(109,40,217,0.28) 0%, rgba(10,10,11,0) 55%), #08080a' },
+  { label: 'Ocean',    type: 'gradient', value: 'radial-gradient(120% 80% at 50% -10%, rgba(7,89,133,0.3) 0%, rgba(10,10,11,0) 55%), #08080a' },
+];
+
+function BrandingPopover({ brand, onClose }: { brand: string; onClose: () => void }) {
+  const session = useStudioStore((s) => s.session);
+  const saveDemoBackground = useStudioStore((s) => s.saveDemoBackground);
+  const current = (session?.metadata as any)?.demoBackground ?? null;
+  const currentValue = current?.value ?? 'default';
+
+  return (
+    <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, width: 260, background: '#161618', border: `1px solid ${zn.border}`, borderRadius: 12, boxShadow: '0 20px 50px rgba(0,0,0,0.6)', zIndex: 80, padding: 14 }}
+      onClick={(e) => e.stopPropagation()}>
+      <div style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: zn.dim, marginBottom: 10 }}>Viewer background</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+        {BG_PRESETS.map((p) => {
+          const active = currentValue === p.value;
+          const swatch = p.type === 'color' ? p.value : (p.value === 'default' ? `radial-gradient(circle at 50% 0%, ${withAlpha(brand, 0.3)} 0%, #08080a 60%)` : p.value);
+          return (
+            <button key={p.value} title={p.label} onClick={() => {
+              if (p.value === 'default') { saveDemoBackground(null); }
+              else { saveDemoBackground({ type: p.type, value: p.value }); }
+              onClose();
+            }} style={{ aspectRatio: '3/2', borderRadius: 7, border: `2px solid ${active ? brand : 'transparent'}`, background: swatch, cursor: 'pointer', outline: 'none', boxShadow: active ? `0 0 0 1px ${withAlpha(brand, 0.5)}` : 'none' }} />
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 12, borderTop: `1px solid ${zn.border}`, paddingTop: 12 }}>
+        <div style={{ fontSize: 11, color: zn.dim, marginBottom: 6 }}>Custom color</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="color" defaultValue={current?.type === 'color' ? current.value : '#08080a'}
+            onChange={(e) => saveDemoBackground({ type: 'color', value: e.target.value })}
+            style={{ width: 34, height: 28, borderRadius: 6, border: `1px solid ${zn.border}`, padding: 2, background: 'transparent', cursor: 'pointer' }} />
+          <span style={{ fontSize: 11.5, color: zn.mute }}>Pick any solid color</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TopBar({ brand, autoplay, setAutoplay }: { brand: string; autoplay: boolean; setAutoplay: (v: boolean) => void }) {
   const session = useStudioStore((s) => s.session);
   const title = session?.aiOutputs?.title || 'Untitled demo';
+  const [showBranding, setShowBranding] = useState(false);
   return (
-    <div style={{ height: 52, flex: 'none', borderBottom: `1px solid ${zn.border}`, background: zn.bg, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' }}>
+    <div style={{ height: 52, flex: 'none', borderBottom: `1px solid ${zn.border}`, background: zn.bg, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' }}
+      onClick={() => setShowBranding(false)}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
         <span style={{ width: 24, height: 24, borderRadius: 7, background: brand, display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 700, fontSize: 13 }}>S</span>
         <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
@@ -61,7 +109,10 @@ function TopBar({ brand, autoplay, setAutoplay }: { brand: string; autoplay: boo
         <I.ChevronDown size={14} style={{ color: zn.dim, marginLeft: 2 }} />
       </div>
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 9 }}>
-        <TopBtn icon={<I.Palette size={15} />} ghost>Branding</TopBtn>
+        <div style={{ position: 'relative' }}>
+          <TopBtn icon={<I.Palette size={15} />} ghost onClick={(e) => { e?.stopPropagation(); setShowBranding((v) => !v); }}>Branding</TopBtn>
+          {showBranding && <BrandingPopover brand={brand} onClose={() => setShowBranding(false)} />}
+        </div>
         <div onClick={() => setAutoplay(!autoplay)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '0 4px' }}>
           <span style={{ fontSize: 12.5, color: zn.mute, fontWeight: 500 }}>Autoplay</span>
           <span style={{ width: 34, height: 19, borderRadius: 99, background: autoplay ? brand : zn.border2, position: 'relative', transition: 'background 0.18s' }}>
@@ -115,11 +166,12 @@ function StepRail({ current, setCurrent, brand, session }: {
 
 const HS_SIZES = [{ label: 'S', v: 14 }, { label: 'M', v: 20 }, { label: 'L', v: 28 }];
 
-function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, activeTool, onPlaceOverlay, selectedOverlayId, onSelectOverlay }: {
+function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, activeTool, onPlaceOverlay, onClearTool, selectedOverlayId, onSelectOverlay }: {
   step: any; session: any; brand: string; hotspotStyle: HotspotStyle;
-  onUpdateHotspot: (pctX: number, pctY: number, hotspotSize?: number) => void;
+  onUpdateHotspot: (pctX: number, pctY: number, hotspotSize?: number, zoomScale?: number) => void;
   activeTool: OverlayTool | null;
   onPlaceOverlay: (pctX: number, pctY: number) => void;
+  onClearTool: () => void;
   selectedOverlayId: string | null;
   onSelectOverlay: (id: string | null) => void;
 }) {
@@ -136,12 +188,18 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
   const dragPos         = useRef(pos);
   const screenshotRef   = useRef<HTMLDivElement>(null);
 
+  // Zoom-focus rect draw state
+  const [focusRect, setFocusRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const focusDragging = useRef(false);
+  const focusStart    = useRef<{ x: number; y: number } | null>(null);
+
   // Sync when step switches
   useEffect(() => {
     const x = step?.animationTarget?.pctX ?? rawX;
     const y = step?.animationTarget?.pctY ?? rawY;
     setPos({ x, y });
     dragPos.current = { x, y };
+    setFocusRect(null);
   }, [step?.id]);
 
   const onHotspotMouseDown = (e: React.MouseEvent) => {
@@ -150,16 +208,56 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
     dragging.current = true;
   };
 
-  const onScreenshotMouseMove = (e: React.MouseEvent) => {
-    if (!dragging.current || !screenshotRef.current) return;
+  const getPct = (e: React.MouseEvent) => {
+    if (!screenshotRef.current) return { x: 0, y: 0 };
     const rect = screenshotRef.current.getBoundingClientRect();
-    const x = Math.min(100, Math.max(0, ((e.clientX - rect.left)  / rect.width)  * 100));
-    const y = Math.min(100, Math.max(0, ((e.clientY - rect.top)   / rect.height) * 100));
+    return {
+      x: Math.min(100, Math.max(0, ((e.clientX - rect.left)  / rect.width)  * 100)),
+      y: Math.min(100, Math.max(0, ((e.clientY - rect.top)   / rect.height) * 100)),
+    };
+  };
+
+  const onScreenshotMouseDown = (e: React.MouseEvent) => {
+    if (activeTool !== 'zoomFocus') return;
+    e.preventDefault();
+    const { x, y } = getPct(e);
+    focusStart.current = { x, y };
+    focusDragging.current = true;
+    setFocusRect({ x1: x, y1: y, x2: x, y2: y });
+  };
+
+  const onScreenshotMouseMove = (e: React.MouseEvent) => {
+    if (focusDragging.current && focusStart.current) {
+      const { x, y } = getPct(e);
+      setFocusRect({ x1: focusStart.current.x, y1: focusStart.current.y, x2: x, y2: y });
+      return;
+    }
+    if (!dragging.current) return;
+    const { x, y } = getPct(e);
     dragPos.current = { x, y };
     setPos({ x, y });
   };
 
-  const onScreenshotMouseUp = () => {
+  const onScreenshotMouseUp = (e: React.MouseEvent) => {
+    if (focusDragging.current && focusRect) {
+      focusDragging.current = false;
+      const x1 = Math.min(focusRect.x1, focusRect.x2);
+      const y1 = Math.min(focusRect.y1, focusRect.y2);
+      const x2 = Math.max(focusRect.x1, focusRect.x2);
+      const y2 = Math.max(focusRect.y1, focusRect.y2);
+      const w = x2 - x1;
+      const h = y2 - y1;
+      if (w > 3 && h > 3) {
+        const centerX   = (x1 + x2) / 2;
+        const centerY   = (y1 + y2) / 2;
+        // zoom to fill the selected rect — cap at 5×
+        const zoomScale = Math.min(5, Math.max(1.1, Math.min(100 / w, 100 / h)));
+        onUpdateHotspot(centerX, centerY, undefined, zoomScale);
+      }
+      setFocusRect(null);
+      onClearTool();
+      return;
+    }
     if (!dragging.current) return;
     dragging.current = false;
     onUpdateHotspot(dragPos.current.x, dragPos.current.y);
@@ -186,11 +284,12 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
           {/* Screenshot + overlays */}
           <div
             ref={screenshotRef}
+            onMouseDown={onScreenshotMouseDown}
             onMouseMove={onScreenshotMouseMove}
-            onMouseUp={onScreenshotMouseUp}
-            onMouseLeave={onScreenshotMouseUp}
+            onMouseUp={(e) => onScreenshotMouseUp(e)}
+            onMouseLeave={(e) => onScreenshotMouseUp(e)}
             onClick={(e) => {
-              if (!activeTool || !screenshotRef.current) return;
+              if (!activeTool || activeTool === 'zoomFocus' || !screenshotRef.current) return;
               const rect = screenshotRef.current.getBoundingClientRect();
               const x = ((e.clientX - rect.left) / rect.width) * 100;
               const y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -255,18 +354,41 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
                 onMouseDown={onHotspotMouseDown}
               />
             )}
+
+            {/* Zoom focus rect while drawing */}
+            {focusRect && (() => {
+              const x = Math.min(focusRect.x1, focusRect.x2);
+              const y = Math.min(focusRect.y1, focusRect.y2);
+              const w = Math.abs(focusRect.x2 - focusRect.x1);
+              const h = Math.abs(focusRect.y2 - focusRect.y1);
+              return (
+                <div style={{ position: 'absolute', left: `${x}%`, top: `${y}%`, width: `${w}%`, height: `${h}%`, border: `2px solid ${brand}`, borderRadius: 4, background: withAlpha(brand, 0.12), pointerEvents: 'none', zIndex: 30, boxSizing: 'border-box' }} />
+              );
+            })()}
           </div>
 
-          {/* Hotspot size controls */}
+          {/* Hotspot size + zoom controls */}
           {coords && (
-            <div style={{ height: 34, background: '#1a1a1d', borderTop: `1px solid ${zn.border}`, display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', justifyContent: 'flex-end' }}>
-              <span style={{ fontSize: 10.5, color: zn.dim, marginRight: 2 }}>Hotspot size</span>
-              {HS_SIZES.map(({ label, v }) => (
-                <button key={label} onClick={() => onUpdateHotspot(dragPos.current.x, dragPos.current.y, v)}
-                  style={{ width: 26, height: 22, borderRadius: 5, border: `1px solid ${currentSize === v ? brand : zn.border}`, background: currentSize === v ? withAlpha(brand, 0.15) : 'transparent', color: currentSize === v ? brand : zn.dim, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-                  {label}
-                </button>
-              ))}
+            <div style={{ height: 34, background: '#1a1a1d', borderTop: `1px solid ${zn.border}`, display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px' }}>
+              {step?.animationTarget?.zoomScale > 1 && (
+                <>
+                  <span style={{ fontSize: 10.5, color: zn.dim }}>Zoom {step.animationTarget.zoomScale.toFixed(1)}×</span>
+                  <button onClick={() => onUpdateHotspot(dragPos.current.x, dragPos.current.y, undefined, 1)}
+                    style={{ height: 22, padding: '0 8px', borderRadius: 5, border: `1px solid ${zn.border}`, background: 'transparent', color: zn.mute, fontSize: 10.5, cursor: 'pointer' }}>
+                    Reset
+                  </button>
+                  <div style={{ width: 1, height: 16, background: zn.border, margin: '0 2px' }} />
+                </>
+              )}
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10.5, color: zn.dim }}>Hotspot size</span>
+                {HS_SIZES.map(({ label, v }) => (
+                  <button key={label} onClick={() => onUpdateHotspot(dragPos.current.x, dragPos.current.y, v)}
+                    style={{ width: 26, height: 22, borderRadius: 5, border: `1px solid ${currentSize === v ? brand : zn.border}`, background: currentSize === v ? withAlpha(brand, 0.15) : 'transparent', color: currentSize === v ? brand : zn.dim, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -563,9 +685,13 @@ export const DemoCanvas: React.FC = () => {
     });
   };
 
-  const handleUpdateHotspot = async (pctX: number, pctY: number, hotspotSize?: number) => {
+  const handleUpdateHotspot = async (pctX: number, pctY: number, hotspotSize?: number, zoomScale?: number) => {
     const existing = step?.animationTarget ?? { zoomScale: 1 };
-    const updated  = { ...existing, pctX, pctY, ...(hotspotSize !== undefined ? { hotspotSize } : {}) };
+    const updated  = {
+      ...existing, pctX, pctY,
+      ...(hotspotSize  !== undefined ? { hotspotSize }  : {}),
+      ...(zoomScale    !== undefined ? { zoomScale }    : {}),
+    };
     updateStep(step.id, { animationTarget: updated });
     await saveAnimationTarget(step.id, updated);
   };
@@ -608,7 +734,7 @@ export const DemoCanvas: React.FC = () => {
         <OverlayToolbar activeTool={activeTool} onSelectTool={(t) => setActiveTool((prev) => prev === t ? null : t)} onEditScreenshot={() => {}} brand={brand} />
         <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }} onClick={() => setSelectedOverlayId(null)}>
           <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} />
-          <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} />
+          <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} onClearTool={() => setActiveTool(null)} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} />
           {selectedOverlay ? (
             <OverlaySidebar overlay={selectedOverlay as any} onUpdate={handleOverlayUpdate as any} onDelete={handleOverlayDelete} onTypeChange={(t) => handleOverlayUpdate({ type: t })} brand={brand} />
           ) : (

@@ -199,6 +199,12 @@
   }
   .dm-fade-up { animation: dm-fade-up 0.45s cubic-bezier(0.22,1,0.36,1) both; }
 
+  @keyframes dm-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  .dm-fade { animation: dm-fade 0.15s ease both; }
+
   /* Cursor ping ring used in VideoPlayer */
   @keyframes cursor-ping {
     0%   { transform: translate(-50%, -50%) scale(0.6); opacity: 0.9; }
