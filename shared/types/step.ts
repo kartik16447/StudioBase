@@ -1,5 +1,30 @@
 import { z } from 'zod';
 
+export const OverlaySchema = z.object({
+  id: z.string(),
+  type: z.enum(['hotspot', 'callout', 'spotlight']),
+  pctX: z.number(),
+  pctY: z.number(),
+  w: z.number().optional(),
+  h: z.number().optional(),
+  title: z.string().optional(),
+  body: z.string().optional(),
+  bgColor: z.string().optional(),
+  textColor: z.string().optional(),
+  arrowPos: z.enum(['top', 'bottom', 'left', 'right']).optional(),
+  arrowDir: z.enum(['tl', 't', 'tr', 'l', 'r', 'bl', 'b', 'br', 'none']).optional(),
+  showArrow: z.boolean().optional(),
+  shape: z.enum(['square', 'rounded', 'circle']).optional(),
+  overlayOpacity: z.number().optional(),
+  borderColor: z.string().optional(),
+  borderWidth: z.number().optional(),
+  autoOpen: z.boolean().optional(),
+  invisible: z.boolean().optional(),
+  voiceover: z.boolean().optional(),
+  destination: z.union([z.literal('next'), z.literal('stay'), z.literal('specific')]).optional(),
+  destinationStep: z.number().optional(),
+});
+
 export const DemoCardSchema = z.object({
   id: z.string(),
   type: z.enum(['text', 'cta', 'blur', 'callout', 'video', 'form', 'image', 'embed']),
@@ -82,6 +107,7 @@ export const StepSchema = z.object({
   annotations: z.array(AnnotationSchema).optional(),
   animationTarget: AnimationTargetSchema.nullable().optional(),
   cards: z.array(DemoCardSchema).optional(),
+  overlays: z.array(OverlaySchema).optional(),
   data: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -89,3 +115,4 @@ export type Step = z.infer<typeof StepSchema>;
 export type Annotation = z.infer<typeof AnnotationSchema>;
 export type AnimationTarget = z.infer<typeof AnimationTargetSchema>;
 export type DemoCard = z.infer<typeof DemoCardSchema>;
+export type Overlay = z.infer<typeof OverlaySchema>;

@@ -18,7 +18,11 @@ import { HotspotStylePicker } from '../../../components/demo/HotspotStylePicker'
 import { CardTypePicker } from '../../../components/demo/CardTypePicker';
 import { withAlpha } from '../../../components/demo/helpers';
 import { displayText } from '../../../lib/textUtils';
-import type { DemoCard } from '../../../../../shared/types/step';
+import type { DemoCard, Overlay } from '../../../../../shared/types/step';
+import { OverlayToolbar } from '../../../components/demo/OverlayToolbar';
+import type { OverlayTool } from '../../../components/demo/OverlayToolbar';
+import { OverlaySidebar } from '../../../components/demo/OverlaySidebar';
+import { SpotlightMask } from '../../../components/demo/SpotlightMask';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -111,9 +115,13 @@ function StepRail({ current, setCurrent, brand, session }: {
 
 const HS_SIZES = [{ label: 'S', v: 14 }, { label: 'M', v: 20 }, { label: 'L', v: 28 }];
 
-function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot }: {
+function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, activeTool, onPlaceOverlay, selectedOverlayId, onSelectOverlay }: {
   step: any; session: any; brand: string; hotspotStyle: HotspotStyle;
   onUpdateHotspot: (pctX: number, pctY: number, hotspotSize?: number) => void;
+  activeTool: OverlayTool | null;
+  onPlaceOverlay: (pctX: number, pctY: number) => void;
+  selectedOverlayId: string | null;
+  onSelectOverlay: (id: string | null) => void;
 }) {
   const coords  = step?.coordinates;
   const rawX    = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : 50;
@@ -181,7 +189,14 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot }: {
             onMouseMove={onScreenshotMouseMove}
             onMouseUp={onScreenshotMouseUp}
             onMouseLeave={onScreenshotMouseUp}
-            style={{ position: 'relative', aspectRatio: '16/9', background: '#fff', userSelect: 'none' }}
+            onClick={(e) => {
+              if (!activeTool || !screenshotRef.current) return;
+              const rect = screenshotRef.current.getBoundingClientRect();
+              const x = ((e.clientX - rect.left) / rect.width) * 100;
+              const y = ((e.clientY - rect.top) / rect.height) * 100;
+              onPlaceOverlay(x, y);
+            }}
+            style={{ position: 'relative', aspectRatio: '16/9', background: '#fff', userSelect: 'none', cursor: activeTool ? 'crosshair' : 'default' }}
           >
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.1)', zIndex: 30 }}>
               <div style={{ height: '100%', background: brand }} />
@@ -201,6 +216,31 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot }: {
                 </div>
               </div>
             ))}
+
+            {/* Overlay layer */}
+            {(step?.overlays ?? []).map((ov: Overlay) => {
+              const selected = ov.id === selectedOverlayId;
+              if (ov.type === 'spotlight' && ov.w && ov.h) {
+                return (
+                  <div key={ov.id} onClick={(e) => { e.stopPropagation(); onSelectOverlay(ov.id); }} style={{ position: 'absolute', inset: 0, zIndex: 17, cursor: 'pointer' }}>
+                    <SpotlightMask rect={{ x: ov.pctX, y: ov.pctY, w: ov.w, h: ov.h }} shape={ov.shape ?? 'rounded'} overlayOpacity={ov.overlayOpacity ?? 55} borderColor={selected ? brand : (ov.borderColor ?? brand)} />
+                  </div>
+                );
+              }
+              return (
+                <div key={ov.id} onClick={(e) => { e.stopPropagation(); onSelectOverlay(ov.id); }}
+                  style={{ position: 'absolute', left: `${ov.pctX}%`, top: `${ov.pctY}%`, transform: 'translate(-50%,-50%)', zIndex: 22, cursor: 'pointer' }}>
+                  {ov.type === 'hotspot' && !ov.invisible && (
+                    <Hotspot style={hotspotStyle} brand={brand} size={20} handles={selected} />
+                  )}
+                  {ov.type === 'callout' && (
+                    <div style={{ background: ov.bgColor ?? '#18181b', color: ov.textColor ?? '#e4e4e7', fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 8, whiteSpace: 'nowrap', border: selected ? `2px solid ${brand}` : '1px solid rgba(255,255,255,0.12)', boxShadow: '0 6px 18px rgba(0,0,0,0.5)' }}>
+                      {ov.body || 'Callout text'}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Draggable hotspot */}
             {coords && (
@@ -491,10 +531,12 @@ export const DemoCanvas: React.FC = () => {
   const saveAnimationTarget = useStudioStore((s) => s.saveAnimationTarget);
   const brand               = brandState.primaryColor || '#6366f1';
 
-  const [current,      setCurrent]      = useState(0);
-  const [hotspotStyle, setHotspotStyle] = useState<HotspotStyle>('pulse');
-  const [autoplay,     setAutoplay]     = useState(false);
-  const [showHsPicker, setShowHsPicker] = useState(false);
+  const [current,           setCurrent]          = useState(0);
+  const [hotspotStyle,      setHotspotStyle]     = useState<HotspotStyle>('pulse');
+  const [autoplay,          setAutoplay]         = useState(false);
+  const [showHsPicker,      setShowHsPicker]     = useState(false);
+  const [activeTool,        setActiveTool]       = useState<OverlayTool | null>(null);
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
 
   const steps = session?.steps ?? [];
   const step  = steps[current];
@@ -528,19 +570,57 @@ export const DemoCanvas: React.FC = () => {
     await saveAnimationTarget(step.id, updated);
   };
 
+  const currentOverlays: Overlay[] = (step as any).overlays ?? [];
+  const selectedOverlay = currentOverlays.find((o) => o.id === selectedOverlayId) ?? null;
+
+  const saveOverlays = async (overlays: Overlay[]) => {
+    updateStep(step.id, { overlays } as any);
+    await saveStep(step.id, { overlays });
+  };
+
+  const handlePlaceOverlay = (pctX: number, pctY: number) => {
+    if (!activeTool) return;
+    const id = crypto.randomUUID();
+    const base: Overlay = { id, type: activeTool, pctX, pctY };
+    if (activeTool === 'spotlight') { base.w = 25; base.h = 20; base.shape = 'rounded'; base.overlayOpacity = 55; }
+    const updated = [...currentOverlays, base];
+    saveOverlays(updated);
+    setSelectedOverlayId(id);
+    setActiveTool(null);
+  };
+
+  const handleOverlayUpdate = (patch: Partial<Overlay>) => {
+    if (!selectedOverlayId) return;
+    const updated = currentOverlays.map((o) => o.id === selectedOverlayId ? { ...o, ...patch } : o);
+    saveOverlays(updated);
+  };
+
+  const handleOverlayDelete = () => {
+    const updated = currentOverlays.filter((o) => o.id !== selectedOverlayId);
+    saveOverlays(updated);
+    setSelectedOverlayId(null);
+  };
+
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
       <TopBar brand={brand} autoplay={autoplay} setAutoplay={setAutoplay} />
-      <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
-        <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} />
-        <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} />
-        <ContentPanel step={step} stepIndex={current} brand={brand} onSave={handleSave} />
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <OverlayToolbar activeTool={activeTool} onSelectTool={(t) => setActiveTool((prev) => prev === t ? null : t)} onEditScreenshot={() => {}} brand={brand} />
+        <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }} onClick={() => setSelectedOverlayId(null)}>
+          <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} />
+          <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} />
+          {selectedOverlay ? (
+            <OverlaySidebar overlay={selectedOverlay as any} onUpdate={handleOverlayUpdate as any} onDelete={handleOverlayDelete} onTypeChange={(t) => handleOverlayUpdate({ type: t })} brand={brand} />
+          ) : (
+            <ContentPanel step={step} stepIndex={current} brand={brand} onSave={handleSave} />
+          )}
 
-        {showHsPicker && (
-          <div style={{ position: 'absolute', bottom: 60, right: 360, zIndex: 60 }}>
-            <HotspotStylePicker brand={brand} selected={hotspotStyle} onPick={(s) => { setHotspotStyle(s); setShowHsPicker(false); }} onClose={() => setShowHsPicker(false)} />
-          </div>
-        )}
+          {showHsPicker && (
+            <div style={{ position: 'absolute', bottom: 60, right: 360, zIndex: 60 }}>
+              <HotspotStylePicker brand={brand} selected={hotspotStyle} onPick={(s) => { setHotspotStyle(s); setShowHsPicker(false); }} onClose={() => setShowHsPicker(false)} />
+            </div>
+          )}
+        </div>
       </div>
       <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(total - 1, c + 1))} />
     </div>

@@ -6,7 +6,8 @@ import { Hotspot } from '../../demo/Hotspot';
 import type { HotspotStyle } from '../../demo/Hotspot';
 import { withAlpha, brandGradient } from '../../demo/helpers';
 import { displayText } from '../../../lib/textUtils';
-import type { Step, DemoCard } from '../../../../../shared/types/step';
+import type { Step, DemoCard, Overlay } from '../../../../../shared/types/step';
+import { SpotlightMask } from '../../demo/SpotlightMask';
 import type { ChapterBreak } from '../../../../../shared/types/session';
 
 // ─── Sequence ────────────────────────────────────────────────────────────────
@@ -211,6 +212,7 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
   const hotspotY  = step.animationTarget?.pctY  ?? rawY;
   const hotspotSz = step.animationTarget?.hotspotSize ?? 20;
   const cards: DemoCard[] = (step as any).cards ?? [];
+  const overlays: Overlay[] = (step as any).overlays ?? [];
   const callouts = (step.annotations ?? []).filter((a) => a.shape === 'text' && a.text);
   const blurs    = (step.annotations ?? []).filter((a) => a.shape === 'blur');
   const cardBlurs    = cards.filter((c) => c.type === 'blur'    && c.rect);
@@ -232,6 +234,25 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
       {cardBlurs.map((c) => <BlurMask key={c.id} x={c.rect!.x} y={c.rect!.y} w={c.rect!.w} h={c.rect!.h} />)}
       {callouts.map((a, i) => <CalloutOverlay key={i} x={a.x} y={a.y} text={a.text!} brand={brand} />)}
       {cardCallouts.map((c) => <CalloutOverlay key={c.id} x={c.rect!.x} y={c.rect!.y} text={c.body || 'Note'} brand={c.color || brand} />)}
+      {/* Overlay layer */}
+      {overlays.map((ov) => {
+        if (ov.type === 'spotlight' && ov.w && ov.h) {
+          return <SpotlightMask key={ov.id} rect={{ x: ov.pctX, y: ov.pctY, w: ov.w, h: ov.h }} shape={ov.shape ?? 'rounded'} overlayOpacity={ov.overlayOpacity ?? 55} borderColor={ov.borderColor ?? brand} />;
+        }
+        if (ov.type === 'hotspot' && !ov.invisible) {
+          return <Hotspot key={ov.id} style={hotspotStyle} brand={brand} white x={ov.pctX} y={ov.pctY} size={20} onClick={ov.destination === 'next' ? onHotspot : undefined} title={ov.title} />;
+        }
+        if (ov.type === 'callout') {
+          return (
+            <div key={ov.id} style={{ position: 'absolute', left: `${ov.pctX}%`, top: `${ov.pctY}%`, transform: 'translate(-50%,-50%)', zIndex: 22, pointerEvents: 'none' }}>
+              <div style={{ background: ov.bgColor ?? 'rgba(20,20,23,0.9)', color: ov.textColor ?? '#fff', fontSize: 12.5, fontWeight: 600, padding: '6px 11px', borderRadius: 8, whiteSpace: 'nowrap', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(8px)' }}>
+                {ov.body || ov.title || 'Note'}
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })}
       {hotspotX !== null && hotspotY !== null && (
         <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={hotspotSz} onClick={onHotspot} title="Next" />
       )}

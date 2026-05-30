@@ -34,6 +34,7 @@ const UpdateStepBody = z.object({
   textOverride: z.string().max(2000).optional(),
   annotations: z.array(z.any()).optional(),
   cards: z.array(z.any()).optional(),
+  overlays: z.array(z.any()).optional(),
   stepTitle: z.string().max(300).nullable().optional(),
 });
 

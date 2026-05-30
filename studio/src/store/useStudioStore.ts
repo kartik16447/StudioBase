@@ -92,7 +92,7 @@ interface StudioState {
   // Phase 5 SOP Editor additions
   sopStatus: 'draft' | 'review' | 'published' | null;
   setSopStatus: (status: 'draft' | 'review' | 'published' | null) => void;
-  saveStep: (stepId: string, updates: { textOverride?: string; annotations?: any[]; cards?: any[]; stepTitle?: string | null }) => Promise<void>;
+  saveStep: (stepId: string, updates: { textOverride?: string; annotations?: any[]; cards?: any[]; overlays?: any[]; stepTitle?: string | null }) => Promise<void>;
   saveAnnotations: (stepId: string, annotations: any[]) => void;
   saveAnimationTarget: (stepId: string, animationTarget: any) => Promise<void>;
   saveChapterBreaks: (chapterBreaks: { afterStepId: string; chapterTitle: string }[]) => Promise<void>;
