@@ -45,19 +45,6 @@ export function OverlayToolbar({
           borderBottom: `1px solid ${zn.border}`,
         }}
       >
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: 0.3,
-            textTransform: 'uppercase',
-            color: zn.dim,
-            marginRight: 6,
-          }}
-        >
-          Add
-        </span>
-
         {TOOLS.map(({ id, label, Icon }) => {
           const active = activeTool === id;
           return (

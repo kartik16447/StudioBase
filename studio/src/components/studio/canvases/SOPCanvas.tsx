@@ -46,6 +46,7 @@ export const SOPCanvas: React.FC = () => {
 
   const isAiProcessing = useStudioStore(state => state.isAiProcessing);
   const triggerPipeline = useStudioStore(state => state.triggerPipeline);
+  const setScriptDirty = useStudioStore(state => state.setScriptDirty);
 
   const [isSharing, setIsSharing] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -212,6 +213,7 @@ export const SOPCanvas: React.FC = () => {
               console.log(`[SOPCanvas][Generate AI Content] Starting processing for sessionId: ${session.sessionId}`);
               try {
                 await triggerPipeline();
+                setScriptDirty(true);
               } catch (err: any) {
                 console.error('[SOPCanvas][Generate AI Content] triggerPipeline failed!', err);
                 const msg = err?.message || 'Failed to start AI generation';

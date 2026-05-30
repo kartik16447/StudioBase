@@ -73,6 +73,7 @@ export const CardTypePicker: React.FC<Props> = ({
               onMouseLeave={() => setHover(null)}
               onClick={() => !c.soon && onPick?.(c.id)}
               disabled={c.soon}
+              title={c.soon ? 'Coming Q3 2026 — join the waitlist to get early access' : undefined}
               style={{
                 textAlign: 'left',
                 padding: '11px 11px',

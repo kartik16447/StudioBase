@@ -192,7 +192,6 @@ export const Sidebar: React.FC = () => {
               <Avatar name="Kartik Upadhyay" size={32} />
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-semibold text-white truncate">Kartik Upadhyay</div>
-                <div className="text-[11px] text-white/40 truncate">Free Plan · 12/50 mins</div>
               </div>
               <button title="Sign out" onClick={() => sessionManager.logout()} className="text-white/40 hover:text-red-400 transition-colors">
                 <I.LogOut size={16} />

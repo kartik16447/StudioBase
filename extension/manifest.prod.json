@@ -4,7 +4,6 @@
   "version": "1.0.0",
   "description": "Record your screen, auto-generate step-by-step SOPs, interactive demos, and cinematic videos — powered by AI.",
   "homepage_url": "https://studiobase.app",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyH0iOu1pGsTNC3TTQm9IOS7wOGBKFwqeCqM0KcFLnXzduNnPUiPTRjyQphBdbVbWENIsD2Sdv6CUq2LJR8tIy0gr1dbExCleBLgsAY9sdTDl9Fw4eJpVKLwSGgyM4Ul9hty91p+jVT1kFcPULZ/XmIkR82uF/U5MoK8RmIVBogLWIBP3VgwL1d0eZcNyD5df83OpFGaU8x31hzW0woG8jJzV2gUqkKomRB/KDJM85RxGRH1querkZvwgtlDUDT6QOpaGfMmAzuaoh5mtXoVL1CubiM2KPcS87ylrzIzvZEDQgK2E1oEyq4iky+m0saKIgTVE2Tbp4+oDdTrBpkuRlQIDAQAB",
   "permissions": [
     "tabs",
     "storage",

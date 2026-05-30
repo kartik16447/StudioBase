@@ -414,13 +414,14 @@ export const EmbedDemoView: React.FC = () => {
   const session  = useStudioStore((s) => s.session);
   const brand    = useStudioStore((s) => s.brand.primaryColor) || '#6366f1';
 
-  const meta        = (session?.metadata as any) ?? {};
-  const demoBrand   = meta.demoBrand ?? {};
-  const fontFamily  = demoBrand.fontFamily ? `${demoBrand.fontFamily}, Inter, system-ui, sans-serif` : undefined;
-  const showWatermark = demoBrand.watermark !== false;
-  const logoUrl     = demoBrand.logoUrl ?? null;
-  const pwRequired  = !!meta.password;
-  const autoplayCfg = meta.autoplay ?? { enabled: false, intervalSeconds: 5 };
+  const meta           = (session?.metadata as any) ?? {};
+  const demoBrand      = meta.demoBrand ?? {};
+  const fontFamily     = demoBrand.fontFamily ? `${demoBrand.fontFamily}, Inter, system-ui, sans-serif` : undefined;
+  const showWatermark  = demoBrand.watermark !== false;
+  const logoUrl        = demoBrand.logoUrl ?? null;
+  const pwRequired     = !!meta.password;
+  const autoplayCfg    = meta.autoplay ?? { enabled: false, intervalSeconds: 5 };
+  const transitionStyle: 'cut' | 'crossfade' = meta.transitionStyle ?? 'crossfade';
 
   const [hotspotStyle] = useState<HotspotStyle>('pulse');
   const [idx, setIdx]  = useState(0);
@@ -507,7 +508,7 @@ export const EmbedDemoView: React.FC = () => {
       {frame.type === 'step'    && (
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '52px 24px 28px' }} onClick={(e) => e.stopPropagation()}>
           <div style={{ width: cardWidth, transition: 'width 0.3s ease', display: 'flex', flexDirection: 'column' }}>
-            <div key={frame.stepIndex} className="dm-fade" style={{ position: 'relative' }}>
+            <div key={frame.stepIndex} className={transitionStyle === 'crossfade' ? 'dm-fade' : undefined} style={{ position: 'relative' }}>
               <ScreenshotCard step={frame.step} session={session} brand={brand} hotspotStyle={hotspotStyle} progress={progress} onHotspot={() => go(1)} cursorTween={activeTween} />
               {/* Countdown ring overlays the hotspot when autoplay is on */}
               {autoplayCfg.enabled && frame.stepIndex < steps.length - 1 && (

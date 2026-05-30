@@ -49,7 +49,7 @@ export function injectToolbar(): void {
   toolbarContainer.id = 'sb-toolbar-container';
   Object.assign(toolbarContainer.style, {
     position: 'fixed',
-    bottom: '24px',
+    top: '24px',
     left: '0',
     right: '0',
     display: 'flex',
@@ -542,6 +542,7 @@ function injectStyles(): void {
   const style = document.createElement('style');
   style.id = 'sb-toolbar-styles';
   style.textContent = `
+    *, *::before, *::after { cursor: none !important; }
     @keyframes sb-spin {
       to { transform: rotate(360deg); }
     }
@@ -591,7 +592,7 @@ function applyCursorMode(mode: CursorMode): void {
   cursorEl.id = 'sb-cursor';
   Object.assign(cursorEl.style, {
     position: 'fixed', pointerEvents: 'none',
-    zIndex: '2147483645', left: '0', top: '0',
+    zIndex: '2147483647', left: '0', top: '0',
   });
 
   const arrowSvg = (fill: string, stroke: string) =>

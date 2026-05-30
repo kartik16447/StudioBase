@@ -5,6 +5,7 @@
     "build": "node build.mjs",
     "build:prod": "node build.mjs --prod",
     "watch": "node build.mjs --watch",
+    "package": "rm -rf dist && node build.mjs --prod && cd dist && zip -r ../studiobase-extension.zip .",
     "deploy": "npm run build && wrangler deploy",
     "preview": "npm run build && wrangler dev"
   },

@@ -46,8 +46,11 @@ export const VideoCanvas: React.FC = () => {
   const cinPlayerRef      = useRef<CinematicPlayerHandle>(null);
   const rawVideoRef       = useRef<HTMLVideoElement>(null);
 
-  const renderMode = useStudioStore((s) => s.renderMode);
-  const steps      = useMemo(() => session?.steps || [], [session?.steps]);
+  const renderMode     = useStudioStore((s) => s.renderMode);
+  const scriptDirty    = useStudioStore((s) => s.scriptDirty);
+  const setScriptDirty = useStudioStore((s) => s.setScriptDirty);
+  const triggerExport  = useStudioStore((s) => s.triggerExport);
+  const steps          = useMemo(() => session?.steps || [], [session?.steps]);
 
   const sopId       = session?.sopId ?? null;
   const sessionId   = session?.sessionId ?? 'unknown';
@@ -203,6 +206,29 @@ export const VideoCanvas: React.FC = () => {
         }
         .border-travel { animation: border-travel 4s linear infinite; }
       `}</style>
+
+      {/* ── Script dirty banner ──────────────────────────────────────────── */}
+      {scriptDirty && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-500/15 border-b border-amber-500/30 shrink-0">
+          <I.AlertTriangle size={14} className="text-amber-400 shrink-0" />
+          <p className="text-[12px] text-amber-300 flex-1">
+            Script was updated — regenerate the video so it matches your new narration.
+          </p>
+          <button
+            onClick={() => { setScriptDirty(false); triggerExport(); }}
+            className="text-[11px] font-semibold text-amber-300 hover:text-amber-100 border border-amber-400/40 rounded px-2.5 py-1 transition-colors shrink-0"
+          >
+            Regenerate ↻
+          </button>
+          <button
+            onClick={() => setScriptDirty(false)}
+            className="text-amber-500 hover:text-amber-300 transition-colors shrink-0"
+            title="Dismiss"
+          >
+            <I.X size={13} />
+          </button>
+        </div>
+      )}
 
       {/* ── Viewing area ───────────────────────────────────────────────── */}
       <div className="flex-1 studio-gradient flex flex-col items-center justify-start py-16 px-8 min-h-0 overflow-y-auto">
@@ -407,7 +433,7 @@ export const VideoCanvas: React.FC = () => {
               }
             }}
           >
-            Raw
+            Download Raw
           </Button>
           <Button
             variant="ghost" size="sm" icon={I.Code2}
