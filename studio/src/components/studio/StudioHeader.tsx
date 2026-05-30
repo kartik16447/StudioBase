@@ -230,6 +230,16 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
   const brand = useStudioStore((s) => s.brand);
   const saveAutoplay = useStudioStore((s) => s.saveAutoplay);
   const setShowDemoPreview = useStudioStore((s) => s.setShowDemoPreview);
+  const saveSessionTitle = useStudioStore((s) => s.saveSessionTitle);
+
+  const [editingTitle, setEditingTitle] = useState(session?.aiOutputs?.title || 'Untitled Session');
+
+  // Keep state in sync with external session updates
+  React.useEffect(() => {
+    if (session?.aiOutputs?.title) {
+      setEditingTitle(session.aiOutputs.title);
+    }
+  }, [session?.aiOutputs?.title]);
 
   const activeToolState = useStudioStore((s) => s.activeTool);
   const setActiveToolState = useStudioStore((s) => s.setActiveTool);
@@ -250,17 +260,23 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
       onClick={() => setShowBranding(false)}
     >
       {/* Left zone: Session Breadcrumb */}
-      <div className="flex items-center gap-2.5 shrink-0 select-none">
-        <span
-          className="w-6 h-6 rounded flex items-center justify-center text-white font-bold text-[12.5px] shadow-sm shrink-0"
-          style={{ backgroundColor: brandColor }}
-        >
-          S
-        </span>
+      <div className="flex items-center gap-1.5 shrink-0 select-none">
         <div className="flex flex-col shrink-0 pr-1">
-          <span className="text-[13px] font-semibold text-text truncate max-w-[160px] sm:max-w-[240px]">
-            {session?.aiOutputs?.title || 'Untitled Session'}
-          </span>
+          <input
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            onBlur={() => {
+              if (editingTitle.trim() && editingTitle !== session?.aiOutputs?.title) {
+                saveSessionTitle(editingTitle.trim());
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.currentTarget.blur();
+              }
+            }}
+            className="text-[13px] font-semibold text-text bg-transparent border-none outline-none focus:bg-surface-3 focus:ring-1 focus:ring-border rounded px-1.5 py-0.5 -mx-1.5 max-w-[160px] sm:max-w-[240px] transition-all"
+          />
           <span className="text-[10px] text-text-3 font-medium capitalize tracking-wide leading-none mt-0.5">
             {activeView} mode
           </span>

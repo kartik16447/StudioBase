@@ -114,8 +114,8 @@ const FormatCard: React.FC<FormatCardProps> = ({
           {unlockLoading
             ? 'Unlocking…'
             : creditBalance === null
-              ? `Unlock Cinematic (${CINEMATIC_CREDIT_COST} credit · — remaining)`
-              : `Unlock Cinematic (${CINEMATIC_CREDIT_COST} credit · ${creditBalance} remaining)`}
+              ? `Unlock (1cr · —)`
+              : `Unlock (1cr · ${creditBalance} left)`}
         </button>
       )}
     </div>

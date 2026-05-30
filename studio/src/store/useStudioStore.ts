@@ -102,6 +102,7 @@ interface StudioState {
   saveDemoBrand: (patch: { logoUrl?: string | null; fontFamily?: string | null; watermark?: boolean }) => Promise<void>;
   saveEndScreen: (endScreen: { headline?: string; subheadline?: string; ctaLabel?: string; ctaUrl?: string } | null) => Promise<void>;
   savePassword: (password: string | null) => Promise<void>;
+  saveSessionTitle: (title: string) => Promise<void>;
   publishSOP: (sopId: string, status: 'review' | 'published') => Promise<void>;
   forkSOP: (sopId: string) => Promise<string>; // returns new sopId
   shareSession: () => Promise<{ shareUrl: string; shareToken: string }>;
@@ -904,6 +905,27 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify({ metadata: updatedMetadata }),
     }).catch(err => console.warn('[savePassword] PATCH failed:', err));
+  },
+
+  saveSessionTitle: async (title) => {
+    const { session } = get();
+    if (!session) return;
+    const sessionId = (session as any).id || (session as any).sessionId;
+    const workspaceId = (session as any).workspaceId;
+    if (!sessionId || !workspaceId) return;
+
+    // Optimistically update memory
+    const updatedSession = {
+      ...session,
+      aiOutputs: { ...(session.aiOutputs || {}), title }
+    };
+    set({ session: updatedSession });
+
+    await apiClient.request(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ title }),
+    }).catch(err => console.warn('[saveSessionTitle] PATCH failed:', err));
   },
 
   publishSOP: async (sopId, status) => {

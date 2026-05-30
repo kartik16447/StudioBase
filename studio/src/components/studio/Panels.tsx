@@ -557,7 +557,7 @@ export const ChaptersPanel: React.FC = () => {
   const session = useStudioStore(state => state.session);
   const saveChapterBreaks = useStudioStore(state => state.saveChapterBreaks);
   const focusedStepId = useStudioStore(state => state.focusedStepId);
-  const currentStepIndex = useStudioStore(state => state.currentStepIndex);
+  const focusedStepIndex = useStudioStore(state => state.focusedStepIndex);
 
   if (!session) return null;
 
@@ -602,8 +602,18 @@ export const ChaptersPanel: React.FC = () => {
 
         <button
           onClick={() => {
-            const targetStepId = focusedStepId || session.steps[currentStepIndex]?.id || session.steps[0]?.id;
-            if (!targetStepId) return;
+            const activeStep = session.steps.find(s => s.id === focusedStepId) || session.steps[focusedStepIndex] || session.steps[0];
+            const defaultSeq = activeStep ? activeStep.sequence : 1;
+            const input = window.prompt(`Enter step number to add chapter break after (1 - ${session.steps.length}):`, String(defaultSeq));
+            if (input === null) return; // cancel
+            const stepNum = parseInt(input, 10);
+            if (isNaN(stepNum) || stepNum < 1 || stepNum > session.steps.length) {
+              showToast('error', 'Invalid step number.');
+              return;
+            }
+            const targetStep = session.steps.find(s => s.sequence === stepNum);
+            if (!targetStep) return;
+            const targetStepId = targetStep.id;
 
             // Check if there is already a chapter break after this step
             if (chapters.some(c => c.afterStepId === targetStepId)) {
@@ -652,9 +662,14 @@ const ChapterRow: React.FC<{ n: number, title: string, stepRange: string, isFirs
             />
           ) : (
             <div
-              className={cn('text-[13.5px] font-semibold text-text truncate', !isFirst && 'cursor-text')}
+              className={cn('text-[13.5px] font-semibold text-text truncate flex items-center gap-1.5', !isFirst && 'cursor-text')}
               onClick={() => !isFirst && setEditing(true)}
-            >{title}</div>
+            >
+              <span>{title}</span>
+              {!isFirst && (
+                <I.Edit2 size={11} className="text-text-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              )}
+            </div>
           )}
           <div className="text-[11.5px] text-text-3">{stepRange}</div>
         </div>

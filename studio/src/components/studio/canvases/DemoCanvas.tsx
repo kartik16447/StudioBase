@@ -1121,9 +1121,15 @@ export const DemoCanvas: React.FC = () => {
           </AnimatePresence>
 
           {showHsPicker && (
-            <div style={{ position: 'absolute', bottom: 60, right: 360, zIndex: 60 }}>
-              <HotspotStylePicker brand={brand} selected={hotspotStyle} onPick={(s) => { setHotspotStyle(s); setShowHsPicker(false); }} onClose={() => setShowHsPicker(false)} />
-            </div>
+            <>
+              <div
+                style={{ position: 'fixed', inset: 0, zIndex: 59 }}
+                onClick={() => setShowHsPicker(false)}
+              />
+              <div style={{ position: 'absolute', bottom: 60, right: 360, zIndex: 60 }}>
+                <HotspotStylePicker brand={brand} selected={hotspotStyle} onPick={(s) => { setHotspotStyle(s); setShowHsPicker(false); }} onClose={() => setShowHsPicker(false)} />
+              </div>
+            </>
           )}
         </div>
       </div>

@@ -281,13 +281,19 @@ export const VideoCanvas: React.FC = () => {
             onPlayStateChange={handlePlayerPlayState}
           />
 
-          {/* Watermark overlay — on top of player */}
+          {/* Logo / Branding Fallback (Top-Right) */}
+          <div className="absolute top-4 right-4 z-20 pointer-events-none bg-black/35 backdrop-blur-[4px] rounded-md px-2.5 py-1.5 flex items-center justify-center border border-white/10 shadow-lg">
+            {brand.logoUrl ? (
+              <img src={brand.logoUrl} className="h-5 max-w-[100px] object-contain" alt="Logo" />
+            ) : (
+              <span className="text-white/70 text-[10px] font-extrabold tracking-wider uppercase">StudioBase</span>
+            )}
+          </div>
+
+          {/* Watermark overlay (Bottom-Right) */}
           {brand.watermark && (
-            <div className="absolute bottom-14 right-4 z-20 pointer-events-none opacity-55">
-              {brand.logoUrl
-                ? <img src={brand.logoUrl} className="h-5 object-contain" alt={brand.watermark} />
-                : <span className="text-white text-[11px] font-semibold tracking-wide">{brand.watermark}</span>
-              }
+            <div className="absolute bottom-14 right-4 z-20 pointer-events-none opacity-45 select-none">
+              <span className="text-white text-[10px] font-semibold tracking-wider uppercase">{brand.watermark}</span>
             </div>
           )}
 
