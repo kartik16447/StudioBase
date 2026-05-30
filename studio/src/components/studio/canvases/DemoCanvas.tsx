@@ -514,6 +514,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
             onMouseLeave={(e) => onScreenshotMouseUp(e)}
             onClick={(e) => {
               if (!activeTool || activeTool === 'zoomFocus' || !screenshotRef.current) return;
+              e.stopPropagation();
               const rect = screenshotRef.current.getBoundingClientRect();
               const x = ((e.clientX - rect.left) / rect.width) * 100;
               const y = ((e.clientY - rect.top) / rect.height) * 100;
@@ -522,6 +523,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
             onDoubleClick={(e) => {
               if (activeTool) return;
               if (!screenshotRef.current) return;
+              e.stopPropagation();
               const rect = screenshotRef.current.getBoundingClientRect();
               const x = ((e.clientX - rect.left) / rect.width) * 100;
               const y = ((e.clientY - rect.top) / rect.height) * 100;

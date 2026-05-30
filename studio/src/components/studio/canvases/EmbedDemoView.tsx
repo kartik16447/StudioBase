@@ -381,8 +381,8 @@ function CursorTweenOverlay({ tween, brand }: { tween: CursorTween; brand: strin
   );
 }
 
-function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspot, cursorTween }: {
-  step: Step; session: any; brand: string; hotspotStyle: HotspotStyle; progress: number; onHotspot: () => void;
+function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNavigate, cursorTween }: {
+  step: Step; session: any; brand: string; hotspotStyle: HotspotStyle; progress: number; onNavigate: (ov: any) => void;
   cursorTween?: CursorTween | null;
 }) {
   const coords    = step.coordinates;
@@ -437,12 +437,12 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
               shape={ov.shape ?? 'rounded'}
               overlayOpacity={ov.overlayOpacity ?? 55}
               borderColor={ov.borderColor ?? brand}
-              onClick={ov.destination !== 'stay' ? onHotspot : undefined}
+              onClick={ov.destination !== 'stay' ? () => onNavigate(ov) : undefined}
             />
           );
         }
         if (ov.type === 'hotspot' && !ov.invisible) {
-          return <Hotspot key={ov.id} style={hotspotStyle} brand={brand} white x={ov.pctX} y={ov.pctY} size={20} onClick={ov.destination === 'next' ? onHotspot : undefined} title={ov.title} />;
+          return <Hotspot key={ov.id} style={hotspotStyle} brand={brand} white x={ov.pctX} y={ov.pctY} size={20} onClick={ov.destination !== 'stay' ? () => onNavigate(ov) : undefined} title={ov.title} />;
         }
         if (ov.type === 'callout') {
           return (
@@ -450,14 +450,14 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onHotspo
               key={ov.id}
               ov={ov}
               brand={brand}
-              onClick={ov.destination !== 'stay' ? onHotspot : undefined}
+              onClick={ov.destination !== 'stay' ? () => onNavigate(ov) : undefined}
             />
           );
         }
         return null;
       })}
       {hotspotX !== null && hotspotY !== null && !cursorTween && (
-        <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={hotspotSz} onClick={onHotspot} title="Next" />
+        <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={hotspotSz} onClick={() => onNavigate({ destination: 'next' })} title="Next" />
       )}
       {cursorTween && <CursorTweenOverlay tween={cursorTween} brand={brand} />}
     </div>
@@ -607,6 +607,24 @@ export const EmbedDemoView: React.FC = () => {
 
   const go = useCallback((d: number) => setIdx((i) => Math.max(0, Math.min(seq.length - 1, i + d))), [seq.length]);
 
+  const handleOverlayClick = useCallback((ov: any) => {
+    if (ov.destination === 'stay') {
+      return;
+    }
+    if (ov.destination === 'specific') {
+      const stepNum = ov.destinationStep ?? 1;
+      const targetIndex = seq.findIndex(
+        (f) => f.type === 'step' && f.stepIndex === stepNum - 1
+      );
+      if (targetIndex !== -1) {
+        setIdx(targetIndex);
+      }
+      return;
+    }
+    // Default to next step
+    go(1);
+  }, [seq, go]);
+
   // Keyboard nav
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -675,7 +693,7 @@ export const EmbedDemoView: React.FC = () => {
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '52px 24px 28px' }} onClick={(e) => e.stopPropagation()}>
           <div style={{ width: cardWidth, transition: 'width 0.3s ease', display: 'flex', flexDirection: 'column' }}>
             <div key={frame.stepIndex} className={transitionStyle === 'crossfade' ? 'dm-fade' : undefined} style={{ position: 'relative' }}>
-              <ScreenshotCard step={frame.step} session={session} brand={brand} hotspotStyle={hotspotStyle} progress={progress} onHotspot={() => go(1)} cursorTween={activeTween} />
+              <ScreenshotCard step={frame.step} session={session} brand={brand} hotspotStyle={hotspotStyle} progress={progress} onNavigate={handleOverlayClick} cursorTween={activeTween} />
               {/* Countdown ring overlays the hotspot when autoplay is on */}
               {autoplayCfg.enabled && frame.stepIndex < steps.length - 1 && (
                 <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
