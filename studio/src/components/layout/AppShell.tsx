@@ -20,16 +20,19 @@ interface SidebarItemProps {
   badge?: string | number;
   shortcut?: string;
   collapsed: boolean;
+  disabled?: boolean;
 }
 
-const SidebarItem: React.FC<SidebarItemProps> = ({ icon: Icon, label, active, onClick, badge, shortcut, collapsed }) => {
+const SidebarItem: React.FC<SidebarItemProps> = ({ icon: Icon, label, active, onClick, badge, shortcut, collapsed, disabled }) => {
   const btn = (
     <button
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
       className={cn(
         'group relative w-full rounded-sm flex items-center transition-all duration-150',
         collapsed ? 'h-10 w-10 mx-auto justify-center px-0' : 'h-10 px-3 gap-3',
-        active ? 'bg-sidebar-active text-primary' : 'text-text-3 hover:bg-sidebar-hover hover:text-white',
+        disabled
+          ? 'opacity-40 cursor-not-allowed text-text-3'
+          : active ? 'bg-sidebar-active text-primary' : 'text-text-3 hover:bg-sidebar-hover hover:text-white',
       )}
     >
       <Icon size={18} strokeWidth={active ? 2.2 : 1.9} className="shrink-0" />
@@ -37,7 +40,10 @@ const SidebarItem: React.FC<SidebarItemProps> = ({ icon: Icon, label, active, on
         <>
           <span className={cn('text-[13.5px] font-medium transition-colors truncate', active && 'text-white')}>{label}</span>
           {badge && (
-            <span className="ml-auto text-[10px] font-bold px-1.5 h-4.5 min-w-[18px] inline-flex items-center justify-center rounded-full bg-primary text-white">
+            <span className={cn(
+              "ml-auto text-[10px] font-bold px-1.5 h-4.5 min-w-[18px] inline-flex items-center justify-center rounded-full bg-primary text-white shrink-0",
+              disabled && "bg-white/[0.08] text-white/40 font-medium"
+            )}>
               {badge}
             </span>
           )}
@@ -59,7 +65,7 @@ const SidebarItem: React.FC<SidebarItemProps> = ({ icon: Icon, label, active, on
   );
 
   if (collapsed) {
-    return <Tooltip content={label} side="right">{btn}</Tooltip>;
+    return <Tooltip content={disabled ? `${label} (Soon)` : label} side="right">{btn}</Tooltip>;
   }
   return btn;
 };
@@ -121,8 +127,8 @@ export const Sidebar: React.FC = () => {
           {!collapsed && <div className="px-3 mb-2 text-[10.5px] font-bold text-white/30 uppercase tracking-[0.16em]">Workspace</div>}
           <div className={cn('space-y-0.5', collapsed && 'flex flex-col items-center')}>
             <SidebarItem collapsed={collapsed} id="home" icon={I.Home} label="Library" active={active === 'home'} onClick={() => navigate('home')} shortcut="G H" />
-            <SidebarItem collapsed={collapsed} id="recent" icon={I.History} label="Recent" active={active === 'recent'} onClick={() => navigate('home')} />
-            <SidebarItem collapsed={collapsed} id="shared" icon={I.Users} label="Shared with me" active={active === 'shared'} onClick={() => navigate('home')} />
+            <SidebarItem collapsed={collapsed} id="recent" icon={I.History} label="Recent" active={active === 'recent'} onClick={() => {}} disabled={true} badge="Soon" />
+            <SidebarItem collapsed={collapsed} id="shared" icon={I.Users} label="Shared with me" active={active === 'shared'} onClick={() => {}} disabled={true} badge="Soon" />
           </div>
         </section>
 
@@ -139,7 +145,7 @@ export const Sidebar: React.FC = () => {
         <section>
           {!collapsed && <div className="px-3 mb-2 text-[10.5px] font-bold text-white/30 uppercase tracking-[0.16em]">Resources</div>}
           <div className={cn('space-y-0.5', collapsed && 'flex flex-col items-center')}>
-            <SidebarItem collapsed={collapsed} id="knowledge" icon={I.Bookmark} label="Knowledge Base" active={active === 'knowledge'} onClick={() => navigate('home')} />
+            <SidebarItem collapsed={collapsed} id="knowledge" icon={I.Bookmark} label="Knowledge Base" active={active === 'knowledge'} onClick={() => {}} disabled={true} badge="Soon" />
             <SidebarItem collapsed={collapsed} id="team" icon={I.Settings} label="Workspace Settings" active={active === 'team'} onClick={() => navigate('team')} />
             <SidebarItem collapsed={collapsed} id="analytics" icon={I.BarChart2} label="Analytics" active={active === 'analytics'} onClick={() => navigate('analytics')} />
             {/* Audit Logs — enterprise only */}

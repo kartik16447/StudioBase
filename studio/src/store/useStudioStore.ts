@@ -150,6 +150,10 @@ interface StudioState {
   // Script dirty flag — set when AI script is regenerated, cleared when video is re-exported
   scriptDirty: boolean;
   setScriptDirty: (dirty: boolean) => void;
+
+  // Demo preview state
+  showDemoPreview: boolean;
+  setShowDemoPreview: (show: boolean) => void;
 }
 
 // const RESTORABLE_ROUTES: RouteName[] = ['home', 'brand', 'templates', 'team', 'analytics'];
@@ -1168,4 +1172,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   // Script dirty flag
   scriptDirty: false,
   setScriptDirty: (dirty) => set({ scriptDirty: dirty }),
+
+  // Demo preview state
+  showDemoPreview: false,
+  setShowDemoPreview: (show) => set({ showDemoPreview: show }),
 }));

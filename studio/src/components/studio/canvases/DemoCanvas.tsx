@@ -287,8 +287,6 @@ function TopBar({ brand, autoplay, setAutoplay, intervalSeconds, setIntervalSeco
             </div>
           )}
         </div>
-        <span style={{ width: 1, height: 22, background: zn.border }} />
-        <TopBtn icon={<I.Share2 size={15} />}>Share</TopBtn>
         <TopBtn icon={<I.Eye size={15} />} primary brand={brand} onClick={onPreview}>Preview</TopBtn>
       </div>
 
@@ -563,6 +561,17 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
               const x = ((e.clientX - rect.left) / rect.width) * 100;
               const y = ((e.clientY - rect.top) / rect.height) * 100;
               onPlaceOverlay(x, y);
+            }}
+            onDoubleClick={(e) => {
+              if (activeTool) return;
+              if (!screenshotRef.current) return;
+              const rect = screenshotRef.current.getBoundingClientRect();
+              const x = ((e.clientX - rect.left) / rect.width) * 100;
+              const y = ((e.clientY - rect.top) / rect.height) * 100;
+              useStudioStore.getState().setActiveTool('hotspot');
+              setTimeout(() => {
+                onPlaceOverlay(x, y);
+              }, 0);
             }}
             style={{ position: 'relative', aspectRatio: '16/9', background: '#fff', userSelect: 'none', cursor: activeTool ? 'crosshair' : 'default' }}
           >
@@ -987,9 +996,20 @@ export const DemoCanvas: React.FC = () => {
   const [current,            setCurrent]           = useState(0);
   const [hotspotStyle,       setHotspotStyle]      = useState<HotspotStyle>('pulse');
   const [showHsPicker,       setShowHsPicker]      = useState(false);
-  const [activeTool,         setActiveTool]        = useState<OverlayTool | null>(null);
+
+  const activeToolState = useStudioStore((s) => s.activeTool);
+  const setActiveToolState = useStudioStore((s) => s.setActiveTool);
+  const activeTool = (activeToolState === 'cursor' || !['hotspot', 'callout', 'spotlight', 'zoomFocus'].includes(activeToolState))
+    ? null
+    : activeToolState as OverlayTool;
+  const setActiveTool = (t: OverlayTool | null) => {
+    setActiveToolState(t || 'cursor');
+  };
+
+  const showPreview = useStudioStore((s) => s.showDemoPreview);
+  const setShowPreview = useStudioStore((s) => s.setShowDemoPreview);
+
   const [selectedOverlayId,  setSelectedOverlayId] = useState<string | null>(null);
-  const [showPreview,        setShowPreview]       = useState(false);
   const [selectedChapterId,  setSelectedChapterId] = useState<string | null>(null);
 
   const steps = session?.steps ?? [];
@@ -1083,7 +1103,7 @@ export const DemoCanvas: React.FC = () => {
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v, autoplayInterval)} intervalSeconds={autoplayInterval} setIntervalSeconds={(s) => saveAutoplay(savedAutoplay, s)} onPreview={() => setShowPreview(true)} activeTool={activeTool} onSelectTool={(t) => setActiveTool((prev) => prev === t ? null : t)} />
+      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v, autoplayInterval)} intervalSeconds={autoplayInterval} setIntervalSeconds={(s) => saveAutoplay(savedAutoplay, s)} onPreview={() => setShowPreview(true)} activeTool={activeTool} onSelectTool={(t) => setActiveTool(activeTool === t ? null : t)} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }} onClick={() => setSelectedOverlayId(null)}>
           <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} selectedChapterId={selectedChapterId} onSelectChapter={setSelectedChapterId} />
