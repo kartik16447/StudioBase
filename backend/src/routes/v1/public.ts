@@ -109,6 +109,29 @@ publicRoutes.get('/:shareToken/json', async (c) => {
   const session = await resolveSession(c.env.DB, shareToken);
   if (!session?.r2JsonKey) return c.json({ error: 'Not found' }, 404);
 
+  // Password enforcement — same logic as GET /:shareToken
+  const metaRow = await c.env.DB.prepare(
+    `SELECT metadata FROM sessions WHERE id = ?`
+  ).bind(session.id).first<{ metadata: string | null }>();
+  let sessionPassword: string | null = null;
+  if (metaRow?.metadata) {
+    try {
+      const meta = JSON.parse(metaRow.metadata);
+      if (meta?.password && typeof meta.password === 'string') {
+        sessionPassword = meta.password;
+      }
+    } catch {}
+  }
+  if (sessionPassword) {
+    const provided =
+      c.req.header('x-session-password') ||
+      c.req.query('password') ||
+      null;
+    if (provided !== sessionPassword) {
+      return c.json({ error: 'password_required' }, 401);
+    }
+  }
+
   // ── Fetch R2 snapshot + D1 live overrides in parallel ───────────────────
   const [obj, sessionMeta, sopRow, audioRows] = await Promise.all([
     c.env.R2.get(session.r2JsonKey),
