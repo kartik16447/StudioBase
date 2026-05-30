@@ -24,7 +24,8 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
   setActiveTab,
   tabs
 }) => {
-  const activeTabItem = tabs.find(t => t.id === activeTab) || tabs[0];
+  const visibleTabs = tabs.filter(t => !['music', 'visuals', 'elements'].includes(t.id));
+  const activeTabItem = visibleTabs.find(t => t.id === activeTab) || visibleTabs[0] || tabs[0];
 
   return (
     <AnimatePresence initial={false}>
@@ -38,9 +39,8 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
         >
           <div className="px-3 pt-2 border-b border-border overflow-x-auto">
             <div className="flex items-center gap-0 min-w-max">
-              {tabs.map(t => {
+              {visibleTabs.map(t => {
                 const active = activeTab === t.id;
-                const isLocked = ['music', 'visuals', 'elements'].includes(t.id);
                 return (
                   <button
                     key={t.id}
@@ -48,12 +48,10 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
                     className={cn(
                       'relative inline-flex items-center gap-1.5 h-11 px-3 text-[12.5px] font-medium transition-colors',
                       active ? 'text-text' : 'text-text-2 hover:text-text',
-                      isLocked && 'opacity-60',
                     )}
                   >
                     <t.icon size={14} strokeWidth={1.9} />
                     {t.label}
-                    {isLocked && <I.Lock size={10} className="text-text-3" />}
                     {active && (
                       <motion.span
                         layoutId="tab-indicator"
@@ -80,6 +78,33 @@ export const SidebarControls: React.FC<SidebarControlsProps> = ({
                 <activeTabItem.component />
               </motion.div>
             </AnimatePresence>
+          </div>
+
+          {/* Collapsible More (soon) Row */}
+          <div className="border-t border-border bg-surface-2/20 shrink-0">
+            <details className="group">
+              <summary className="flex items-center justify-between px-4 h-10 text-[12.5px] font-semibold text-text-2 hover:text-text cursor-pointer select-none">
+                <span className="flex items-center gap-2">
+                  <I.Plus size={13} className="text-text-3 group-open:rotate-45 transition-transform duration-200" />
+                  <span>More features</span>
+                </span>
+                <span className="text-[10px] bg-white/[0.06] border border-white/5 text-text-3 font-semibold px-1.5 py-0.5 rounded-full">Soon</span>
+              </summary>
+              <div className="px-4 pb-3.5 pt-1.5 flex flex-col gap-2.5 border-t border-border/5 bg-surface-2/40 text-[12px] text-text-3">
+                <div className="flex items-center gap-2">
+                  <I.Music2 size={13} className="text-text-3" />
+                  <span>Music Tracks — generate AI background scores</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <I.Image size={13} className="text-text-3" />
+                  <span>Visual Overlays — inject media & custom slides</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <I.Layers size={13} className="text-text-3" />
+                  <span>Asset Library — upload reusable brand templates</span>
+                </div>
+              </div>
+            </details>
           </div>
         </motion.aside>
       )}
