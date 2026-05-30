@@ -11,7 +11,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useStudioStore } from '../../../store/useStudioStore';
-import { apiClient } from '../../../lib/apiClient';
+
 import { I } from '../../../components/icons';
 import { ScreenshotPlaceholder } from '../../../components/ui';
 import { Hotspot } from '../../../components/demo/Hotspot';
@@ -22,7 +22,7 @@ import { withAlpha } from '../../../components/demo/helpers';
 import { displayText } from '../../../lib/textUtils';
 import type { DemoCard, Overlay } from '../../../../../shared/types/step';
 import type { OverlayTool } from '../../../components/demo/OverlayToolbar';
-import { Crosshair, MessageSquare, Scan, ZoomIn as ZoomInIcon } from '../../../components/demo/icons';
+
 import { EmbedDemoView } from './EmbedDemoView';
 import { OverlaySidebar } from '../../../components/demo/OverlaySidebar';
 import { SpotlightMask } from '../../../components/demo/SpotlightMask';
@@ -35,158 +35,11 @@ const zn = {
   ink: '#e4e4e7', mute: '#a1a1aa', dim: '#71717a', chip: '#252528',
 };
 
-// ─── Top bar ──────────────────────────────────────────────────────────────────
 
-function TopBtn({ children, icon, primary, ghost, brand, onClick }: {
-  children?: React.ReactNode; icon?: React.ReactNode; primary?: boolean;
-  ghost?: boolean; brand?: string; onClick?: (e?: React.MouseEvent) => void;
-}) {
-  const [h, setH] = useState(false);
-  return (
-    <button onClick={onClick} onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
-      style={{ height: 30, padding: '0 12px', borderRadius: 7, fontSize: 12.5, fontWeight: 550, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, border: primary ? 'none' : `1px solid ${h ? zn.border2 : zn.border}`, background: primary ? brand : ghost ? (h ? zn.chip : 'transparent') : (h ? zn.panel2 : zn.panel), color: primary ? '#fff' : zn.ink, boxShadow: primary && brand ? `0 4px 14px ${withAlpha(brand, 0.35)}` : 'none', transition: 'all 0.13s' }}>
-      {icon}{children}
-    </button>
-  );
-}
 
-const BG_PRESETS: { label: string; type: 'color' | 'gradient'; value: string }[] = [
-  { label: 'Default', type: 'gradient', value: 'default' },
-  { label: 'Midnight', type: 'color',   value: '#08080a' },
-  { label: 'Slate',    type: 'color',   value: '#0f172a' },
-  { label: 'Zinc',     type: 'color',   value: '#18181b' },
-  { label: 'Forest',   type: 'gradient', value: 'radial-gradient(120% 80% at 50% -10%, rgba(20,83,45,0.28) 0%, rgba(10,10,11,0) 55%), #08080a' },
-  { label: 'Violet',   type: 'gradient', value: 'radial-gradient(120% 80% at 50% -10%, rgba(109,40,217,0.28) 0%, rgba(10,10,11,0) 55%), #08080a' },
-  { label: 'Ocean',    type: 'gradient', value: 'radial-gradient(120% 80% at 50% -10%, rgba(7,89,133,0.3) 0%, rgba(10,10,11,0) 55%), #08080a' },
-];
 
-const FONTS = ['Inter', 'DM Sans', 'Lato', 'Geist', 'System'];
 
-async function uploadLogo(session: any, file: File): Promise<string | null> {
-  const sessionId = session?.id || session?.sessionId;
-  const workspaceId = session?.workspaceId;
-  if (!sessionId || !workspaceId) return null;
-  try {
-    const ext = file.name.split('.').pop() ?? 'png';
-    const key = `${sessionId}/logo-${Date.now()}.${ext}`;
-    const presign = await apiClient.request<{ files: { key: string; uploadUrl: string }[] }>('/assets/upload/presign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
-      body: JSON.stringify({ sessionId, files: [{ key, contentType: file.type }] }),
-    });
-    const { uploadUrl } = presign.files[0];
-    await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
-    return uploadUrl.split('?')[0]; // bare URL without presign params
-  } catch { return null; }
-}
 
-function BrandingPopover({ brand }: { brand: string }) {
-  const session = useStudioStore((s) => s.session);
-  const saveDemoBackground = useStudioStore((s) => s.saveDemoBackground);
-  const saveDemoBrand = useStudioStore((s) => s.saveDemoBrand);
-  const savePassword = useStudioStore((s) => s.savePassword);
-  const meta = (session?.metadata as any) ?? {};
-  const demoBrand = meta.demoBrand ?? {};
-  const [tab, setTab] = useState<'bg' | 'brand' | 'settings'>('bg');
-  const [uploading, setUploading] = useState(false);
-  const currentValue = meta.demoBackground?.value ?? 'default';
-
-  const tabBtn = (id: typeof tab, label: string) => (
-    <button onClick={() => setTab(id)} style={{ flex: 1, height: 26, borderRadius: 6, border: 'none', background: tab === id ? zn.panel2 : 'transparent', color: tab === id ? zn.ink : zn.dim, fontSize: 12, fontWeight: tab === id ? 600 : 400, cursor: 'pointer' }}>{label}</button>
-  );
-
-  return (
-    <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, width: 280, background: '#161618', border: `1px solid ${zn.border}`, borderRadius: 12, boxShadow: '0 20px 50px rgba(0,0,0,0.6)', zIndex: 80, padding: 14 }}
-      onClick={(e) => e.stopPropagation()}>
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 2, background: zn.bg, borderRadius: 8, padding: 3, marginBottom: 14 }}>
-        {tabBtn('bg', 'Background')}
-        {tabBtn('brand', 'Brand')}
-        {tabBtn('settings', 'Settings')}
-      </div>
-
-      {tab === 'bg' && (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-            {BG_PRESETS.map((p) => {
-              const active = currentValue === p.value;
-              const swatch = p.type === 'color' ? p.value : (p.value === 'default' ? `radial-gradient(circle at 50% 0%, ${withAlpha(brand, 0.3)} 0%, #08080a 60%)` : p.value);
-              return (
-                <button key={p.value} title={p.label} onClick={() => {
-                  if (p.value === 'default') saveDemoBackground(null);
-                  else saveDemoBackground({ type: p.type, value: p.value });
-                }} style={{ aspectRatio: '3/2', borderRadius: 7, border: `2px solid ${active ? brand : 'transparent'}`, background: swatch, cursor: 'pointer', outline: 'none' }} />
-              );
-            })}
-          </div>
-          <div style={{ marginTop: 10, borderTop: `1px solid ${zn.border}`, paddingTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input type="color" defaultValue={meta.demoBackground?.type === 'color' ? meta.demoBackground.value : '#08080a'}
-              onChange={(e) => saveDemoBackground({ type: 'color', value: e.target.value })}
-              style={{ width: 34, height: 28, borderRadius: 6, border: `1px solid ${zn.border}`, padding: 2, background: 'transparent', cursor: 'pointer' }} />
-            <span style={{ fontSize: 11.5, color: zn.mute }}>Custom color</span>
-          </div>
-        </>
-      )}
-
-      {tab === 'brand' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* Logo */}
-          <div>
-            <div style={{ fontSize: 11, color: zn.dim, marginBottom: 6 }}>Logo</div>
-            {demoBrand.logoUrl && <img src={demoBrand.logoUrl} alt="logo" style={{ height: 32, borderRadius: 6, marginBottom: 8, objectFit: 'contain', background: '#fff', padding: '2px 6px' }} />}
-            <label style={{ display: 'flex', alignItems: 'center', gap: 7, height: 30, padding: '0 10px', borderRadius: 7, border: `1px solid ${zn.border}`, background: zn.panel2, color: uploading ? zn.dim : zn.ink, fontSize: 12, cursor: uploading ? 'default' : 'pointer' }}>
-              <I.Upload size={13} /> {uploading ? 'Uploading…' : 'Upload logo'}
-              <input type="file" accept="image/*" style={{ display: 'none' }} disabled={uploading} onChange={async (e) => {
-                const file = e.target.files?.[0]; if (!file) return;
-                setUploading(true);
-                const url = await uploadLogo(session, file);
-                if (url) saveDemoBrand({ logoUrl: url });
-                setUploading(false);
-              }} />
-            </label>
-            {demoBrand.logoUrl && <button onClick={() => saveDemoBrand({ logoUrl: null })} style={{ marginTop: 4, fontSize: 11, color: zn.dim, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Remove logo</button>}
-          </div>
-          {/* Font */}
-          <div>
-            <div style={{ fontSize: 11, color: zn.dim, marginBottom: 6 }}>Font</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-              {FONTS.map((f) => {
-                const active = (demoBrand.fontFamily ?? 'Inter') === f;
-                return <button key={f} onClick={() => saveDemoBrand({ fontFamily: f })} style={{ height: 26, padding: '0 10px', borderRadius: 6, border: `1px solid ${active ? brand : zn.border}`, background: active ? withAlpha(brand, 0.12) : 'transparent', color: active ? brand : zn.mute, fontSize: 12, cursor: 'pointer' }}>{f}</button>;
-              })}
-            </div>
-          </div>
-          {/* Watermark */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: zn.ink }}>Show watermark</span>
-            <div onClick={() => saveDemoBrand({ watermark: !(demoBrand.watermark ?? true) })} style={{ width: 34, height: 19, borderRadius: 99, background: (demoBrand.watermark ?? true) ? brand : zn.border2, position: 'relative', cursor: 'pointer', transition: 'background 0.18s' }}>
-              <span style={{ position: 'absolute', top: 2, left: (demoBrand.watermark ?? true) ? 17 : 2, width: 15, height: 15, borderRadius: '50%', background: '#fff', transition: 'left 0.18s', boxShadow: '0 1px 2px rgba(0,0,0,0.4)' }} />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {tab === 'settings' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 11, color: zn.dim, marginBottom: 6 }}>Password protection</div>
-            <input defaultValue={meta.password ?? ''} placeholder="Leave blank for no gate"
-              onBlur={(e) => savePassword(e.target.value.trim() || null)}
-              style={{ width: '100%', background: zn.bg, border: `1px solid ${zn.border}`, borderRadius: 7, color: zn.ink, fontSize: 12.5, padding: '8px 10px', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
-            {meta.password && <div style={{ marginTop: 4, fontSize: 10.5, color: zn.dim }}>Share link with <code style={{ background: zn.panel2, padding: '1px 4px', borderRadius: 3 }}>?pw={meta.password}</code> to bypass</div>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const OVERLAY_TOOLS: { id: OverlayTool; label: string; Icon: React.ComponentType<any> }[] = [
-  { id: 'hotspot',    label: 'Hotspot',   Icon: Crosshair },
-  { id: 'callout',   label: 'Callout',   Icon: MessageSquare },
-  { id: 'spotlight', label: 'Spotlight', Icon: Scan },
-  { id: 'zoomFocus', label: 'Focus',     Icon: ZoomInIcon },
-];
 
 const OVERLAY_HINTS: Record<OverlayTool, string> = {
   hotspot:   'Click on the screenshot to place a hotspot',
@@ -195,118 +48,6 @@ const OVERLAY_HINTS: Record<OverlayTool, string> = {
   zoomFocus: 'Drag a rectangle on the screenshot to set zoom focus',
 };
 
-function TopBar({ brand, autoplay, setAutoplay, intervalSeconds, setIntervalSeconds, onPreview, activeTool, onSelectTool }: {
-  brand: string; autoplay: boolean; setAutoplay: (v: boolean) => void;
-  intervalSeconds: number; setIntervalSeconds: (s: number) => void;
-  onPreview: () => void;
-  activeTool?: OverlayTool | null;
-  onSelectTool?: (t: OverlayTool) => void;
-}) {
-  const session = useStudioStore((s) => s.session);
-  const title = session?.aiOutputs?.title || 'Untitled demo';
-  const [showBranding, setShowBranding] = useState(false);
-
-  const toolBtn = (id: OverlayTool, Icon: React.ComponentType<any>, label: string) => {
-    const active = activeTool === id;
-    return (
-      <button
-        key={id}
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onSelectTool?.(id); }}
-        style={{
-          height: 28, padding: '0 10px', borderRadius: 7, border: `1px solid ${active ? withAlpha(brand, 0.55) : 'transparent'}`,
-          background: active ? withAlpha(brand, 0.14) : 'transparent',
-          color: active ? brand : zn.mute,
-          font: '500 12px/1 Inter, system-ui, sans-serif',
-          cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
-          transition: 'background 120ms, color 120ms',
-        }}
-        onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = zn.chip; }}
-        onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
-      >
-        <Icon size={14} color={active ? brand : zn.mute} />
-        {label}
-      </button>
-    );
-  };
-
-  return (
-    <div style={{ position: 'relative', height: 52, flex: 'none', borderBottom: `1px solid ${zn.border}`, background: zn.bg, display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' }}
-      onClick={() => setShowBranding(false)}>
-      {/* Left: identity */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
-        <span style={{ width: 24, height: 24, borderRadius: 7, background: brand, display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 700, fontSize: 13 }}>S</span>
-        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: zn.ink }}>{title}</span>
-          <span style={{ fontSize: 10.5, color: zn.dim }}>Demo mode</span>
-        </div>
-        <I.ChevronDown size={14} style={{ color: zn.dim, marginLeft: 2 }} />
-      </div>
-
-      {/* Center: overlay tools (only shown when tools are available) */}
-      {onSelectTool && (
-        <>
-          <span style={{ width: 1, height: 22, background: zn.border, flexShrink: 0 }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            {OVERLAY_TOOLS.map(({ id, label, Icon }) => toolBtn(id, Icon, label))}
-          </div>
-        </>
-      )}
-
-      {/* Right: actions */}
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
-        <div style={{ position: 'relative' }}>
-          <TopBtn icon={<I.Palette size={15} />} ghost onClick={(e) => { e?.stopPropagation(); setShowBranding((v) => !v); }}>Branding</TopBtn>
-          {showBranding && <BrandingPopover brand={brand} />}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div onClick={() => setAutoplay(!autoplay)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '0 4px' }}>
-            <span style={{ fontSize: 12.5, color: zn.mute, fontWeight: 500 }}>Autoplay</span>
-            <span style={{ width: 34, height: 19, borderRadius: 99, background: autoplay ? brand : zn.border2, position: 'relative', transition: 'background 0.18s' }}>
-              <span style={{ position: 'absolute', top: 2, left: autoplay ? 17 : 2, width: 15, height: 15, borderRadius: '50%', background: '#fff', transition: 'left 0.18s', boxShadow: '0 1px 2px rgba(0,0,0,0.4)' }} />
-            </span>
-          </div>
-          {autoplay && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={(e) => e.stopPropagation()}>
-              <input
-                type="number"
-                min={2}
-                max={30}
-                value={intervalSeconds}
-                onChange={(e) => {
-                  const v = Math.min(30, Math.max(2, Number(e.target.value)));
-                  setIntervalSeconds(v);
-                }}
-                style={{
-                  width: 42, height: 24, borderRadius: 6, border: `1px solid ${zn.border2}`,
-                  background: zn.panel2, color: zn.ink, fontSize: 12, fontWeight: 600,
-                  textAlign: 'center', outline: 'none', padding: '0 4px',
-                }}
-              />
-              <span style={{ fontSize: 11, color: zn.dim }}>sec / step</span>
-            </div>
-          )}
-        </div>
-        <TopBtn icon={<I.Eye size={15} />} primary brand={brand} onClick={onPreview}>Preview</TopBtn>
-      </div>
-
-      {/* Floating hint chip when a tool is active */}
-      {activeTool && (
-        <div style={{
-          position: 'absolute', top: '100%', left: 12, marginTop: 8, zIndex: 20,
-          display: 'inline-flex', alignItems: 'center', gap: 7,
-          height: 26, padding: '0 10px', borderRadius: 7,
-          background: withAlpha(brand, 0.14), border: `1px solid ${withAlpha(brand, 0.4)}`,
-          color: brand, fontSize: 12, fontWeight: 500, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
-          pointerEvents: 'none',
-        }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: brand, boxShadow: `0 0 0 4px ${withAlpha(brand, 0.25)}` }} />
-          {OVERLAY_HINTS[activeTool]}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Step rail ────────────────────────────────────────────────────────────────
 
@@ -987,7 +728,6 @@ export const DemoCanvas: React.FC = () => {
   const saveStep            = useStudioStore((s) => s.saveStep);
   const updateStep          = useStudioStore((s) => s.updateStep);
   const saveAnimationTarget  = useStudioStore((s) => s.saveAnimationTarget);
-  const saveAutoplay         = useStudioStore((s) => s.saveAutoplay);
   const saveTransitionStyle  = useStudioStore((s) => s.saveTransitionStyle);
   const brand               = brandState.primaryColor || '#6366f1';
 
@@ -1033,7 +773,6 @@ export const DemoCanvas: React.FC = () => {
   // End screen editor view
   if (current === steps.length) return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v, autoplayInterval)} intervalSeconds={autoplayInterval} setIntervalSeconds={(s) => saveAutoplay(savedAutoplay, s)} onPreview={() => setShowPreview(true)} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} selectedChapterId={selectedChapterId} onSelectChapter={setSelectedChapterId} />
         <div style={{ flex: 1, background: '#111', display: 'grid', placeItems: 'center' }} >
@@ -1103,9 +842,22 @@ export const DemoCanvas: React.FC = () => {
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v, autoplayInterval)} intervalSeconds={autoplayInterval} setIntervalSeconds={(s) => saveAutoplay(savedAutoplay, s)} onPreview={() => setShowPreview(true)} activeTool={activeTool} onSelectTool={(t) => setActiveTool(activeTool === t ? null : t)} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }} onClick={() => setSelectedOverlayId(null)}>
+          {/* Floating hint chip when a tool is active */}
+          {activeTool && (
+            <div style={{
+              position: 'absolute', top: 12, left: 12, zIndex: 20,
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+              height: 26, padding: '0 10px', borderRadius: 7,
+              background: withAlpha(brand, 0.14), border: `1px solid ${withAlpha(brand, 0.4)}`,
+              color: brand, fontSize: 12, fontWeight: 500, boxShadow: '0 6px 18px rgba(0,0,0,0.4)',
+              pointerEvents: 'none',
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: brand, boxShadow: `0 0 0 4px ${withAlpha(brand, 0.25)}` }} />
+              {OVERLAY_HINTS[activeTool]}
+            </div>
+          )}
           <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} selectedChapterId={selectedChapterId} onSelectChapter={setSelectedChapterId} />
           <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} onClearTool={() => setActiveTool(null)} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} />
           <AnimatePresence mode="wait">

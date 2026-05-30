@@ -218,7 +218,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
   setActiveView,
   renderMode,
   setRenderMode,
-  onNavigateHome,
+  onNavigateHome: _onNavigateHome,
   onShareClick,
   onSandboxExport,
   onOpenInDocs,
@@ -249,14 +249,23 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
       className="h-14 bg-surface border-b border-border flex items-center px-4 gap-3 z-40 relative min-w-0"
       onClick={() => setShowBranding(false)}
     >
-      {/* Back to Library */}
-      <button
-        onClick={onNavigateHome}
-        className="px-2.5 h-9 rounded-pill hover:bg-surface-2 inline-flex items-center gap-2 transition-colors text-text-2 hover:text-text font-medium text-[13px] shrink-0"
-      >
-        <I.Home size={16} strokeWidth={2.2} />
-        <span className="hidden sm:inline">Library</span>
-      </button>
+      {/* Left zone: Session Breadcrumb */}
+      <div className="flex items-center gap-2.5 shrink-0 select-none">
+        <span
+          className="w-6 h-6 rounded flex items-center justify-center text-white font-bold text-[12.5px] shadow-sm shrink-0"
+          style={{ backgroundColor: brandColor }}
+        >
+          S
+        </span>
+        <div className="flex flex-col shrink-0 pr-1">
+          <span className="text-[13px] font-semibold text-text truncate max-w-[160px] sm:max-w-[240px]">
+            {session?.aiOutputs?.title || 'Untitled Session'}
+          </span>
+          <span className="text-[10px] text-text-3 font-medium capitalize tracking-wide leading-none mt-0.5">
+            {activeView} mode
+          </span>
+        </div>
+      </div>
 
       <div className="w-px h-6 bg-border shrink-0" />
 
@@ -366,25 +375,26 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
             </div>
 
             {/* Autoplay Toggle */}
-            <div className="flex items-center gap-2.5 border border-border rounded-pill px-3 h-8 bg-surface-2/40">
+            <div
+              className="flex items-center gap-2.5 border border-border rounded-pill px-3 h-8 bg-surface-2/40"
+              onClick={(e) => e.stopPropagation()}
+            >
               <button
                 type="button"
-                onClick={() => saveAutoplay(!savedAutoplay, autoplayInterval)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  saveAutoplay(!savedAutoplay, autoplayInterval);
+                }}
                 className="flex items-center gap-2 cursor-pointer select-none"
               >
                 <span className="text-[12px] text-text-2 font-semibold">Autoplay</span>
                 <span
-                  className={cn(
-                    "w-7 h-4.5 rounded-full relative transition-colors duration-200",
-                    savedAutoplay ? "bg-primary" : "bg-border-2"
-                  )}
+                  className="w-8 h-5 rounded-full relative transition-colors duration-200 bg-zinc-700 shrink-0"
                   style={{ backgroundColor: savedAutoplay ? brandColor : undefined }}
                 >
                   <span
-                    className={cn(
-                      "absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all duration-200 shadow-sm",
-                      savedAutoplay ? "left-3" : "left-0.5"
-                    )}
+                    className="absolute top-[2px] w-4 h-4 rounded-full bg-white transition-all duration-200 shadow-sm"
+                    style={{ left: savedAutoplay ? '14px' : '2px' }}
                   />
                 </span>
               </button>
