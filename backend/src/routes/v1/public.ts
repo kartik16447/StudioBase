@@ -286,7 +286,7 @@ publicRoutes.get('/:shareToken/asset/:key{.+}', async (c) => {
   const contentType = obj.httpMetadata?.contentType || 'image/png';
   return c.body(obj.body as any, 200, {
     'Content-Type': contentType,
-    'Cache-Control': 'public, max-age=86400',
+    'Cache-Control': 'no-cache, must-revalidate',
     'Access-Control-Allow-Origin': '*',
   });
 });

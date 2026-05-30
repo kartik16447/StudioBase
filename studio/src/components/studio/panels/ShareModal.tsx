@@ -29,11 +29,12 @@ interface FormatCardProps {
   onToggle?: () => void;
   onUnlock?: () => void;
   unlockLoading?: boolean;
+  creditBalance?: number | null;
 }
 
 const FormatCard: React.FC<FormatCardProps> = ({
   icon, accentColor, title, description, badge,
-  enabled, disabled, locked, onToggle, onUnlock, unlockLoading,
+  enabled, disabled, locked, onToggle, onUnlock, unlockLoading, creditBalance,
 }) => (
   <div
     className={cn(
@@ -110,7 +111,11 @@ const FormatCard: React.FC<FormatCardProps> = ({
           ) : (
             <I.Lock size={11} />
           )}
-          {unlockLoading ? 'Unlocking…' : `Unlock · ${CINEMATIC_CREDIT_COST}cr`}
+          {unlockLoading
+            ? 'Unlocking…'
+            : creditBalance === null
+              ? `Unlock Cinematic (${CINEMATIC_CREDIT_COST} credit · — remaining)`
+              : `Unlock Cinematic (${CINEMATIC_CREDIT_COST} credit · ${creditBalance} remaining)`}
         </button>
       )}
     </div>
@@ -144,6 +149,9 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   const [cinematicLoading, setCinematicLoading] = useState(false);
   const [cinematicError,   setCinematicError]   = useState<string | null>(null);
 
+  // Credit balance
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+
   const shareUrl = shareToken
     ? `${window.location.origin}/s/${shareToken}`
     : null;
@@ -159,6 +167,14 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     });
     setCinematicError(null);
   }, [session]);
+
+  // Fetch credit balance when modal opens
+  useEffect(() => {
+    if (!open) return;
+    apiClient.get<{ creditsBalance: number }>('/auth/me')
+      .then(res => setCreditBalance(res.creditsBalance))
+      .catch(() => setCreditBalance(null));
+  }, [open]);
 
   // ── Public link toggle ──────────────────────────────────────────────────────
   const togglePublic = async () => {
@@ -358,6 +374,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
                       locked={!formats.cinematicEnabled}
                       onUnlock={!formats.cinematicEnabled ? unlockCinematic : undefined}
                       unlockLoading={cinematicLoading}
+                      creditBalance={creditBalance}
                     />
                   </div>
 

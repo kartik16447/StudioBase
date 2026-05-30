@@ -7,6 +7,7 @@ import {
 } from '../components/ui';
 import { SessionCard } from '../components/studio';
 import { apiClient } from '../lib/apiClient';
+import { showToast } from '../components/GlobalToast';
 import { sessionManager } from '../lib/auth/sessionManager';
 import type { SessionEnvelope } from '../../../shared/types/session';
 
@@ -168,7 +169,7 @@ export const HomePage: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="md" icon={I.Sparkles}>New from template</Button>
-            <Button variant="primary" size="md" icon={I.Plus} onClick={() => alert('Start capture from the StudioBase extension.')}>Capture session</Button>
+            <Button variant="primary" size="md" icon={I.Plus} onClick={() => showToast('info', 'Open the StudioBase browser extension to start a capture session.')}>Capture session</Button>
           </div>
         </div>
 
@@ -230,7 +231,7 @@ export const HomePage: React.FC = () => {
             </>
           ) : (
               <>
-                <NewSessionCard onClick={() => alert('Open browser extension to start a capture session.')} />
+                <NewSessionCard onClick={() => showToast('info', 'Open the StudioBase browser extension to start a capture session.')} />
                 {filtered.map(s => {
                   const meta = s.metadata as any;
                   const status: string = meta?.pipelineStatus || 'draft';
@@ -336,7 +337,7 @@ export const HomePage: React.FC = () => {
                 <Button variant="ghost" size="md" onClick={() => { setSearch(''); setFilter('all'); }}>Clear filters</Button>
               ) : (
                 <>
-                  <Button variant="primary" size="md" icon={I.Plus} onClick={() => alert('Start capture from the StudioBase extension.')}>Capture first session</Button>
+                  <Button variant="primary" size="md" icon={I.Plus} onClick={() => showToast('info', 'Open the StudioBase browser extension to start a capture session.')}>Capture first session</Button>
                   <Button 
                     variant="ghost" 
                     size="md" 

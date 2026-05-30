@@ -19,6 +19,7 @@ const TriggerSchema = z.object({
     demo: z.boolean().optional(),
     video: z.boolean().optional(),
   }).optional(),
+  tone: z.string().optional(),
 });
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
@@ -32,11 +33,11 @@ pipeline.post(
   zValidator('json', TriggerSchema),
   async (c) => {
     const user = c.get('user');
-    const { sessionId, requestedOutputs } = c.req.valid('json');
+    const { sessionId, requestedOutputs, tone } = c.req.valid('json');
 
     const service = new PipelineService(c.env, c.executionCtx);
     try {
-      const result = await service.trigger(user.id, sessionId, requestedOutputs);
+      const result = await service.trigger(user.id, sessionId, requestedOutputs, tone);
       return c.json({ success: true, ...result });
     } catch (err: any) {
       if (err.message === 'NOT_FOUND') throw new HTTPException(404, { message: 'Session not found' });

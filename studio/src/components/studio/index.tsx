@@ -147,6 +147,8 @@ export const AnnotationCanvas: React.FC<{
 }> = ({ step, isAnnotating, onAnnotationsChange, onExit }) => {
   const activeTool = useStudioStore(state => state.activeTool);
   const setActiveTool = useStudioStore(state => state.setActiveTool);
+  const storeUndo = useStudioStore(state => state.undo);
+  const storeRedo = useStudioStore(state => state.redo);
 
   const [drawing, setDrawing] = React.useState(false);
   const [startPct, setStartPct] = React.useState({ x: 0, y: 0 });
@@ -188,6 +190,24 @@ export const AnnotationCanvas: React.FC<{
     return () => window.removeEventListener('keydown', handler);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAnnotating, history]);
+
+  // Global undo/redo outside annotation mode (narration edits, step deletion, overlay moves)
+  React.useEffect(() => {
+    if (isAnnotating) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        storeUndo();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+        e.preventDefault();
+        storeRedo();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isAnnotating, storeUndo, storeRedo]);
 
   const annotations = step.annotations ?? [];
 

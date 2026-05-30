@@ -12,6 +12,7 @@ export interface PipelineJob {
     demo?: boolean;
     video?: boolean;
   };
+  tone?: string;
 }
 
 // ─── AI response schema ───────────────────────────────────────────────────────
@@ -278,7 +279,7 @@ export class PipelineProcessor {
   }
 
   async process(job: PipelineJob) {
-    const { sessionId, userId } = job;
+    const { sessionId, userId, tone } = job;
     const startedAt = Date.now();
 
     try {
@@ -303,11 +304,14 @@ export class PipelineProcessor {
         const userMessage = JSON.stringify(payload);
         console.log(`[PIPELINE] calling Workers AI -- model:@cf/meta/llama-4-scout-17b-16e-instruct steps:${payload.length} inputChars:${userMessage.length}`);
 
+        const toneModifier = tone
+          ? `\n\n**TONE OVERRIDE:** Write all narration in a "${tone}" voice. Apply this throughout every step's generatedText.`
+          : '';
         const aiResponse = await (this.env.AI.run as any)(
           '@cf/meta/llama-4-scout-17b-16e-instruct',
           {
             messages: [
-              { role: 'system', content: SYSTEM_PROMPT },
+              { role: 'system', content: SYSTEM_PROMPT + toneModifier },
               { role: 'user', content: userMessage },
             ],
             response_format: { type: 'json_schema', json_schema: SOP_JSON_SCHEMA },

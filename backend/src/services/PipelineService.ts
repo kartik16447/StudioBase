@@ -9,7 +9,7 @@ export class PipelineService {
     this.audit = new AuditService(env, executionCtx);
   }
 
-  async trigger(userId: string, sessionId: string, requestedOutputs: any) {
+  async trigger(userId: string, sessionId: string, requestedOutputs: any, tone?: string) {
     const session = await this.env.DB.prepare(
       'SELECT * FROM sessions WHERE id = ? AND ownerId = ?'
     ).bind(sessionId, userId).first() as any;
@@ -47,11 +47,12 @@ export class PipelineService {
       this.env.DB.prepare('UPDATE sessions SET status = ?, updatedAt = ? WHERE id = ?').bind('processing', now, sessionId),
     ]);
 
-    const job: PipelineJob = { 
-      sessionId, 
-      userId, 
-      r2JsonKey: session.r2JsonKey, 
-      requestedOutputs: finalOutputs 
+    const job: PipelineJob = {
+      sessionId,
+      userId,
+      r2JsonKey: session.r2JsonKey,
+      requestedOutputs: finalOutputs,
+      tone,
     };
     
     console.log(`[PipelineService] sending to queue — job:`, JSON.stringify(job));

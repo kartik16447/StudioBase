@@ -272,6 +272,7 @@ const ExportDrawer: React.FC<{ open: boolean; onClose: () => void }> = ({ open, 
   const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<{ url: string; rows: number; key: string } | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [secs, setSecs] = useState(900);
   const timerRef = useRef<any>(null);
 
@@ -284,6 +285,7 @@ const ExportDrawer: React.FC<{ open: boolean; onClose: () => void }> = ({ open, 
 
   const onGenerate = async () => {
     setGenerating(true);
+    setExportError(null);
     try {
       const fromMs = new Date(from).getTime();
       const toMs = new Date(to + 'T23:59:59').getTime();
@@ -292,7 +294,7 @@ const ExportDrawer: React.FC<{ open: boolean; onClose: () => void }> = ({ open, 
       );
       setResult(data);
     } catch (e: any) {
-      alert('Export failed: ' + e.message);
+      setExportError('Export failed: ' + e.message);
     } finally {
       setGenerating(false);
     }
@@ -333,6 +335,11 @@ const ExportDrawer: React.FC<{ open: boolean; onClose: () => void }> = ({ open, 
 
         {/* Body */}
         <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {exportError && (
+            <div style={{ padding: '10px 14px', borderRadius: 9, background: 'rgba(255,59,48,.08)', border: '1px solid rgba(255,59,48,.2)', color: '#FF3B30', fontSize: 13 }}>
+              {exportError}
+            </div>
+          )}
           {/* Date range */}
           <section>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#6E6E73', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10 }}>Date range</div>

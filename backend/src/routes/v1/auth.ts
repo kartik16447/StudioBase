@@ -4,6 +4,7 @@ import { GoogleAuthSchema } from '../../schemas/auth';
 import { zValidator } from '@hono/zod-validator';
 import { AuthService } from '../../services/AuthService';
 import { HTTPException } from 'hono/http-exception';
+import { authMiddleware } from '../../middlewares/auth';
 
 const auth = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -38,6 +39,23 @@ auth.post('/google', zValidator('json', GoogleAuthSchema), async (c) => {
     }
     throw err;
   }
+});
+
+// 2. Get current user profile + credit balance
+auth.get('/me', authMiddleware(), async (c) => {
+  const user = c.get('user');
+  const record = await c.env.DB.prepare(
+    'SELECT id, email, name, avatarUrl, creditsBalance FROM users WHERE id = ?'
+  ).bind(user.id).first() as any;
+
+  if (!record) throw new HTTPException(404, { message: 'User not found' });
+  return c.json({
+    id: record.id,
+    email: record.email,
+    name: record.name,
+    avatarUrl: record.avatarUrl,
+    creditsBalance: record.creditsBalance ?? 0,
+  });
 });
 
 export default auth;

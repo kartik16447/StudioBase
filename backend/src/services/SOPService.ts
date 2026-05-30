@@ -112,12 +112,8 @@ export class SOPService {
     updates: Partial<Step>,
     actorId: string,
   ): Promise<void> {
-    // Guard: cannot edit steps on a published SOP
     const sop = await this.getSOPById(sopId, workspaceId);
     if (!sop) throw new Error('SOP not found');
-    if (sop.status === 'published') {
-      throw new Error('Cannot edit steps on a published SOP. Fork first.');
-    }
 
     const existing = await this.db
       .prepare('SELECT * FROM steps WHERE id = ? AND sopId = ? AND workspaceId = ?')

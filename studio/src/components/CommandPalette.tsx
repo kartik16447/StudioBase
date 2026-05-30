@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../store/useStudioStore';
 import { I } from '../components/icons';
 import { Kbd } from '../components/ui';
+import { showToast } from '../components/GlobalToast';
 
 export const CommandPalette: React.FC = () => {
   const commandOpen = useStudioStore(state => state.commandOpen);
@@ -16,7 +17,7 @@ export const CommandPalette: React.FC = () => {
     { id: 'studio',   label: 'Open last session in Studio', icon: I.Wand2, run: () => navigate('studio') },
     { id: 'brand',    label: 'Open Brand Kit', icon: I.Palette,  run: () => navigate('brand') },
     { id: 'share',    label: 'Open public Share view', icon: I.Share2, run: () => navigate('share') },
-    { id: 'capture',  label: 'Capture new session…', icon: I.Plus, run: () => alert('Open the StudioBase browser extension to capture a session.') },
+    { id: 'capture',  label: 'Capture new session…', icon: I.Plus, run: () => showToast('info', 'Open the StudioBase browser extension to capture a session.') },
     { id: 'tab-script',   label: 'Studio: Script tab',   icon: I.FileText, run: () => { navigate('studio'); setActiveTab('script'); } },
     { id: 'tab-brand',    label: 'Studio: Brand tab',    icon: I.Palette,  run: () => { navigate('studio'); setActiveTab('brand'); } },
     { id: 'tab-chapters', label: 'Studio: Chapters tab', icon: I.Bookmark, run: () => { navigate('studio'); setActiveTab('chapters'); } },

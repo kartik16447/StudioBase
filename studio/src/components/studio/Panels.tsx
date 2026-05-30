@@ -27,6 +27,9 @@ export const ScriptPanel: React.FC = () => {
   const [search, setSearch] = useState('');
   const isAiProcessing = useStudioStore(state => state.isAiProcessing);
   const triggerPipeline = useStudioStore(state => state.triggerPipeline);
+  const updateStep = useStudioStore(state => state.updateStep);
+  const [regenModalOpen, setRegenModalOpen] = useState(false);
+  const [stepsWithOverride, setStepsWithOverride] = useState<Step[]>([]);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
@@ -58,14 +61,21 @@ export const ScriptPanel: React.FC = () => {
           <SectionLabel className="!mb-0">Voiceover tone</SectionLabel>
           <button
             disabled={isAiProcessing}
-            onClick={async () => {
-              console.log('[ScriptPanel][Regenerate all] Button clicked.');
-              try {
-                await triggerPipeline();
-              } catch (err: any) {
-                console.error('[ScriptPanel][Regenerate all] triggerPipeline failed!', err);
-                showToast('error', err?.message || 'AI generation failed');
+            onClick={() => {
+              if (!session) return;
+              const overrides = session.steps.filter(s => s.textOverride && s.textOverride.trim() !== '');
+              if (overrides.length > 0) {
+                setStepsWithOverride(overrides);
+                setRegenModalOpen(true);
+                return;
               }
+              (async () => {
+                try {
+                  await triggerPipeline(tone);
+                } catch (err: any) {
+                  showToast('error', err?.message || 'AI generation failed');
+                }
+              })();
             }}
             className="text-[11px] text-primary font-semibold inline-flex items-center gap-1 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -125,6 +135,75 @@ export const ScriptPanel: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* Regenerate confirmation modal */}
+      <AnimatePresence>
+        {regenModalOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[200] bg-black/50 backdrop-blur-sm"
+              onClick={() => setRegenModalOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 8 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 8 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              className="fixed inset-0 z-[201] flex items-center justify-center pointer-events-none p-4"
+            >
+              <div className="pointer-events-auto w-full max-w-[400px] bg-surface rounded-xl border border-border shadow-card p-6">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="w-9 h-9 rounded-lg bg-amber-500/15 flex items-center justify-center flex-shrink-0">
+                    <I.AlertTriangle size={18} className="text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-[15px] font-semibold text-text mb-1">Manual edits detected</h3>
+                    <p className="text-[13px] text-text-2">
+                      {stepsWithOverride.length} step{stepsWithOverride.length !== 1 ? 's have' : ' has'} manual edits. Regenerating will overwrite them.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={async () => {
+                      setRegenModalOpen(false);
+                      try { await triggerPipeline(tone); } catch (err: any) { showToast('error', err?.message || 'AI generation failed'); }
+                    }}
+                  >
+                    Regenerate Anyway
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-center"
+                    onClick={async () => {
+                      setRegenModalOpen(false);
+                      stepsWithOverride.forEach(s => updateStep(s.id, { locked: true } as any));
+                      try { await triggerPipeline(tone); } catch (err: any) { showToast('error', err?.message || 'AI generation failed'); }
+                    }}
+                  >
+                    Lock Edited Steps and Regenerate Rest
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-center text-text-2"
+                    onClick={() => setRegenModalOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -529,7 +608,7 @@ export const ChaptersPanel: React.FC = () => {
 
             // Check if there is already a chapter break after this step
             if (chapters.some(c => c.afterStepId === targetStepId)) {
-              alert("A chapter break already exists for this step.");
+              showToast('error', 'A chapter break already exists for this step.');
               return;
             }
 

@@ -139,7 +139,7 @@ interface StudioState {
   generateAllAudio: (sessionId: string, voiceId: string) => Promise<{ queued: string[]; totalCost: number }>;
 
   isAiProcessing: boolean;
-  triggerPipeline: () => Promise<void>;
+  triggerPipeline: (tone?: string) => Promise<void>;
   startPipelinePolling: (sessionId: string) => void;
   stopPipelinePolling: () => void;
 
@@ -150,6 +150,13 @@ interface StudioState {
   // Script dirty flag — set when AI script is regenerated, cleared when video is re-exported
   scriptDirty: boolean;
   setScriptDirty: (dirty: boolean) => void;
+
+  // Global undo/redo (narration edits, step deletion, overlay moves)
+  _undoStack: Step[][];
+  _redoStack: Step[][];
+  pushUndo: () => void;
+  undo: () => void;
+  redo: () => void;
 
   // Demo preview state
   showDemoPreview: boolean;
@@ -175,7 +182,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   sessionStatus: null,
   activeTab: 'script',
   isPanelOpen: true,
-  activeView: 'video',
+  activeView: 'sop',
   activeTool: 'cursor',
   isToolbarVisible: true,
   focusedStepId: null,
@@ -588,21 +595,33 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   setCurrentTime: (time) => set({ currentTime: time }),
   updateStep: (stepId, updates) => set((state) => {
     if (!state.session) return state;
-    const newSteps = state.session.steps.map(s => 
+    const trackedFields = ['textOverride', 'overlays'] as const;
+    const isTracked = trackedFields.some(f => f in updates);
+    const newStack = isTracked
+      ? [...state._undoStack, state.session.steps].slice(-50)
+      : state._undoStack;
+    const newSteps = state.session.steps.map(s =>
       s.id === stepId ? { ...s, ...updates } : s
     );
-    return { session: { ...state.session, steps: newSteps } };
+    return {
+      session: { ...state.session, steps: newSteps },
+      _undoStack: newStack,
+      _redoStack: isTracked ? [] : state._redoStack,
+    };
   }),
   deleteStep: (stepId) => set((state) => {
     if (!state.session) return state;
+    const snapshot = state.session.steps;
     const newSteps = state.session.steps.filter(s => s.id !== stepId);
     const sequencedSteps = newSteps.map((s, i) => ({ ...s, sequence: i + 1 }));
-    return { 
-      session: { 
-        ...state.session, 
+    return {
+      session: {
+        ...state.session,
         steps: sequencedSteps,
         metadata: { ...state.session.metadata, stepCount: sequencedSteps.length }
-      } 
+      },
+      _undoStack: [...state._undoStack, snapshot].slice(-50),
+      _redoStack: [],
     };
   }),
   triggerScroll: () => set((state) => ({ scrollTrigger: state.scrollTrigger + 1 })),
@@ -1112,7 +1131,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
 
   isAiProcessing: false,
 
-  triggerPipeline: async () => {
+  triggerPipeline: async (tone?: string) => {
     const { session, startPipelinePolling } = get();
     if (!session) return;
     const sessionId = session.sessionId;
@@ -1120,10 +1139,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     // the previous 'ready' status and stop on the very first tick.
     set({ isAiProcessing: true, sessionStatus: 'processing' });
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         sessionId,
         requestedOutputs: { sop: true },
       };
+      if (tone) payload.tone = tone;
       console.log('[useStudioStore][triggerPipeline] Sending POST to /pipeline/trigger with payload:', payload);
       await apiClient.post('/pipeline/trigger', payload);
       console.log('[useStudioStore][triggerPipeline] Pipeline triggered successfully. Starting polling...');
@@ -1176,4 +1196,32 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   // Demo preview state
   showDemoPreview: false,
   setShowDemoPreview: (show) => set({ showDemoPreview: show }),
+
+  // Global undo/redo
+  _undoStack: [],
+  _redoStack: [],
+  pushUndo: () => set((state) => {
+    if (!state.session) return state;
+    const steps = state.session.steps;
+    const next = [...state._undoStack, steps].slice(-50);
+    return { _undoStack: next, _redoStack: [] };
+  }),
+  undo: () => set((state) => {
+    if (!state.session || state._undoStack.length === 0) return state;
+    const prev = state._undoStack[state._undoStack.length - 1];
+    return {
+      _undoStack: state._undoStack.slice(0, -1),
+      _redoStack: [...state._redoStack, state.session.steps].slice(-50),
+      session: { ...state.session, steps: prev },
+    };
+  }),
+  redo: () => set((state) => {
+    if (!state.session || state._redoStack.length === 0) return state;
+    const next = state._redoStack[state._redoStack.length - 1];
+    return {
+      _redoStack: state._redoStack.slice(0, -1),
+      _undoStack: [...state._undoStack, state.session.steps].slice(-50),
+      session: { ...state.session, steps: next },
+    };
+  }),
 }));

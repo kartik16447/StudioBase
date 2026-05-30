@@ -7,6 +7,7 @@ import { apiClient } from '../../../lib/apiClient';
 import { CinematicPlayer, type CinematicPlayerHandle } from '../../player/CinematicPlayer';
 import { analyticsClient } from '../../../lib/analyticsClient';
 import { EmbedModal } from '../panels/EmbedModal';
+import { showToast } from '../../GlobalToast';
 import { handleSOPVideoExport } from '../../../modules/render-engine/ExportOrchestrator';
 import { exportScreenshotsToVideo } from '../../../modules/render-engine/VideoExporter';
 
@@ -459,7 +460,7 @@ export const VideoCanvas: React.FC = () => {
                 });
               } catch (e) {
                 const err = e as Error;
-                alert(`Export failed: ${err.message}`);
+                showToast('error', `Export failed: ${err.message}`);
               } finally {
                 setScreenshotExporting(false);
                 setScreenshotProgress('');
