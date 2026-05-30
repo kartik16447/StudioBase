@@ -31,9 +31,9 @@ import { SpotlightMask } from '../../../components/demo/SpotlightMask';
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
 const zn = {
-  bg: '#09090b', panel: '#161618', panel2: '#1c1c1f',
-  border: '#27272a', border2: '#323237',
-  ink: '#e4e4e7', mute: '#a1a1aa', dim: '#71717a', chip: '#252528',
+  bg: '#F5F5F7', panel: '#FFFFFF', panel2: '#F0F0F5',
+  border: 'rgba(0,0,0,0.08)', border2: 'rgba(0,0,0,0.14)',
+  ink: '#1D1D1F', mute: '#6E6E73', dim: '#AEAEB2', chip: '#E6E6EC',
 };
 
 
@@ -104,7 +104,7 @@ function StepRail({ current, setCurrent, brand, session, selectedChapterId, onSe
       {/* End screen entry */}
       <div style={{ height: 1, background: zn.border, margin: '4px 0' }} />
       <div onClick={() => { setCurrent(steps.length); onSelectChapter(null); }} style={{ borderRadius: 8, padding: 5, cursor: 'pointer', background: current === steps.length && !selectedChapterId ? withAlpha(brand, 0.12) : 'transparent', border: `1px solid ${current === steps.length && !selectedChapterId ? withAlpha(brand, 0.4) : 'transparent'}` }}>
-        <div style={{ aspectRatio: '16/10', borderRadius: 5, border: `1px solid ${zn.border}`, background: '#111', display: 'grid', placeItems: 'center' }}>
+        <div style={{ aspectRatio: '16/10', borderRadius: 5, border: `1px solid ${zn.border}`, background: zn.panel2, display: 'grid', placeItems: 'center' }}>
           <I.Check size={14} color={brand} />
         </div>
         <div style={{ fontSize: 10.5, color: current === steps.length && !selectedChapterId ? zn.ink : zn.mute, fontWeight: current === steps.length && !selectedChapterId ? 600 : 450, marginTop: 4 }}>End screen</div>
@@ -282,11 +282,11 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
       <div style={{ flex: 1, display: 'grid', placeItems: 'center', padding: '34px 40px', minHeight: 0, position: 'relative', zIndex: 10 }}>
         <div style={{ width: '100%', maxWidth: 760, borderRadius: 12, overflow: 'hidden', boxShadow: '0 30px 70px -24px rgba(0,0,0,0.8)', border: `1px solid ${zn.border2}` }}>
           {/* Browser chrome */}
-          <div style={{ height: 34, background: '#1f1f22', display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', borderBottom: `1px solid ${zn.border}` }}>
+          <div style={{ height: 34, background: zn.panel2, display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', borderBottom: `1px solid ${zn.border}` }}>
             <span style={{ display: 'flex', gap: 6 }}>
               {['#ff5f57', '#febc2e', '#28c840'].map((c) => <span key={c} style={{ width: 11, height: 11, borderRadius: '50%', background: c }} />)}
             </span>
-            <div style={{ marginLeft: 10, flex: 1, maxWidth: 320, height: 20, borderRadius: 6, background: '#161618', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, color: zn.dim }}>
+            <div style={{ marginLeft: 10, flex: 1, maxWidth: 320, height: 20, borderRadius: 6, background: zn.panel, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, color: zn.dim }}>
               <I.Link size={11} /> {step?.url?.replace(/^https?:\/\//, '').substring(0, 40) || 'app.example.com'}
             </div>
           </div>
@@ -390,7 +390,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
 
           {/* Hotspot size + zoom controls */}
           {coords && (
-            <div style={{ height: 34, background: '#1a1a1d', borderTop: `1px solid ${zn.border}`, display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px' }}>
+            <div style={{ height: 34, background: zn.panel2, borderTop: `1px solid ${zn.border}`, display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px' }}>
               {step?.animationTarget?.zoomScale > 1 && (
                 <>
                   <span style={{ fontSize: 10.5, color: zn.dim }}>Zoom {step.animationTarget.zoomScale.toFixed(1)}×</span>

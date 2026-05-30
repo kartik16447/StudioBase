@@ -2,15 +2,15 @@
 // These mirror the shared zinc-based dark palette used across the studio.
 
 export const zn = {
-  bg: '#09090b',
-  panel: '#161618',
-  panel2: '#1c1c1f',
-  border: '#27272a',
-  border2: '#323237',
-  ink: '#e4e4e7',
-  mute: '#a1a1aa',
-  dim: '#71717a',
-  chip: '#252528',
+  bg: '#F5F5F7',
+  panel: '#FFFFFF',
+  panel2: '#F0F0F5',
+  border: 'rgba(0,0,0,0.08)',
+  border2: 'rgba(0,0,0,0.14)',
+  ink: '#1D1D1F',
+  mute: '#6E6E73',
+  dim: '#AEAEB2',
+  chip: '#E6E6EC',
 } as const;
 
 // Placeholder brand color. At runtime this is supplied as a prop and may be
