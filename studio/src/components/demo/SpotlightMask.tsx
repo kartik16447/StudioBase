@@ -10,6 +10,7 @@ export type SpotlightMaskProps = {
   overlayOpacity: number;
   borderColor?: string;
   onClick?: (e: React.MouseEvent) => void;
+  onMouseDown?: (e: React.MouseEvent) => void;
 };
 
 function radiusFor(shape: SpotlightShape): string {
@@ -34,6 +35,7 @@ export function SpotlightMask({
   overlayOpacity,
   borderColor = defaultBrand,
   onClick,
+  onMouseDown,
 }: SpotlightMaskProps) {
   const dim = Math.max(0, Math.min(100, overlayOpacity)) / 100;
 
@@ -49,6 +51,7 @@ export function SpotlightMask({
     >
       <div
         onClick={onClick}
+        onMouseDown={onMouseDown}
         className="spotlight-cutout"
         style={{
           position: 'absolute',
@@ -60,8 +63,8 @@ export function SpotlightMask({
           boxShadow: `0 0 0 9999px rgba(0,0,0,${dim})`,
           outline: `2px solid ${borderColor}`,
           outlineOffset: -1,
-          pointerEvents: onClick ? 'auto' : 'none',
-          cursor: onClick ? 'pointer' : 'default',
+          pointerEvents: onClick || onMouseDown ? 'auto' : 'none',
+          cursor: onClick || onMouseDown ? 'pointer' : 'default',
           transition: 'left 120ms, top 120ms, width 120ms, height 120ms, border-radius 120ms, outline-color 150ms',
         }}
       />

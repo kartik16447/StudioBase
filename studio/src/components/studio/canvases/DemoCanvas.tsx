@@ -176,12 +176,14 @@ function CalloutCard({
   selected,
   brand,
   onClick,
+  onMouseDown,
   isEditor = false,
 }: {
   ov: any;
   selected: boolean;
   brand: string;
-  onClick?: () => void;
+  onClick?: (e: React.MouseEvent) => void;
+  onMouseDown?: (e: React.MouseEvent) => void;
   isEditor?: boolean;
 }) {
   const dir = ov.arrowDir ?? 'none';
@@ -241,13 +243,14 @@ function CalloutCard({
   return (
     <div
       onClick={onClick}
+      onMouseDown={onMouseDown}
       style={{
         position: 'absolute',
         left: `${clampedX}%`,
         top: `${clampedY}%`,
         transform: transformStr,
         zIndex: selected ? 30 : 22,
-        cursor: onClick ? 'pointer' : 'default',
+        cursor: onClick || onMouseDown ? 'pointer' : 'default',
         pointerEvents: 'auto',
       }}
     >
@@ -339,7 +342,7 @@ function CalloutCard({
 
 const HS_SIZES = [{ label: 'S', v: 14 }, { label: 'M', v: 20 }, { label: 'L', v: 28 }];
 
-function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, activeTool, onPlaceOverlay, onClearTool, selectedOverlayId, onSelectOverlay }: {
+function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, activeTool, onPlaceOverlay, onClearTool, selectedOverlayId, onSelectOverlay, onUpdateOverlay }: {
   step: any; session: any; brand: string; hotspotStyle: HotspotStyle;
   onUpdateHotspot: (pctX: number, pctY: number, hotspotSize?: number, zoomScale?: number) => void;
   activeTool: OverlayTool | null;
@@ -347,6 +350,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
   onClearTool: () => void;
   selectedOverlayId: string | null;
   onSelectOverlay: (id: string | null) => void;
+  onUpdateOverlay?: (patch: Partial<Overlay>, overlayId?: string) => void;
 }) {
   const coords  = step?.coordinates;
   const rawX    = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : 50;
@@ -360,6 +364,9 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
   const dragging        = useRef(false);
   const dragPos         = useRef(pos);
   const screenshotRef   = useRef<HTMLDivElement>(null);
+
+  const [localOverlays, setLocalOverlays] = useState<any[]>(step?.overlays ?? []);
+  const draggingOverlayId = useRef<string | null>(null);
 
   // Zoom-focus rect draw state
   const [focusRect, setFocusRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
@@ -375,10 +382,24 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
     setFocusRect(null);
   }, [step?.id]);
 
+  // Sync overlays safely
+  useEffect(() => {
+    if (!draggingOverlayId.current) {
+      setLocalOverlays(step?.overlays ?? []);
+    }
+  }, [step?.overlays]);
+
   const onHotspotMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     dragging.current = true;
+  };
+
+  const onOverlayMouseDown = (e: React.MouseEvent, overlayId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onSelectOverlay(overlayId);
+    draggingOverlayId.current = overlayId;
   };
 
   const getPct = (e: React.MouseEvent) => {
@@ -405,6 +426,13 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
       setFocusRect({ x1: focusStart.current.x, y1: focusStart.current.y, x2: x, y2: y });
       return;
     }
+    if (draggingOverlayId.current) {
+      const { x, y } = getPct(e);
+      setLocalOverlays((prev) =>
+        prev.map((o) => (o.id === draggingOverlayId.current ? { ...o, pctX: x, pctY: y } : o))
+      );
+      return;
+    }
     if (!dragging.current) return;
     const { x, y } = getPct(e);
     dragPos.current = { x, y };
@@ -423,12 +451,20 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
       if (w > 3 && h > 3) {
         const centerX   = (x1 + x2) / 2;
         const centerY   = (y1 + y2) / 2;
-        // zoom to fill the selected rect — cap at 5×
         const zoomScale = Math.min(5, Math.max(1.1, Math.min(100 / w, 100 / h)));
         onUpdateHotspot(centerX, centerY, undefined, zoomScale);
       }
       setFocusRect(null);
       onClearTool();
+      return;
+    }
+    if (draggingOverlayId.current) {
+      const targetId = draggingOverlayId.current;
+      draggingOverlayId.current = null;
+      const finalOverlay = localOverlays.find((o) => o.id === targetId);
+      if (finalOverlay && onUpdateOverlay) {
+        onUpdateOverlay({ pctX: finalOverlay.pctX, pctY: finalOverlay.pctY }, targetId);
+      }
       return;
     }
     if (!dragging.current) return;
@@ -516,7 +552,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
             ))}
 
             {/* Overlay layer */}
-            {(step?.overlays ?? []).map((ov: Overlay) => {
+            {(localOverlays ?? []).map((ov: Overlay) => {
               const selected = ov.id === selectedOverlayId;
               if (ov.type === 'spotlight' && ov.w && ov.h) {
                 return (
@@ -530,6 +566,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
                       e.stopPropagation();
                       onSelectOverlay(ov.id);
                     }}
+                    onMouseDown={(e) => onOverlayMouseDown(e, ov.id)}
                   />
                 );
               }
@@ -541,12 +578,18 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
                     selected={selected}
                     brand={brand}
                     isEditor
-                    onClick={() => onSelectOverlay(ov.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectOverlay(ov.id);
+                    }}
+                    onMouseDown={(e) => onOverlayMouseDown(e, ov.id)}
                   />
                 );
               }
               return (
-                <div key={ov.id} onClick={(e) => { e.stopPropagation(); onSelectOverlay(ov.id); }}
+                <div key={ov.id}
+                  onClick={(e) => { e.stopPropagation(); onSelectOverlay(ov.id); }}
+                  onMouseDown={(e) => onOverlayMouseDown(e, ov.id)}
                   style={{ position: 'absolute', left: `${ov.pctX}%`, top: `${ov.pctY}%`, transform: 'translate(-50%,-50%)', zIndex: selected ? 30 : 22, cursor: 'pointer' }}>
                   {ov.type === 'hotspot' && !ov.invisible && (
                     <Hotspot style={hotspotStyle} brand={brand} size={20} handles={selected} />
@@ -1024,9 +1067,10 @@ export const DemoCanvas: React.FC = () => {
     setActiveTool(null);
   };
 
-  const handleOverlayUpdate = (patch: Partial<Overlay>) => {
-    if (!selectedOverlayId) return;
-    const updated = currentOverlays.map((o) => o.id === selectedOverlayId ? { ...o, ...patch } : o);
+  const handleOverlayUpdate = (patch: Partial<Overlay>, overlayId?: string) => {
+    const targetId = overlayId || selectedOverlayId;
+    if (!targetId) return;
+    const updated = currentOverlays.map((o) => o.id === targetId ? { ...o, ...patch } : o);
     saveOverlays(updated);
   };
 
@@ -1041,18 +1085,34 @@ export const DemoCanvas: React.FC = () => {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }} onClick={() => setSelectedOverlayId(null)}>
           <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} selectedChapterId={selectedChapterId} onSelectChapter={setSelectedChapterId} />
-          <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} onClearTool={() => setActiveTool(null)} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} />
+          <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} onClearTool={() => setActiveTool(null)} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} onUpdateOverlay={handleOverlayUpdate} />
           <AnimatePresence mode="wait">
             {selectedChapterId ? (
               <motion.div key={`chapter-${selectedChapterId}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                 <ChapterEditor afterStepId={selectedChapterId} session={session} brand={brand} onClose={() => setSelectedChapterId(null)} />
               </motion.div>
             ) : selectedOverlay ? (
-              <motion.div key="overlay-sidebar" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <motion.div
+                key="overlay-sidebar"
+                onClick={(e) => e.stopPropagation()}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+              >
                 <OverlaySidebar overlay={selectedOverlay as any} onUpdate={handleOverlayUpdate as any} onDelete={handleOverlayDelete} onTypeChange={(t) => handleOverlayUpdate({ type: t })} brand={brand} />
               </motion.div>
             ) : (
-              <motion.div key="content-panel" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              <motion.div
+                key="content-panel"
+                onClick={(e) => e.stopPropagation()}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+              >
                 <ContentPanel step={step} stepIndex={current} brand={brand} onSave={handleSave} />
               </motion.div>
             )}
