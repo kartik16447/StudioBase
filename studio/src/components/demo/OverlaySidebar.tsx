@@ -64,8 +64,8 @@ export function OverlaySidebar({
   return (
     <aside
       style={{
-        width: 280,
-        flex: '0 0 280px',
+        width: 340,
+        flex: '0 0 340px',
         height: '100%',
         background: zn.panel,
         borderLeft: `1px solid ${zn.border}`,

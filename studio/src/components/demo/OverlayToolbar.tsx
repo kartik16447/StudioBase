@@ -1,13 +1,12 @@
 import React from 'react';
 import { zn, brand as defaultBrand, withAlpha, FONT } from './tokens';
-import { Crosshair, MessageSquare, Scan, ZoomIn, Paintbrush, Eye } from './icons';
+import { Crosshair, MessageSquare, Scan, ZoomIn, Eye } from './icons';
 
 export type OverlayTool = 'hotspot' | 'callout' | 'spotlight' | 'zoomFocus';
 
 export type OverlayToolbarProps = {
   activeTool: OverlayTool | null;
   onSelectTool: (tool: OverlayTool) => void;
-  onEditScreenshot: () => void;
   onPreview?: () => void;
   /** Tenant accent. Defaults to the placeholder indigo. */
   brand?: string;
@@ -30,7 +29,6 @@ const HINTS: Record<OverlayTool, string> = {
 export function OverlayToolbar({
   activeTool,
   onSelectTool,
-  onEditScreenshot,
   onPreview,
   brand = defaultBrand,
 }: OverlayToolbarProps) {
@@ -87,23 +85,6 @@ export function OverlayToolbar({
         })}
 
         <div style={{ flex: 1 }} />
-
-        <button
-          type="button"
-          onClick={onEditScreenshot}
-          style={{ ...toolBtn, color: zn.mute }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = zn.chip;
-            e.currentTarget.style.color = zn.ink;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-            e.currentTarget.style.color = zn.mute;
-          }}
-        >
-          <Paintbrush size={15} color="currentColor" />
-          <span>Edit screenshot</span>
-        </button>
 
         <div style={{ width: 1, height: 18, background: zn.border2, margin: '0 4px' }} />
 

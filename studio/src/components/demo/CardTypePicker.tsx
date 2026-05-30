@@ -4,15 +4,15 @@ import { I } from '../icons';
 
 export type DemoCardType = 'text' | 'cta' | 'blur' | 'callout' | 'video' | 'form' | 'image' | 'embed';
 
-const CARD_TYPES: { id: DemoCardType; label: string; desc: string; Icon: React.FC<any> }[] = [
+const CARD_TYPES: { id: DemoCardType; label: string; desc: string; Icon: React.FC<any>; soon?: boolean }[] = [
   { id: 'text',    label: 'Text',    desc: 'Rich paragraph',  Icon: I.AlignLeft },
   { id: 'cta',     label: 'CTA',     desc: 'Button + link',   Icon: I.ArrowRight },
   { id: 'blur',    label: 'Blur',    desc: 'Mask a region',   Icon: I.EyeOff },
   { id: 'callout', label: 'Callout', desc: 'Pin a note',      Icon: I.MessageSquare },
   { id: 'video',   label: 'Video',   desc: 'Embed clip',      Icon: I.Video },
-  { id: 'form',    label: 'Form',    desc: 'Capture leads',   Icon: I.ClipboardList },
-  { id: 'image',   label: 'Image',   desc: 'Static figure',   Icon: I.Image },
-  { id: 'embed',   label: 'Embed',   desc: 'Iframe / HTML',   Icon: I.Code2 },
+  { id: 'form',    label: 'Form',    desc: 'Capture leads',   Icon: I.ClipboardList,  soon: true },
+  { id: 'image',   label: 'Image',   desc: 'Static figure',   Icon: I.Image,          soon: true },
+  { id: 'embed',   label: 'Embed',   desc: 'Iframe / HTML',   Icon: I.Code2,          soon: true },
 ];
 
 const pk = {
@@ -65,26 +65,32 @@ export const CardTypePicker: React.FC<Props> = ({
       </div>
       <div style={{ padding: 11, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
         {CARD_TYPES.map((c) => {
-          const h = hover === c.id;
+          const h = hover === c.id && !c.soon;
           return (
             <button
               key={c.id}
-              onMouseEnter={() => setHover(c.id)}
+              onMouseEnter={() => !c.soon && setHover(c.id)}
               onMouseLeave={() => setHover(null)}
-              onClick={() => onPick?.(c.id)}
+              onClick={() => !c.soon && onPick?.(c.id)}
+              disabled={c.soon}
               style={{
                 textAlign: 'left',
                 padding: '11px 11px',
                 borderRadius: 10,
-                cursor: 'pointer',
+                cursor: c.soon ? 'default' : 'pointer',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 7,
                 border: `1px solid ${h ? withAlpha(brand, 0.5) : pk.border}`,
                 background: h ? withAlpha(brand, 0.1) : pk.panel2,
                 transition: 'all 0.12s',
+                opacity: c.soon ? 0.45 : 1,
+                position: 'relative',
               }}
             >
+              {c.soon && (
+                <span style={{ position: 'absolute', top: 6, right: 7, fontSize: 9, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: pk.dim, background: pk.bg, padding: '1px 5px', borderRadius: 4, border: `1px solid ${pk.border}` }}>Soon</span>
+              )}
               <span style={{
                 width: 30, height: 30, borderRadius: 8,
                 display: 'grid', placeItems: 'center',

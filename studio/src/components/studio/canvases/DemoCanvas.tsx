@@ -21,6 +21,7 @@ import { displayText } from '../../../lib/textUtils';
 import type { DemoCard, Overlay } from '../../../../../shared/types/step';
 import { OverlayToolbar } from '../../../components/demo/OverlayToolbar';
 import type { OverlayTool } from '../../../components/demo/OverlayToolbar';
+import { EmbedDemoView } from './EmbedDemoView';
 import { OverlaySidebar } from '../../../components/demo/OverlaySidebar';
 import { SpotlightMask } from '../../../components/demo/SpotlightMask';
 
@@ -93,7 +94,7 @@ function BrandingPopover({ brand, onClose }: { brand: string; onClose: () => voi
   );
 }
 
-function TopBar({ brand, autoplay, setAutoplay }: { brand: string; autoplay: boolean; setAutoplay: (v: boolean) => void }) {
+function TopBar({ brand, autoplay, setAutoplay, onPreview }: { brand: string; autoplay: boolean; setAutoplay: (v: boolean) => void; onPreview: () => void }) {
   const session = useStudioStore((s) => s.session);
   const title = session?.aiOutputs?.title || 'Untitled demo';
   const [showBranding, setShowBranding] = useState(false);
@@ -121,7 +122,7 @@ function TopBar({ brand, autoplay, setAutoplay }: { brand: string; autoplay: boo
         </div>
         <span style={{ width: 1, height: 22, background: zn.border }} />
         <TopBtn icon={<I.Share2 size={15} />}>Share</TopBtn>
-        <TopBtn icon={<I.Eye size={15} />} primary brand={brand}>Preview</TopBtn>
+        <TopBtn icon={<I.Eye size={15} />} primary brand={brand} onClick={onPreview}>Preview</TopBtn>
       </div>
     </div>
   );
@@ -627,9 +628,16 @@ function ContentPanel({ step, stepIndex, brand, onSave }: {
 
 // ─── Bottom bar ───────────────────────────────────────────────────────────────
 
-function BottomBar({ current, total, brand, onPrev, onNext }: { current: number; total: number; brand: string; onPrev: () => void; onNext: () => void }) {
+function BottomBar({ current, total, brand, onPrev, onNext, onStylePicker }: {
+  current: number; total: number; brand: string;
+  onPrev: () => void; onNext: () => void; onStylePicker: () => void;
+}) {
   return (
     <div style={{ height: 46, flex: 'none', borderTop: `1px solid ${zn.border}`, background: zn.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '0 16px', position: 'relative' }}>
+      <button onClick={onStylePicker} title="Hotspot style"
+        style={{ position: 'absolute', left: 14, height: 28, padding: '0 10px', borderRadius: 7, border: `1px solid ${zn.border}`, background: 'transparent', color: zn.mute, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+        <I.Cursor size={13} /> Hotspot style
+      </button>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <button onClick={onPrev} style={{ width: 30, height: 28, borderRadius: 7, border: `1px solid ${zn.border}`, background: 'transparent', display: 'grid', placeItems: 'center', color: zn.mute, cursor: 'pointer' }}>
           <I.ChevronLeft size={16} />
@@ -651,24 +659,28 @@ export const DemoCanvas: React.FC = () => {
   const saveStep            = useStudioStore((s) => s.saveStep);
   const updateStep          = useStudioStore((s) => s.updateStep);
   const saveAnimationTarget = useStudioStore((s) => s.saveAnimationTarget);
+  const saveAutoplay        = useStudioStore((s) => s.saveAutoplay);
   const brand               = brandState.primaryColor || '#6366f1';
+
+  const savedAutoplay = (session?.metadata as any)?.autoplay?.enabled ?? false;
 
   const [current,           setCurrent]          = useState(0);
   const [hotspotStyle,      setHotspotStyle]     = useState<HotspotStyle>('pulse');
-  const [autoplay,          setAutoplay]         = useState(false);
   const [showHsPicker,      setShowHsPicker]     = useState(false);
   const [activeTool,        setActiveTool]       = useState<OverlayTool | null>(null);
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+  const [showPreview,       setShowPreview]      = useState(false);
 
   const steps = session?.steps ?? [];
   const step  = steps[current];
   const total = steps.length;
 
+  const autoplayInterval = (session?.metadata as any)?.autoplay?.intervalSeconds ?? 5;
   useEffect(() => {
-    if (!autoplay || total === 0) return;
-    const t = setInterval(() => setCurrent((c) => (c + 1) % total), 5000);
+    if (!savedAutoplay || total === 0) return;
+    const t = setInterval(() => setCurrent((c) => (c + 1) % total), autoplayInterval * 1000);
     return () => clearInterval(t);
-  }, [autoplay, total]);
+  }, [savedAutoplay, total, autoplayInterval]);
 
   if (!session || !step) return (
     <div style={{ flex: 1, display: 'grid', placeItems: 'center', background: zn.bg, color: zn.dim, fontSize: 13 }}>
@@ -729,9 +741,9 @@ export const DemoCanvas: React.FC = () => {
 
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: zn.bg, color: zn.ink, fontFamily: 'Inter, system-ui, sans-serif' }}>
-      <TopBar brand={brand} autoplay={autoplay} setAutoplay={setAutoplay} />
+      <TopBar brand={brand} autoplay={savedAutoplay} setAutoplay={(v) => saveAutoplay(v)} onPreview={() => setShowPreview(true)} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <OverlayToolbar activeTool={activeTool} onSelectTool={(t) => setActiveTool((prev) => prev === t ? null : t)} onEditScreenshot={() => {}} brand={brand} />
+        <OverlayToolbar activeTool={activeTool} onSelectTool={(t) => setActiveTool((prev) => prev === t ? null : t)} onPreview={() => setShowPreview(true)} brand={brand} />
         <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }} onClick={() => setSelectedOverlayId(null)}>
           <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} />
           <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} onClearTool={() => setActiveTool(null)} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} />
@@ -748,7 +760,24 @@ export const DemoCanvas: React.FC = () => {
           )}
         </div>
       </div>
-      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(total - 1, c + 1))} />
+      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(total - 1, c + 1))} onStylePicker={() => setShowHsPicker(true)} />
+
+      {/* Preview modal */}
+      {showPreview && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ height: 44, flex: 'none', background: '#0a0a0b', borderBottom: '1px solid #27272a', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#e4e4e7' }}>Preview — viewer experience</span>
+            <div style={{ marginLeft: 'auto' }}>
+              <button onClick={() => setShowPreview(false)} style={{ height: 30, padding: '0 14px', borderRadius: 7, border: '1px solid #3f3f46', background: 'transparent', color: '#a1a1aa', fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <I.X size={14} /> Close preview
+              </button>
+            </div>
+          </div>
+          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+            <EmbedDemoView />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

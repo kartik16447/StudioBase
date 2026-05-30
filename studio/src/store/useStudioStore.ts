@@ -97,6 +97,7 @@ interface StudioState {
   saveAnimationTarget: (stepId: string, animationTarget: any) => Promise<void>;
   saveChapterBreaks: (chapterBreaks: { afterStepId: string; chapterTitle: string }[]) => Promise<void>;
   saveDemoBackground: (bg: { type: 'color' | 'gradient' | 'image'; value: string } | null) => Promise<void>;
+  saveAutoplay: (enabled: boolean, intervalSeconds?: number) => Promise<void>;
   publishSOP: (sopId: string, status: 'review' | 'published') => Promise<void>;
   forkSOP: (sopId: string) => Promise<string>; // returns new sopId
   shareSession: () => Promise<{ shareUrl: string; shareToken: string }>;
@@ -790,6 +791,24 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
       body: JSON.stringify({ metadata: updatedMetadata }),
     }).catch(err => console.warn('[saveDemoBackground] PATCH failed:', err));
+  },
+
+  saveAutoplay: async (enabled, intervalSeconds = 5) => {
+    const { session } = get();
+    if (!session) return;
+    const sessionId = (session as any).id || (session as any).sessionId;
+    const workspaceId = (session as any).workspaceId;
+    if (!sessionId || !workspaceId) return;
+
+    const existing = (session as any).metadata || {};
+    const updatedMetadata = { ...existing, autoplay: { enabled, intervalSeconds } };
+    set({ session: { ...session, metadata: updatedMetadata } });
+
+    await apiClient.request(`/sessions/${sessionId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ metadata: updatedMetadata }),
+    }).catch(err => console.warn('[saveAutoplay] PATCH failed:', err));
   },
 
   publishSOP: async (sopId, status) => {
