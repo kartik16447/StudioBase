@@ -461,6 +461,17 @@ export const WorkspaceSettingsPage: React.FC = () => {
                               borderRadius: 8, padding: '5px 10px', fontSize: 12.5, fontWeight: 500,
                               color: '#EF4444', cursor: 'pointer',
                             }}
+                            onClick={async () => {
+                              if (!workspaceId) return;
+                              const name = m.name || m.email || m.userId;
+                              if (!window.confirm(`Remove ${name} from this workspace? This cannot be undone.`)) return;
+                              try {
+                                await apiClient.workspaces.removeMember(workspaceId, m.userId);
+                                setMembers(prev => prev.filter(x => x.userId !== m.userId));
+                              } catch (e: any) {
+                                setError(e.message || 'Failed to remove member');
+                              }
+                            }}
                           >
                             Remove
                           </button>

@@ -13,14 +13,9 @@ const TAB_META: { id: EmbedTab; label: string; icon: React.FC<any>; desc: string
   { id: 'demo',   label: 'Demo',   icon: I.Cursor,         desc: 'Interactive click-through' },
 ];
 
-function buildEmbedUrl(mode: EmbedTab) {
-  // Start from the current URL so all existing params (session, workspaceId, etc.) are preserved
-  const params = new URLSearchParams(window.location.search);
-  params.set('embed', '1');
-  params.set('mode', mode);
-  // Remove any stale non-embed-related params that shouldn't be in the embed URL
-  params.delete('token');
-  return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+function buildEmbedUrl(mode: EmbedTab, shareToken: string | null) {
+  if (!shareToken) return null;
+  return `${window.location.origin}/s/${shareToken}?embed=1&mode=${mode}`;
 }
 
 function iframeSnippet(url: string, title: string) {
@@ -40,10 +35,12 @@ export const EmbedModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   }, [open, onClose]);
 
   const title = session?.aiOutputs?.title ?? 'StudioBase Walkthrough';
-  const embedUrl = buildEmbedUrl(activeTab);
-  const snippet = iframeSnippet(embedUrl, title);
+  const shareToken = (session as any)?.shareToken ?? null;
+  const embedUrl = buildEmbedUrl(activeTab, shareToken);
+  const snippet = embedUrl ? iframeSnippet(embedUrl, title) : '<!-- Share this session publicly first to get an embed URL -->';
 
   const handleCopy = () => {
+    if (!embedUrl) return;
     navigator.clipboard.writeText(snippet);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -109,22 +106,28 @@ export const EmbedModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
 
                 {/* Live preview — scaled-down iframe so the full embed is visible */}
                 <div className="rounded-xl overflow-hidden border border-white/[0.08] bg-black relative" style={{ height: 220 }}>
-                  <iframe
-                    key={embedUrl}
-                    src={embedUrl}
-                    title="Embed preview"
-                    sandbox="allow-scripts allow-same-origin"
-                    style={{
-                      position: 'absolute',
-                      top: 0, left: 0,
-                      width: '200%',
-                      height: '200%',
-                      border: 0,
-                      transform: 'scale(0.5)',
-                      transformOrigin: 'top left',
-                      pointerEvents: 'none',
-                    }}
-                  />
+                  {embedUrl ? (
+                    <iframe
+                      key={embedUrl}
+                      src={embedUrl}
+                      title="Embed preview"
+                      sandbox="allow-scripts allow-same-origin"
+                      style={{
+                        position: 'absolute',
+                        top: 0, left: 0,
+                        width: '200%',
+                        height: '200%',
+                        border: 0,
+                        transform: 'scale(0.5)',
+                        transformOrigin: 'top left',
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-white/30 text-[13px]">
+                      Share this session publicly first to enable embedding
+                    </div>
+                  )}
                 </div>
 
                 {/* Code block */}

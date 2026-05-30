@@ -186,6 +186,12 @@ class ApiClient {
     revoke: (inviteId: string) =>
       this.post<{ ok: boolean }>(`/workspaces/invites/${inviteId}/revoke`),
   };
+
+  // ── Workspace Members ────────────────────────────────────────────────────────
+  workspaces = {
+    removeMember: (workspaceId: string, userId: string) =>
+      this.delete<{ ok: boolean }>(`/workspaces/${workspaceId}/members/${userId}`),
+  };
 }
 
 // ── Shared types (consumed by store + components) ─────────────────────────────

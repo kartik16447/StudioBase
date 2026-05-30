@@ -33,6 +33,29 @@ publicRoutes.get('/:shareToken', async (c) => {
   const session = await resolveSession(c.env.DB, shareToken);
   if (!session) return c.json({ error: 'Not found' }, 404);
 
+  // Password enforcement: read from session.metadata.password (stored as JSON string in D1)
+  const metaRow = await c.env.DB.prepare(
+    `SELECT metadata FROM sessions WHERE id = ?`
+  ).bind(session.id).first<{ metadata: string | null }>();
+  let sessionPassword: string | null = null;
+  if (metaRow?.metadata) {
+    try {
+      const meta = JSON.parse(metaRow.metadata);
+      if (meta?.password && typeof meta.password === 'string') {
+        sessionPassword = meta.password;
+      }
+    } catch {}
+  }
+  if (sessionPassword) {
+    const provided =
+      c.req.header('x-session-password') ||
+      c.req.query('password') ||
+      null;
+    if (provided !== sessionPassword) {
+      return c.json({ error: 'password_required' }, 401);
+    }
+  }
+
   const owner = await c.env.DB.prepare(
     `SELECT name, email FROM users WHERE id = ?`
   ).bind(session.ownerId).first<any>();

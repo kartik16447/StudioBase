@@ -36,6 +36,7 @@ export const HomePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SessionEnvelope[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [creditsBalance, setCreditsBalance] = useState<number | null>(null);
 
   useEffect(() => {
     // 1. Initial Session Resolution
@@ -76,7 +77,11 @@ export const HomePage: React.FC = () => {
           return;
         }
         
-        const data = await apiClient.get<any>('/sessions');
+        const [data, meData] = await Promise.all([
+          apiClient.get<any>('/sessions'),
+          apiClient.get<{ creditsBalance: number }>('/auth/me').catch(() => null),
+        ]);
+        if (meData?.creditsBalance !== undefined) setCreditsBalance(meData.creditsBalance);
         const rawList: BackendSession[] = data.sessions || [];
 
         // Map backend records to UI SessionEnvelope format
@@ -181,7 +186,7 @@ export const HomePage: React.FC = () => {
           <StatCard label="Sessions captured" value={sessions.length.toString()} delta="+0 this week" tone="primary" icon={I.FileText} />
           <StatCard label="Total runtime" value="--" delta="across SOPs & videos" icon={I.Clock} />
           <StatCard label="Views this month" value="0" delta="↑ 0% vs last" tone="success" icon={I.Eye} />
-          <StatCard label="Credits remaining" value="--" delta="of 500 monthly" icon={I.Zap} />
+          <StatCard label="Credits remaining" value={creditsBalance !== null ? creditsBalance.toString() : '--'} delta="of 500 monthly" icon={I.Zap} />
         </div>
       </div>
 
