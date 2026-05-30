@@ -755,6 +755,7 @@ export const CinematicPlayer = forwardRef<CinematicPlayerHandle, CinematicPlayer
               },
               timeMs: now,
               showCursor: showClickRipple,
+              showAnnotations: false, // annotations are SOP-view only; suppress in cinematic player
             },
             masterFrame,
           );

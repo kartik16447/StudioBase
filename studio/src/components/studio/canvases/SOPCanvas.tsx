@@ -47,8 +47,11 @@ export const SOPCanvas: React.FC = () => {
   const isAiProcessing = useStudioStore(state => state.isAiProcessing);
   const triggerPipeline = useStudioStore(state => state.triggerPipeline);
   const setScriptDirty = useStudioStore(state => state.setScriptDirty);
+  const saveSessionTitle = useStudioStore(state => state.saveSessionTitle);
 
   const [isSharing, setIsSharing] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -184,9 +187,38 @@ export const SOPCanvas: React.FC = () => {
             )}
           </div>
 
-          <h1 className="text-[34px] font-semibold text-text tracking-tight leading-[1.15]" style={{ textWrap: 'balance' as any }}>
-            {session.aiOutputs?.title ?? session.capturedTitle ?? 'Untitled Recording'}
-          </h1>
+          {/* Inline-editable title — click to edit, Enter/blur to save */}
+          {editingTitle ? (
+            <input
+              autoFocus
+              value={titleDraft}
+              onChange={e => setTitleDraft(e.target.value)}
+              onBlur={() => {
+                setEditingTitle(false);
+                const t = titleDraft.trim();
+                if (t) saveSessionTitle(t);
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+                if (e.key === 'Escape') { setEditingTitle(false); }
+              }}
+              className="text-[34px] font-semibold text-text tracking-tight leading-[1.15] bg-transparent border-b-2 border-primary outline-none w-full"
+              style={{ textWrap: 'balance' as any }}
+            />
+          ) : (
+            <h1
+              className="text-[34px] font-semibold text-text tracking-tight leading-[1.15] cursor-text hover:opacity-80 transition-opacity group flex items-center gap-2"
+              style={{ textWrap: 'balance' as any }}
+              onClick={() => {
+                setTitleDraft(session.aiOutputs?.title ?? session.capturedTitle ?? '');
+                setEditingTitle(true);
+              }}
+              title="Click to edit title"
+            >
+              {session.aiOutputs?.title ?? session.capturedTitle ?? 'Untitled Recording'}
+              <I.Edit2 size={18} className="opacity-0 group-hover:opacity-40 transition-opacity shrink-0 mt-1" />
+            </h1>
+          )}
           <div className="flex items-center gap-3 mt-4 text-[13px] text-text-2">
             <span className="inline-flex items-center gap-1.5"><I.FileText size={13} /> {session.metadata.stepCount} steps</span>
             <span className="text-text-3">·</span>

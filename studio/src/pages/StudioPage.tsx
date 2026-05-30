@@ -57,6 +57,27 @@ export const StudioPage: React.FC = () => {
 
   useSessionManager();
 
+  // ── Global undo / redo (Ctrl/Cmd+Z and Cmd+Shift+Z) ───────────────────
+  // Lives here so it works in every view (SOP, Video, Demo) regardless of
+  // which canvas or panel is currently active. Skips input/textarea so text
+  // editing keeps browser-native undo.
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement).isContentEditable) return;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          useStudioStore.getState().redo();
+        } else {
+          useStudioStore.getState().undo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   // Embed mode: skip the full studio chrome and render the appropriate embed view
   if (isEmbed) {
     if (mode === 'video') return <EmbedVideoView />;

@@ -76,7 +76,7 @@ interface StudioState {
   setStepIndex: (index: number) => void;
   setPlaybackRate: (rate: number) => void;
   setCurrentTime: (time: number) => void;
-   updateStep: (stepId: string, updates: Partial<Step>) => void;
+   updateStep: (stepId: string, updates: Partial<Step>, skipUndo?: boolean) => void;
   deleteStep: (stepId: string) => void;
   triggerScroll: () => void;
   setRenderMode: (mode: 'hybrid' | 'slideshow') => void;
@@ -594,11 +594,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   }),
   setPlaybackRate: (rate) => set({ playbackRate: rate }),
   setCurrentTime: (time) => set({ currentTime: time }),
-  updateStep: (stepId, updates) => set((state) => {
+  updateStep: (stepId, updates, skipUndo = false) => set((state) => {
     if (!state.session) return state;
     const trackedFields = ['textOverride', 'overlays'] as const;
-    const isTracked = trackedFields.some(f => f in updates);
-    const newStack = isTracked
+    const shouldTrack = !skipUndo && trackedFields.some(f => f in updates);
+    const newStack = shouldTrack
       ? [...state._undoStack, state.session.steps].slice(-50)
       : state._undoStack;
     const newSteps = state.session.steps.map(s =>
@@ -607,7 +607,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     return {
       session: { ...state.session, steps: newSteps },
       _undoStack: newStack,
-      _redoStack: isTracked ? [] : state._redoStack,
+      _redoStack: shouldTrack ? [] : state._redoStack,
     };
   }),
   deleteStep: (stepId) => set((state) => {

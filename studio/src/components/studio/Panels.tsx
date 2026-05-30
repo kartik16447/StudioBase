@@ -20,9 +20,10 @@ export const ScriptPanel: React.FC = () => {
   const currentStepIndex = useStudioStore(state => state.focusedStepIndex);
   const setStepIndex = useStudioStore(state => state.setStepIndex);
   const updateStep = useStudioStore(state => state.updateStep);
+  const saveStep = useStudioStore(state => state.saveStep);
   const triggerScroll = useStudioStore(state => state.triggerScroll);
   const scrollTrigger = useStudioStore(state => state.scrollTrigger);
-  
+
   const [tone, setTone] = useState('Friendly & concise');
   const [search, setSearch] = useState('');
   const isAiProcessing = useStudioStore(state => state.isAiProcessing);
@@ -61,8 +62,11 @@ export const ScriptPanel: React.FC = () => {
           <button
             disabled={isAiProcessing}
             onClick={() => {
-              if (!session) return;
-              const overrides = session.steps.filter(s => s.textOverride && s.textOverride.trim() !== '');
+              // Read from live store (not stale React closure) so blur-committed
+              // textOverride edits are visible even when clicked immediately after typing.
+              const current = useStudioStore.getState().session;
+              if (!current) return;
+              const overrides = current.steps.filter(s => s.textOverride && s.textOverride.trim() !== '');
               if (overrides.length > 0) {
                 setStepsWithOverride(overrides);
                 setRegenModalOpen(true);
@@ -111,7 +115,14 @@ export const ScriptPanel: React.FC = () => {
                 setStepIndex(idx);
                 triggerScroll();
               }}
-              onUpdate={(text) => updateStep(step.id, { textOverride: text })}
+              onLiveUpdate={(text) => updateStep(step.id, { textOverride: text }, true /* skipUndo */)}
+              onCommit={(text) => {
+                // Push undo snapshot and persist to backend on blur / Enter
+                updateStep(step.id, { textOverride: text });
+                saveStep(step.id, { textOverride: text }).catch(err =>
+                  console.warn('[ScriptPanel] saveStep failed:', err),
+                );
+              }}
               innerRef={el => { if (el) stepRefs.current.set(step.id, el); else stepRefs.current.delete(step.id); }}
             />
           ))}
@@ -207,14 +218,17 @@ export const ScriptPanel: React.FC = () => {
   );
 };
 
-const ScriptStepRow: React.FC<{ 
-  step: Step, 
-  active: boolean, 
+const ScriptStepRow: React.FC<{
+  step: Step,
+  active: boolean,
   isPlaying: boolean,
   onClick: () => void,
-  onUpdate: (text: string) => void,
+  /** Called on every keystroke — updates store without creating an undo snapshot */
+  onLiveUpdate: (text: string) => void,
+  /** Called on blur / Enter — persists to backend and creates an undo snapshot */
+  onCommit: (text: string) => void,
   innerRef?: (el: HTMLDivElement | null) => void
-}> = ({ step, active, isPlaying, onClick, onUpdate, innerRef }) => {
+}> = ({ step, active, isPlaying, onClick, onLiveUpdate, onCommit, innerRef }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(step.textOverride || step.generatedText || '');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -314,17 +328,20 @@ const ScriptStepRow: React.FC<{
             <textarea
               autoFocus
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                onLiveUpdate(e.target.value); // keeps store + SOP view in sync on every keystroke
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   setIsEditing(false);
-                  onUpdate(text);
+                  onCommit(text);
                 }
               }}
               onBlur={() => {
                 setIsEditing(false);
-                onUpdate(text);
+                onCommit(text);
               }}
               className="w-full bg-white border border-primary rounded-md p-3 text-[13.5px] text-text outline-none shadow-card-lifted resize-none leading-relaxed"
               rows={3}

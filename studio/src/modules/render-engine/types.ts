@@ -29,6 +29,12 @@ export interface RenderSpec {
    * and the static dot creates a confusing second cursor.
    */
   showCursor?: boolean;
+  /**
+   * Whether to composite annotation overlays (arrows, boxes, blur regions, etc.)
+   * onto the frame. Default true. Set false in the live cinematic player so
+   * annotations only appear in the SOP view where they were drawn.
+   */
+  showAnnotations?: boolean;
 }
 
 export interface IRenderer {

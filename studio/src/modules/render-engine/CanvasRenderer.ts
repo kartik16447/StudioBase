@@ -101,7 +101,7 @@ export class CanvasRenderer implements IRenderer {
 
     // ── 9. Post-process overlays (no camera transform) ─────────────────────
     this.drawVignette(ctx, cW, cH);
-    this.drawAnnotations(ctx, spec, layout);
+    if (spec.showAnnotations !== false) this.drawAnnotations(ctx, spec, layout);
     if (step.action === 'input' && step.inputValue && progress > 0.25) {
       this.drawTypingOverlay(ctx, cW, cH, step, progress);
     }
