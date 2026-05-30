@@ -80,7 +80,7 @@ async function uploadLogo(session: any, file: File): Promise<string | null> {
   } catch { return null; }
 }
 
-function BrandingPopover({ brand, onClose }: { brand: string; onClose: () => void }) {
+function BrandingPopover({ brand }: { brand: string }) {
   const session = useStudioStore((s) => s.session);
   const saveDemoBackground = useStudioStore((s) => s.saveDemoBackground);
   const saveDemoBrand = useStudioStore((s) => s.saveDemoBrand);
@@ -257,7 +257,7 @@ function TopBar({ brand, autoplay, setAutoplay, intervalSeconds, setIntervalSeco
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 9, flexShrink: 0 }}>
         <div style={{ position: 'relative' }}>
           <TopBtn icon={<I.Palette size={15} />} ghost onClick={(e) => { e?.stopPropagation(); setShowBranding((v) => !v); }}>Branding</TopBtn>
-          {showBranding && <BrandingPopover brand={brand} onClose={() => setShowBranding(false)} />}
+          {showBranding && <BrandingPopover brand={brand} />}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div onClick={() => setAutoplay(!autoplay)} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', padding: '0 4px' }}>
@@ -1111,7 +1111,7 @@ export const DemoCanvas: React.FC = () => {
           )}
         </div>
       </div>
-      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(total - 1, c + 1))} onStylePicker={() => setShowHsPicker(true)} />
+      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(total - 1, c + 1))} onStylePicker={() => setShowHsPicker(true)} transitionStyle={transitionStyle} onTransitionChange={saveTransitionStyle} />
 
       {/* Preview modal */}
       {showPreview && (
