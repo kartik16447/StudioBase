@@ -12,6 +12,7 @@ import { HTTPException } from 'hono/http-exception';
 import { recordEvent, Events } from '../../telemetry/events';
 
 import { SessionService } from '../../services/SessionService';
+import { checkLowCreditNotify } from '../../services/CreditService';
 
 const sessions = new Hono<{ Bindings: Env; Variables: Variables }>();
 const STUDIO_BASE_URL = 'https://studiobase-umber.vercel.app';
@@ -201,7 +202,7 @@ sessions.patch('/:id/share-formats', requirePermission('sop:edit'), async (c) =>
   });
 });
 
-// PATCH /v1/sessions/:id/enable-cinematic — deduct 1 credit and unlock cinematic sharing
+// PATCH /v1/sessions/:id/enable-cinematic — deduct 2 credits and unlock cinematic sharing
 // Idempotent: calling again when already enabled is free (no double charge).
 sessions.patch('/:id/enable-cinematic', requirePermission('sop:edit'), async (c) => {
   const user = c.get('user');
@@ -220,17 +221,17 @@ sessions.patch('/:id/enable-cinematic', requirePermission('sop:edit'), async (c)
     return c.json({ cinematicEnabled: true, charged: false });
   }
 
-  // Credit check
-  const CINEMATIC_CREDIT_COST = 1;
-  const userRecord = await c.env.DB
-    .prepare('SELECT creditsBalance FROM users WHERE id = ?')
-    .bind(user.id).first<{ creditsBalance: number }>();
+  // Credit check against workspace pool
+  const CINEMATIC_CREDIT_COST = 2;
+  const wsCredits = await c.env.DB
+    .prepare('SELECT balanceCredits FROM workspace_credits WHERE workspaceId = ?')
+    .bind(ws.id).first<{ balanceCredits: number }>();
 
-  if ((userRecord?.creditsBalance ?? 0) < CINEMATIC_CREDIT_COST) {
+  if ((wsCredits?.balanceCredits ?? 0) < CINEMATIC_CREDIT_COST) {
     return c.json({
       error: 'INSUFFICIENT_CREDITS',
       need: CINEMATIC_CREDIT_COST,
-      have: userRecord?.creditsBalance ?? 0,
+      have: wsCredits?.balanceCredits ?? 0,
     }, 402);
   }
 
@@ -238,12 +239,15 @@ sessions.patch('/:id/enable-cinematic', requirePermission('sop:edit'), async (c)
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE sessions SET cinematicEnabled = 1, updatedAt = ? WHERE id = ?')
       .bind(now, id),
-    c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance - ? WHERE id = ?')
-      .bind(CINEMATIC_CREDIT_COST, user.id),
+    c.env.DB.prepare('UPDATE workspace_credits SET balanceCredits = balanceCredits - ? WHERE workspaceId = ?')
+      .bind(CINEMATIC_CREDIT_COST, ws.id),
     c.env.DB.prepare(
-      'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(crypto.randomUUID(), user.id, -CINEMATIC_CREDIT_COST, 'cinematic_share', id, now),
+      'INSERT INTO credits_ledger (id, workspaceId, userId, delta, actionType, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).bind(crypto.randomUUID(), ws.id, user.id, -CINEMATIC_CREDIT_COST, 'cinematic', 'cinematic', id, now),
   ]);
+
+  // Best-effort low-credit notification (non-blocking)
+  checkLowCreditNotify(c.env.DB, ws.id).catch(() => {});
 
   return c.json({ cinematicEnabled: true, charged: true });
 });

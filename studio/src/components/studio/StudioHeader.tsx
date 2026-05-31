@@ -4,6 +4,7 @@ import { cn, Button, Avatar } from '../ui';
 import { NotificationBell } from '../ui/NotificationBell';
 import { I } from '../icons';
 import { useStudioStore } from '../../store/useStudioStore';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Crosshair, MessageSquare, Scan, ZoomIn as ZoomInIcon } from '../demo/icons';
 import { withAlpha } from '../demo/helpers';
 import { apiClient } from '../../lib/apiClient';
@@ -18,6 +19,7 @@ export interface StudioHeaderProps {
   onSandboxExport?: () => void;
   onOpenInDocs?: () => void;
   isOpeningInDocs?: boolean;
+  onSaveAsTemplate?: (data: { title: string; description: string; category: string; isGlobal: boolean }) => Promise<void>;
 }
 
 const zn = {
@@ -223,14 +225,29 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
   onSandboxExport,
   onOpenInDocs,
   isOpeningInDocs,
+  onSaveAsTemplate,
 }) => {
   const [showBranding, setShowBranding] = useState(false);
+  const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
+  const [templateForm, setTemplateForm] = useState({ title: '', description: '', category: 'feature-walkthrough', isGlobal: false });
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [showSessionMenu, setShowSessionMenu] = useState(false);
 
   const session = useStudioStore((s) => s.session);
   const brand = useStudioStore((s) => s.brand);
   const saveAutoplay = useStudioStore((s) => s.saveAutoplay);
   const setShowDemoPreview = useStudioStore((s) => s.setShowDemoPreview);
   const saveSessionTitle = useStudioStore((s) => s.saveSessionTitle);
+  const publishedAt = useStudioStore((s) => s.publishedAt);
+  const lastPublishedMs = useStudioStore((s) => s.lastPublishedMs);
+  const [publishedRecently, setPublishedRecently] = useState(false);
+
+  React.useEffect(() => {
+    if (!lastPublishedMs) return;
+    setPublishedRecently(true);
+    const t = setTimeout(() => setPublishedRecently(false), 5000);
+    return () => clearTimeout(t);
+  }, [lastPublishedMs]);
 
   const [editingTitle, setEditingTitle] = useState(session?.aiOutputs?.title || 'Untitled Session');
 
@@ -498,9 +515,159 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
               </button>
             )}
 
+            <AnimatePresence mode="wait">
+              {publishedAt && publishedRecently && (
+                <motion.span
+                  key="live-flash"
+                  initial={{ opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.92 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+                  className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-pill bg-[#E5F8EC] text-[#1B7F3B] text-[11.5px] font-semibold shrink-0"
+                >
+                  <I.CheckCircle size={12} strokeWidth={2.5} />
+                  Live — updated at {publishedAt}
+                </motion.span>
+              )}
+              {publishedAt && !publishedRecently && (
+                <motion.span
+                  key="last-published"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-[11px] text-text-3 shrink-0"
+                >
+                  Last published {publishedAt}
+                </motion.span>
+              )}
+            </AnimatePresence>
+
+            {(() => {
+              const sessionUpdatedAt = (session as any)?.updatedAt as number | undefined;
+              const hasUnpublishedChanges =
+                !!sessionUpdatedAt && !!lastPublishedMs && sessionUpdatedAt > lastPublishedMs;
+              return hasUnpublishedChanges ? (
+                <span className="inline-flex items-center gap-1 h-6 px-2 rounded-pill bg-yellow-500/10 text-yellow-600 text-[11px] font-semibold shrink-0 border border-yellow-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0" />
+                  Unpublished changes
+                </span>
+              ) : null;
+            })()}
+
+            {onSaveAsTemplate && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowSessionMenu(m => !m); }}
+                  className="h-8 w-8 rounded-pill border border-border text-text hover:bg-surface-2 inline-flex items-center justify-center transition-colors"
+                  title="Session options"
+                >
+                  <I.MoreHorizontal size={15} />
+                </button>
+                {showSessionMenu && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowSessionMenu(false)} />
+                    <div className="absolute right-0 top-10 z-50 w-48 bg-surface border border-border rounded-lg shadow-xl py-1">
+                      <button
+                        className="w-full text-left px-3 py-2 text-[12.5px] text-text hover:bg-surface-2 transition-colors flex items-center gap-2"
+                        onClick={() => {
+                          setShowSessionMenu(false);
+                          setTemplateForm(f => ({ ...f, title: session?.aiOutputs?.title || '' }));
+                          setShowSaveAsTemplate(true);
+                        }}
+                      >
+                        <I.BookmarkPlus size={13} /> Save as template
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             <Button variant="primary" size="sm" icon={I.Share2} onClick={onShareClick}>
               <span className="hidden sm:inline">Share</span>
             </Button>
+          </>
+        )}
+
+        {/* Save as Template modal */}
+        {showSaveAsTemplate && (
+          <>
+            <div className="fixed inset-0 z-50 bg-black/50" onClick={() => setShowSaveAsTemplate(false)} />
+            <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+              <div className="bg-surface border border-border rounded-xl shadow-2xl w-[400px] p-6 pointer-events-auto" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-5">
+                  <h2 className="text-[15px] font-semibold text-text">Save as template</h2>
+                  <button onClick={() => setShowSaveAsTemplate(false)} className="text-text-3 hover:text-text transition-colors"><I.X size={16} /></button>
+                </div>
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <label className="text-[12px] font-semibold text-text-2 mb-1.5 block">Title</label>
+                    <input
+                      value={templateForm.title}
+                      onChange={e => setTemplateForm(f => ({ ...f, title: e.target.value }))}
+                      placeholder="Template title…"
+                      className="w-full h-9 px-3 rounded-lg bg-surface-2 border border-border text-[13px] text-text outline-none focus:border-primary transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[12px] font-semibold text-text-2 mb-1.5 block">Description</label>
+                    <textarea
+                      value={templateForm.description}
+                      onChange={e => setTemplateForm(f => ({ ...f, description: e.target.value }))}
+                      placeholder="What is this template for?…"
+                      rows={2}
+                      className="w-full px-3 py-2 rounded-lg bg-surface-2 border border-border text-[13px] text-text outline-none focus:border-primary transition-colors resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[12px] font-semibold text-text-2 mb-1.5 block">Category</label>
+                    <select
+                      value={templateForm.category}
+                      onChange={e => setTemplateForm(f => ({ ...f, category: e.target.value }))}
+                      className="w-full h-9 px-3 rounded-lg bg-surface-2 border border-border text-[13px] text-text outline-none focus:border-primary transition-colors"
+                    >
+                      {[
+                        ['feature-walkthrough', 'Feature Walkthrough'],
+                        ['client-onboarding', 'Client Onboarding'],
+                        ['design-handoff', 'Design Handoff'],
+                        ['process-runbook', 'Process Runbook'],
+                        ['product-demo', 'Product Demo'],
+                        ['quick-howto', 'Quick How-To'],
+                      ].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={templateForm.isGlobal}
+                      onChange={e => setTemplateForm(f => ({ ...f, isGlobal: e.target.checked }))}
+                      className="w-4 h-4 accent-primary"
+                    />
+                    <span className="text-[12.5px] text-text-2">Publish to community gallery</span>
+                  </label>
+                </div>
+                <div className="flex justify-end gap-2 mt-6">
+                  <button
+                    onClick={() => setShowSaveAsTemplate(false)}
+                    className="h-8 px-4 rounded-lg border border-border text-[12.5px] text-text-2 hover:text-text transition-colors"
+                  >Cancel</button>
+                  <button
+                    disabled={!templateForm.title.trim() || savingTemplate}
+                    onClick={async () => {
+                      if (!onSaveAsTemplate || !templateForm.title.trim()) return;
+                      setSavingTemplate(true);
+                      try {
+                        await onSaveAsTemplate(templateForm);
+                        setShowSaveAsTemplate(false);
+                      } finally {
+                        setSavingTemplate(false);
+                      }
+                    }}
+                    className="h-8 px-4 rounded-lg bg-primary text-white text-[12.5px] font-semibold hover:bg-primary/90 transition-colors disabled:opacity-60 disabled:cursor-wait"
+                  >{savingTemplate ? 'Saving…' : 'Save template'}</button>
+                </div>
+              </div>
+            </div>
           </>
         )}
       </div>
