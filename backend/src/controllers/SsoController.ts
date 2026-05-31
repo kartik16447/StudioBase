@@ -22,21 +22,10 @@ export class SsoController {
       return c.json({ error: 'SSO not configured for this domain' }, 403);
     }
 
-    // Stub IdP redirect
-    const redirectUrl = `https://mock-idp.com/auth?domain=${searchDomain}&provider=${wsSetting.ssoProvider}`;
-    return c.json({ redirectUrl });
+    return c.json({ error: 'SSO configuration is not yet available.' }, 501);
   }
 
   static async callback(c: AppContext) {
-    const { token, code } = await c.req.json();
-    
-    // Stub token exchange
-    if (!token && !code) {
-      return c.json({ error: 'Token or code missing' }, 400);
-    }
-
-    const mockJwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzb21ldXNlciIsImRvbWFpbiI6Im1vY2tkb21haW4uY29tIn0.mocksignature';
-
-    return c.json({ token: mockJwt, message: 'SSO token exchange successful' });
+    return c.json({ error: 'SSO configuration is not yet available.' }, 501);
   }
 }

@@ -11,7 +11,8 @@ export function AdminPage({ session }: { session: any }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
 
-  const isAdmin = session?.user?.email === 'karthik.upadhyay98@gmail.com';
+  const role = (session?.user?.workspaceRole ?? '').toLowerCase();
+  const isAdmin = role === 'admin' || role === 'owner';
 
   const fetchAdminData = async (query?: string) => {
     try {

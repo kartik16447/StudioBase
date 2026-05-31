@@ -3,6 +3,8 @@ import { Env, Variables } from '../../types/hono';
 import { authMiddleware } from '../../middlewares/auth';
 import { workspaceMiddleware, requirePermission } from '../../middlewares/workspace';
 import { AuditLogController } from '../../controllers/AuditLogController';
+import { getPlan } from '../../middlewares/plan';
+import { HTTPException } from 'hono/http-exception';
 
 const auditLogs = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -11,8 +13,15 @@ auditLogs.post('/', authMiddleware(), workspaceMiddleware(), async (c) => {
   return AuditLogController.create(c);
 });
 
-// 2. Restricted View (Requires Admin)
-auditLogs.use('*', authMiddleware(), workspaceMiddleware(), requirePermission('workspace:admin'));
+// 2. Restricted View (Requires Admin + Enterprise plan)
+auditLogs.use('*', authMiddleware(), workspaceMiddleware(), requirePermission('workspace:admin'), async (c, next) => {
+  const ws = c.get('workspace');
+  const plan = await getPlan(c.env, ws.id);
+  if (plan.plan !== 'enterprise') {
+    throw new HTTPException(403, { message: 'Audit logs require an Enterprise plan.' });
+  }
+  await next();
+});
 auditLogs.get('/', AuditLogController.list);
 
 // 3. Export audit logs as JSONL — returns a signed R2 URL

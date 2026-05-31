@@ -1,15 +1,21 @@
 import { Hono } from 'hono';
 import { Env, Variables } from '../../types/hono';
 import { zValidator } from '@hono/zod-validator';
+import { z } from 'zod';
 import { authMiddleware } from '../../middlewares/auth';
 import { workspaceMiddleware, requirePermission } from '../../middlewares/workspace';
-import { 
-  UpdateWorkspaceSchema, 
-  CreateInviteSchema, 
-  JoinWorkspaceSchema 
+import {
+  UpdateWorkspaceSchema,
+  CreateInviteSchema,
+  JoinWorkspaceSchema
 } from '../../schemas/workspaces';
 import { WorkspaceController } from '../../controllers/WorkspaceController';
 import { planGate } from '../../middlewares/plan';
+import { HTTPException } from 'hono/http-exception';
+
+const UpdateMemberRoleSchema = z.object({
+  role: z.enum(['Viewer', 'Member', 'Admin']),
+});
 
 const workspaces = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -26,7 +32,20 @@ wsRoutes.use('*', authMiddleware(), workspaceMiddleware());
 // 3. Update Workspace
 wsRoutes.patch('/', requirePermission('workspace:admin'), zValidator('json', UpdateWorkspaceSchema), WorkspaceController.update);
 
-// 3b. Get Workspace Settings (read-only)
+// 3b. Get Brand Config (read-only)
+wsRoutes.get('/brand', async (c) => {
+  const ws = c.get('workspace');
+  const row = await c.env.DB.prepare(
+    'SELECT brandConfig FROM workspaces WHERE id = ?'
+  ).bind(ws.id).first<{ brandConfig: string | null }>();
+  let brandConfig: Record<string, any> = {};
+  if (row?.brandConfig) {
+    try { brandConfig = JSON.parse(row.brandConfig); } catch {}
+  }
+  return c.json({ brandConfig });
+});
+
+// 3c. Get Workspace Settings (read-only)
 wsRoutes.get('/settings', async (c) => {
   const ws = c.get('workspace');
   const row = await c.env.DB.prepare(
@@ -65,6 +84,30 @@ wsRoutes.get('/members', WorkspaceController.listMembers);
 
 // 7. Remove Member
 wsRoutes.delete('/members/:userId', requirePermission('workspace:admin'), WorkspaceController.removeMember);
+
+// 8. Update Member Role
+wsRoutes.patch('/members/:userId', requirePermission('workspace:admin'), zValidator('json', UpdateMemberRoleSchema), async (c) => {
+  const ws = c.get('workspace');
+  const actor = c.get('user');
+  const targetUserId = c.req.param('userId');
+  const { role } = c.req.valid('json');
+
+  if (!targetUserId) throw new HTTPException(400, { message: 'Missing userId' });
+
+  const target = await c.env.DB.prepare(
+    'SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?'
+  ).bind(ws.id, targetUserId).first<{ role: string }>();
+
+  if (!target) throw new HTTPException(404, { message: 'Member not found' });
+  if (target.role === 'Owner') throw new HTTPException(403, { message: 'Cannot change Owner role' });
+  if (actor.id === targetUserId) throw new HTTPException(400, { message: 'Cannot change your own role' });
+
+  await c.env.DB.prepare(
+    'UPDATE workspace_members SET role = ? WHERE workspaceId = ? AND userId = ?'
+  ).bind(role, ws.id, targetUserId).run();
+
+  return c.json({ success: true, userId: targetUserId, role });
+});
 
 workspaces.route('/', wsRoutes);
 

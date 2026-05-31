@@ -18,7 +18,7 @@ function App() {
       const accounts = (res.sv_accounts || []) as any[];
       if (accounts.length > 0) {
         setSession({
-          user: { email: accounts[0].email, id: accounts[0].id }
+          user: { email: accounts[0].email, id: accounts[0].id, workspaceRole: accounts[0].workspaceRole }
         });
       }
     });
