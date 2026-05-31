@@ -50,7 +50,13 @@ export class AssetService {
   }
 
   private validatePath(key: string) {
-    if (!key.startsWith('sessions/') && !key.startsWith('screenshots/') && !key.startsWith('videos/') && !key.startsWith('audio/')) {
+    if (
+      !key.startsWith('sessions/') &&
+      !key.startsWith('screenshots/') &&
+      !key.startsWith('videos/') &&
+      !key.startsWith('audio/') &&
+      !key.startsWith('workspace/')
+    ) {
       throw new Error('INVALID_PATH');
     }
   }

@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { I } from '../components/icons';
-import { 
-  cn, Badge, SectionLabel, Button, IconButton, FieldShell, Card 
+import {
+  cn, Badge, SectionLabel, Button, IconButton, FieldShell, Card
 } from '../components/ui';
 import { ComingSoon } from '../components/studio/Panels';
 import { useStudioStore } from '../store/useStudioStore';
+import { apiClient } from '../lib/apiClient';
+import { sessionManager } from '../lib/auth/sessionManager';
 
 const BRAND_TABS = [
   { id: 'logos', label: 'Logos', icon: I.Image, phase: 2 },
@@ -90,43 +92,125 @@ export const BrandKitPage: React.FC = () => {
 const LogosTab: React.FC = () => {
   const brand = useStudioStore(state => state.brand);
   const setBrand = useStudioStore(state => state.setBrand);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  // Hydrate logo from backend on mount
+  useEffect(() => {
+    const workspaceId = sessionManager.getWorkspaceId();
+    if (!workspaceId) return;
+    apiClient.get<{ brandConfig: { logoUrl?: string } }>(
+      `/workspaces/${workspaceId}/brand`
+    ).then(res => {
+      if (res.brandConfig?.logoUrl) setBrand({ logoUrl: res.brandConfig.logoUrl });
+    }).catch(() => {});
+  }, []);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const workspaceId = sessionManager.getWorkspaceId();
+    if (!workspaceId) return;
+
+    // Optimistic preview
+    setBrand({ logoUrl: URL.createObjectURL(file) });
+    setUploading(true);
+
+    try {
+      const ext = file.name.split('.').pop() ?? 'png';
+      const key = `workspace/${workspaceId}/logo-${Date.now()}.${ext}`;
+
+      // 1. Presign
+      const presign = await apiClient.request<{ files: { key: string; uploadUrl: string }[] }>(
+        '/assets/upload/presign',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+          body: JSON.stringify({ sessionId: workspaceId, files: [{ key, contentType: file.type }] }),
+        }
+      );
+
+      // 2. Upload to R2
+      await fetch(presign.files[0].uploadUrl, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': file.type },
+      });
+
+      // 3. Stable served URL via authenticated assets proxy
+      const servedUrl = apiClient.getUrl(`/assets/${encodeURIComponent(key)}`);
+
+      // 4. Persist to backend
+      await apiClient.request(`/workspaces/${workspaceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+        body: JSON.stringify({ brandConfig: { logoUrl: servedUrl } }),
+      });
+
+      // 5. Update Zustand with stable URL
+      setBrand({ logoUrl: servedUrl });
+    } catch {
+      // Revert optimistic update on failure
+      setBrand({ logoUrl: null });
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleRemove = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setBrand({ logoUrl: null });
+    const workspaceId = sessionManager.getWorkspaceId();
+    if (!workspaceId) return;
+    await apiClient.request(`/workspaces/${workspaceId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+      body: JSON.stringify({ brandConfig: { logoUrl: null } }),
+    }).catch(() => {});
+  };
 
   return (
     <div className="grid grid-cols-3 gap-6">
       <div className="col-span-2">
         <SectionLabel>Workspace logo</SectionLabel>
-        
+
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
           className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            setBrand({ logoUrl: URL.createObjectURL(file) });
-          }}
+          onChange={handleFileChange}
         />
 
         {brand.logoUrl ? (
           <div className="relative h-56 flex items-center justify-center grad-border mb-6">
+            {uploading && (
+              <div className="absolute inset-0 bg-bg/60 flex items-center justify-center rounded-card">
+                <I.Loader size={20} className="animate-spin text-primary" />
+              </div>
+            )}
             <img src={brand.logoUrl} className="max-h-36 max-w-xs object-contain" />
             <button
-              onClick={(e) => { e.stopPropagation(); setBrand({ logoUrl: null }); }}
+              onClick={handleRemove}
               className="absolute top-3 right-3 w-7 h-7 rounded-full bg-surface flex items-center justify-center shadow-card hover:text-danger"
             >
               <I.X size={14} />
             </button>
           </div>
         ) : (
-          <div 
-            className="grad-border h-56 flex items-center justify-center mb-6 cursor-pointer hover:bg-surface-2 transition-colors"
-            onClick={() => fileInputRef.current?.click()}
+          <div
+            className={cn(
+              'grad-border h-56 flex items-center justify-center mb-6 transition-colors',
+              uploading ? 'cursor-wait opacity-60' : 'cursor-pointer hover:bg-surface-2',
+            )}
+            onClick={() => !uploading && fileInputRef.current?.click()}
           >
             <div className="text-center">
               <div className="w-12 h-12 mx-auto rounded-full bg-primary-light flex items-center justify-center mb-3">
-                <I.Upload size={20} className="text-primary" />
+                {uploading
+                  ? <I.Loader size={20} className="text-primary animate-spin" />
+                  : <I.Upload size={20} className="text-primary" />}
               </div>
               <div className="text-[14px] font-semibold text-text mb-1">Drag & drop your logo</div>
               <div className="text-[12px] text-text-2">SVG or PNG, transparent background recommended</div>

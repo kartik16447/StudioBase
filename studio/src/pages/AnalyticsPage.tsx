@@ -37,6 +37,13 @@ interface SopAnalytics {
   steps: StepData[];
 }
 
+interface ViewerRow {
+  id: string;
+  viewerEmail: string | null;
+  viewerFingerprint: string | null;
+  viewedAt: number;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtMs(ms: number): string {
@@ -263,9 +270,9 @@ const SopTable: React.FC<{
   sops: SopRow[];
   expandedId: string | null;
   onExpand: (id: string | null) => void;
-  sopDetail: SopAnalytics | null;
-  detailLoading: boolean;
-}> = ({ sops, expandedId, onExpand, sopDetail, detailLoading }) => {
+  viewerData: ViewerRow[] | null;
+  viewerLoading: boolean;
+}> = ({ sops, expandedId, onExpand, viewerData, viewerLoading }) => {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'views', dir: 'desc' });
 
   const sorted = useMemo(() => {
@@ -366,15 +373,7 @@ const SopTable: React.FC<{
               {expanded && (
                 <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #ECECEF' }}>
                   <td colSpan={6} style={{ padding: '0 24px 16px' }}>
-                    {detailLoading && (
-                      <div style={{ padding: '20px 0', color: '#8A8A95', fontSize: 13 }}>Loading step breakdown…</div>
-                    )}
-                    {sopDetail && !detailLoading && (
-                      <InlineStepBreakdown steps={sopDetail.steps} />
-                    )}
-                    {!sopDetail && !detailLoading && (
-                      <div style={{ padding: '20px 0', color: '#8A8A95', fontSize: 13 }}>No step data available.</div>
-                    )}
+                    <InlineViewerTable views={viewerData ?? []} loading={viewerLoading} />
                   </td>
                 </tr>
               )}
@@ -426,6 +425,45 @@ const InlineStepBreakdown: React.FC<{ steps: StepData[] }> = ({ steps }) => {
           </div>
         );
       })}
+    </div>
+  );
+};
+
+// ─── Inline viewer table (inside expanded table row) ───────────────────────────
+
+const InlineViewerTable: React.FC<{ views: ViewerRow[]; loading: boolean }> = ({ views, loading }) => {
+  if (loading) return <div style={{ padding: '20px 0', color: '#8A8A95', fontSize: 13 }}>Loading viewers…</div>;
+  if (views.length === 0) return <div style={{ padding: '20px 0', color: '#8A8A95', fontSize: 13 }}>No views recorded yet.</div>;
+  return (
+    <div style={{ paddingTop: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#4A4A55', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Viewer breakdown</span>
+        <span style={{ marginLeft: 8, fontSize: 11.5, background: 'rgba(94,92,230,0.1)', color: '#5E5CE6', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>
+          {views.length} viewer{views.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid #ECECEF' }}>
+            <th style={{ padding: '6px 0', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Viewer</th>
+            <th style={{ padding: '6px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em' }}>First viewed</th>
+            <th style={{ padding: '6px 0', textAlign: 'right', fontSize: 11, fontWeight: 700, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Steps completed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {views.map(v => {
+            const label = v.viewerEmail || 'Anonymous viewer';
+            const ts = new Date(v.viewedAt).toLocaleString();
+            return (
+              <tr key={v.id} style={{ borderBottom: '1px solid #F0F0F3' }}>
+                <td style={{ padding: '8px 0', color: '#0B0B0F', fontWeight: 500, fontStyle: v.viewerEmail ? 'normal' : 'italic' }}>{label}</td>
+                <td style={{ padding: '8px 16px', color: '#4A4A55', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{ts}</td>
+                <td style={{ padding: '8px 0', textAlign: 'right', color: '#B8B8C2', fontSize: 12 }}>—</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 };
@@ -519,6 +557,8 @@ export const AnalyticsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [viewerData, setViewerData] = useState<ViewerRow[] | null>(null);
+  const [viewerLoading, setViewerLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -530,16 +570,24 @@ export const AnalyticsPage: React.FC = () => {
 
   const handleSelectSop = async (sopId: string | null) => {
     setSelectedSopId(sopId);
+    setViewerData(null);
     if (!sopId) { setSopDetail(null); return; }
     setDetailLoading(true);
+    setViewerLoading(true);
     setSopDetail(null);
     try {
-      const data = await apiClient.get<SopAnalytics>(`/analytics/sops/${sopId}`);
-      setSopDetail(data);
+      const [detail, viewerRes] = await Promise.all([
+        apiClient.get<SopAnalytics>(`/analytics/sops/${sopId}`),
+        apiClient.get<{ views: ViewerRow[] }>(`/analytics/views/${sopId}`),
+      ]);
+      setSopDetail(detail);
+      setViewerData(viewerRes.views ?? []);
     } catch {
       setSopDetail(null);
+      setViewerData([]);
     } finally {
       setDetailLoading(false);
+      setViewerLoading(false);
     }
   };
 
@@ -727,8 +775,8 @@ export const AnalyticsPage: React.FC = () => {
                 sops={workspace.sops}
                 expandedId={selectedSopId}
                 onExpand={handleSelectSop}
-                sopDetail={sopDetail}
-                detailLoading={detailLoading}
+                viewerData={viewerData}
+                viewerLoading={viewerLoading}
               />
             </div>
           </div>

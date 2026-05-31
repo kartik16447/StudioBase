@@ -235,6 +235,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const [error,      setError]      = useState<string | null>(null);
   const [copied,     setCopied]     = useState(false);
   const [viewMode,   setViewMode]   = useState<ViewMode>('video');
+  const [isPaidPlan, setIsPaidPlan] = useState(false);
 
   // displayIndex tracks which step the player is on — updated via onStepSelect
   // Used for step info card, transcript highlight, chapter label.
@@ -251,6 +252,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
         const meta = await fetch(`${BACKEND_URL}/v1/public/${shareToken}`).then(r => r.json()) as any;
         if (meta.error) throw new Error(meta.error);
         setOwnerName(meta.owner?.name || 'Anonymous');
+        setIsPaidPlan(meta.isPaidPlan ?? false);
         if (!meta.sessionJsonUrl) throw new Error('Session not ready.');
         sessionJsonUrlRef.current = meta.sessionJsonUrl;
       }
@@ -472,16 +474,20 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
           />
         )}
 
-        {/* Footer */}
-        <div className="mt-16 pt-8 border-t border-white/[0.06] flex flex-col items-center gap-3 text-center">
-          <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center">
-            <span className="text-white font-bold text-sm">S</span>
+        {/* Footer — only shown on free plan workspaces */}
+        {!isPaidPlan && (
+          <div className="mt-16 pt-6 border-t border-white/[0.06] flex justify-center">
+            <p className="text-[12px] text-white/30 text-center">
+              Made with IsomerFlow —{' '}
+              <a
+                href="https://studiobase-umber.vercel.app/landing"
+                className="text-white/40 hover:text-white/60 hover:underline transition-colors"
+              >
+                try it free
+              </a>
+            </p>
           </div>
-          <p className="text-[13px] text-white/40">Made with <span className="font-semibold text-white/60">StudioBase</span></p>
-          <a href="https://studiobase-umber.vercel.app/landing" className="text-[13px] font-semibold text-indigo-400 hover:underline">
-            Create your own walkthrough →
-          </a>
-        </div>
+        )}
       </div>
     </div>
   );

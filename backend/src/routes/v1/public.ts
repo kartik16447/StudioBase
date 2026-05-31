@@ -60,6 +60,11 @@ publicRoutes.get('/:shareToken', async (c) => {
     `SELECT name, email FROM users WHERE id = ?`
   ).bind(session.ownerId).first<any>();
 
+  const planRow = await c.env.DB.prepare(
+    `SELECT plan FROM workspace_plans WHERE workspaceId = ?`
+  ).bind(session.workspaceId).first<{ plan: string } | null>();
+  const isPaidPlan = planRow ? planRow.plan !== 'free' : false;
+
   const origin = new URL(c.req.url).origin;
   const sessionJsonUrl = session.r2JsonKey
     ? `${origin}/v1/public/${shareToken}/json`
@@ -75,6 +80,7 @@ publicRoutes.get('/:shareToken', async (c) => {
     cinematicEnabled: session.cinematicEnabled === 1,
     sopEnabled: session.sopEnabled !== 0,   // default true (column defaults to 1)
     rawEnabled: session.rawEnabled !== 0,   // default true
+    isPaidPlan,
     owner: owner
       ? { name: owner.name || owner.email?.split('@')[0] || 'Anonymous' }
       : { name: 'Anonymous' },
@@ -169,10 +175,14 @@ publicRoutes.get('/:shareToken/json', async (c) => {
   // ── Parse D1 live overrides ──────────────────────────────────────────────
   // animationTarget per step: stored in session.metadata.stepOverrides[stepId]
   let stepOverrides: Record<string, { animationTarget?: any }> = {};
+  let sopStepOrder: string[] | null = null;
   if (sessionMeta?.metadata) {
     try {
       const meta = JSON.parse(sessionMeta.metadata);
       stepOverrides = meta?.stepOverrides || {};
+      if (Array.isArray(meta?.sopStepOrder) && meta.sopStepOrder.length > 0) {
+        sopStepOrder = meta.sopStepOrder;
+      }
     } catch {}
   }
 
@@ -333,6 +343,18 @@ publicRoutes.get('/:shareToken/json', async (c) => {
         }
       }
     }
+  }
+
+  // ── Apply sopStepOrder if set ────────────────────────────────────────────
+  // Reorder the steps array to match the order saved in session metadata.
+  // Steps not present in sopStepOrder are appended at the end in original order.
+  if (sopStepOrder && Array.isArray(json.steps)) {
+    const orderMap = new Map<string, number>(sopStepOrder.map((id: string, i: number) => [id, i]));
+    json.steps = [...json.steps].sort((a: any, b: any) => {
+      const ai = orderMap.has(a.id) ? orderMap.get(a.id)! : Infinity;
+      const bi = orderMap.has(b.id) ? orderMap.get(b.id)! : Infinity;
+      return ai - bi;
+    });
   }
 
   return c.json({ ...json, assets });

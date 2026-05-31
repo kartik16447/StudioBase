@@ -52,7 +52,7 @@ export const CommandPalette: React.FC = () => {
                 autoFocus
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Type a command, page, or session…"
+                placeholder="Type a command or page…"
                 className="flex-1 bg-transparent outline-none text-[14.5px] placeholder:text-text-3 text-text"
               />
               <Kbd>esc</Kbd>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../store/useStudioStore';
 import { I } from '../components/icons';
@@ -22,6 +22,7 @@ import { RenderConstants } from '../modules/render-engine/RenderConstants';
 import { handleSOPVideoExport } from '../modules/render-engine/ExportOrchestrator';
 import { useSessionManager } from '../hooks/useSessionManager';
 import { useIsEmbed } from '../hooks/useIsEmbed';
+import { apiClient } from '../lib/apiClient';
 import { EmbedSOPView } from '../components/studio/canvases/EmbedSOPView';
 import { EmbedVideoView } from '../components/studio/canvases/EmbedVideoView';
 import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
@@ -54,8 +55,20 @@ export const StudioPage: React.FC = () => {
   const setPendingDocId = useStudioStore(state => state.setPendingDocId);
   const [shareOpen, setShareOpen] = useState(false);
   const [isOpeningInDocs, setIsOpeningInDocs] = useState(false);
+  const [isSeededSession, setIsSeededSession] = useState(false);
 
   useSessionManager();
+
+  useEffect(() => {
+    if (!session?.sessionId) return;
+    apiClient.get<{ seededSessionId: string | null }>('/onboarding/state')
+      .then(data => {
+        if (data?.seededSessionId && data.seededSessionId === session.sessionId) {
+          setIsSeededSession(true);
+        }
+      })
+      .catch(() => {});
+  }, [session?.sessionId]);
 
   // ── Global undo / redo (Ctrl/Cmd+Z and Cmd+Shift+Z) ───────────────────
   // Lives here so it works in every view (SOP, Video, Demo) regardless of
@@ -162,6 +175,12 @@ export const StudioPage: React.FC = () => {
 
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+      {isSeededSession && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-primary/8 border-b border-primary/15 text-[12.5px] text-primary shrink-0">
+          <I.Info size={13} strokeWidth={2} />
+          <span>This is an example session — explore freely, your changes won't affect anything.</span>
+        </div>
+      )}
       <StudioHeader
         activeView={activeView}
         setActiveView={setActiveView}
@@ -172,6 +191,16 @@ export const StudioPage: React.FC = () => {
         onSandboxExport={() => handleSOPVideoExport({ session, theme: useStudioStore.getState().brand, renderMode, masterAudioUrl })}
         onOpenInDocs={handleOpenInDocs}
         isOpeningInDocs={isOpeningInDocs}
+        onSaveAsTemplate={async (data) => {
+          const sessionId = session?.sessionId ?? (session as any)?.id;
+          if (!sessionId) { showToast('No session loaded', 'error'); return; }
+          try {
+            await apiClient.post('/templates', { sessionId, ...data });
+            showToast('Template saved', 'success');
+          } catch (err: any) {
+            showToast(err.message || 'Failed to save template', 'error');
+          }
+        }}
       />
       <ShareModal open={shareOpen} onClose={() => setShareOpen(false)} />
       <div className="flex-1 flex min-h-0">
