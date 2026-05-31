@@ -390,45 +390,6 @@ const SopTable: React.FC<{
   );
 };
 
-// ─── Inline step breakdown (inside expanded table row) ──────────────────────────
-
-const InlineStepBreakdown: React.FC<{ steps: StepData[] }> = ({ steps }) => {
-  const maxV = Math.max(...steps.map(s => s.views), 1);
-  return (
-    <div style={{ paddingTop: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: '#4A4A55', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Step-by-step view counts</span>
-        <span style={{ marginLeft: 8, fontSize: 11.5, background: 'rgba(94,92,230,0.1)', color: '#5E5CE6', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>{steps.length} steps</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#8A8A95' }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#F59E0B', display: 'inline-block' }} /> &lt;60% retention
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#EF4444', display: 'inline-block', marginLeft: 6 }} /> &lt;30% retention
-        </div>
-      </div>
-      {steps.map((s, i) => {
-        const retention = Math.round((s.views / maxV) * 100);
-        const tone = retention < 30 ? '#EF4444' : retention < 60 ? '#F59E0B' : '#10B981';
-        return (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '5px 0', borderBottom: i < steps.length - 1 ? '1px solid #F0F0F3' : 'none' }}>
-            <div style={{ width: 24, fontSize: 11, fontWeight: 700, color: '#B8B8C2', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-              {String(i + 1).padStart(2, '0')}
-            </div>
-            <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#0B0B0F', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              Step {s.stepIndex + 1}
-              <span style={{ color: '#8A8A95', marginLeft: 8, fontSize: 11.5 }}>{s.views.toLocaleString()} views · {fmtMs(s.avgDwellMs)} avg</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <div style={{ width: 140, height: 6, background: '#F2F2F5', borderRadius: 99, overflow: 'hidden' }}>
-                <div style={{ width: `${retention}%`, height: '100%', background: tone, borderRadius: 99 }} />
-              </div>
-              <span style={{ fontSize: 12, fontWeight: 600, color: tone, width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{retention}%</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
 // ─── Inline viewer table (inside expanded table row) ───────────────────────────
 
 const InlineViewerTable: React.FC<{ views: ViewerRow[]; loading: boolean }> = ({ views, loading }) => {

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { apiClient, type PendingInvite } from '../lib/apiClient';
 import { sessionManager } from '../lib/auth/sessionManager';
-import { usePlan, PLAN_FEATURES } from '../hooks/usePlan';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -113,7 +112,7 @@ const Card: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }>
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export const WorkspaceSettingsPage: React.FC = () => {
-  const plan = usePlan();
+  const workspaceId = sessionManager.getWorkspaceId();
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
@@ -139,11 +138,9 @@ export const WorkspaceSettingsPage: React.FC = () => {
 
   // Role dropdowns
   const [openRoleFor, setOpenRoleFor] = useState<string | null>(null);
-  const [roleUpdating, setRoleUpdating] = useState<string | null>(null);
 
   const handleRoleChange = async (userId: string, newRole: 'Admin' | 'Member' | 'Viewer') => {
     if (!workspaceId) return;
-    setRoleUpdating(userId);
     try {
       await apiClient.request(`/workspaces/${workspaceId}/members/${userId}`, {
         method: 'PATCH',
@@ -154,7 +151,6 @@ export const WorkspaceSettingsPage: React.FC = () => {
     } catch (e: any) {
       setError(e.message || 'Failed to update role');
     } finally {
-      setRoleUpdating(null);
       setOpenRoleFor(null);
     }
   };
@@ -173,11 +169,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
   const [ssoTooltipVisible, setSsoTooltipVisible] = useState(false);
   const [mfaTooltipVisible, setMfaTooltipVisible] = useState(false);
   const [reauthTooltipVisible, setReauthTooltipVisible] = useState(false);
-  const [reauth, setReauth] = useState(true);
   const [reauthDays, setReauthDays] = useState(30);
-  const [enforceMfa, setEnforceMfa] = useState(false);
-
-  const workspaceId = sessionManager.getWorkspaceId();
 
   const loadData = () => {
     if (!workspaceId) return;
@@ -191,7 +183,6 @@ export const WorkspaceSettingsPage: React.FC = () => {
       setMembers(membersRes.members || []);
       setPendingInvites(invitesRes.invites || []);
       if (settingsRes.settings?.retentionDays) setReauthDays(settingsRes.settings.retentionDays);
-      if (settingsRes.settings?.ssoEnabled) setReauth(!!settingsRes.settings.ssoEnabled);
     }).catch(err => setError(err.message))
       .finally(() => setLoading(false));
   };

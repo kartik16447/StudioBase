@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cn, Button, Avatar } from '../ui';
 import { NotificationBell } from '../ui/NotificationBell';
 import { I } from '../icons';
 import { useStudioStore } from '../../store/useStudioStore';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Crosshair, MessageSquare, Scan, ZoomIn as ZoomInIcon } from '../demo/icons';
 import { withAlpha } from '../demo/helpers';
 import { apiClient } from '../../lib/apiClient';

@@ -193,12 +193,12 @@ export const StudioPage: React.FC = () => {
         isOpeningInDocs={isOpeningInDocs}
         onSaveAsTemplate={async (data) => {
           const sessionId = session?.sessionId ?? (session as any)?.id;
-          if (!sessionId) { showToast('No session loaded', 'error'); return; }
+          if (!sessionId) { showToast('error', 'No session loaded'); return; }
           try {
             await apiClient.post('/templates', { sessionId, ...data });
-            showToast('Template saved', 'success');
+            showToast('info', 'Template saved');
           } catch (err: any) {
-            showToast(err.message || 'Failed to save template', 'error');
+            showToast('error', err.message || 'Failed to save template');
           }
         }}
       />

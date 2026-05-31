@@ -271,9 +271,9 @@ export const HomePage: React.FC = () => {
     try {
       await apiClient.post(`/templates/${templateId}/publish`, {});
       setWorkspaceTemplates(prev => prev.map(t => t.id === templateId ? { ...t, isGlobal: 1 } : t));
-      showToast('Template published to community', 'success');
+      showToast('info', 'Template published to community');
     } catch (err: any) {
-      showToast(err.message || 'Failed to publish template', 'error');
+      showToast('error', err.message || 'Failed to publish template');
     }
   };
 
