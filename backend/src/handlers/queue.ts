@@ -1,6 +1,7 @@
 import { Env } from '../types/hono';
 import { PipelineProcessor } from '../services/pipeline/PipelineProcessor';
 import { AudioProcessor } from '../services/audio/AudioProcessor';
+import { creditRefundStatements, CreditActionType } from '../services/CreditService';
 
 export async function handleQueue(batch: MessageBatch, env: Env, ctx: ExecutionContext) {
   const pipelineProcessor = new PipelineProcessor(env);
@@ -31,13 +32,9 @@ export async function handleQueue(batch: MessageBatch, env: Env, ctx: ExecutionC
         if (jobType === 'audio_tts' || jobType === 'audio_swap') {
           // Refund credit + reset step state so UI doesn't stay stuck
           const now = Date.now();
-          const ledgerReason = jobType === 'audio_tts' ? 'audio_tts_refund' : 'audio_swap_refund';
+          const actionType: CreditActionType = jobType === 'audio_tts' ? 'audio_tts' : 'audio_swap';
           await env.DB.batch([
-            env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + 1 WHERE id = ?')
-              .bind(body.userId),
-            env.DB.prepare(
-              'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, 1, ?, ?, ?)'
-            ).bind(crypto.randomUUID(), body.userId, ledgerReason, body.sessionId, now),
+            ...creditRefundStatements(env.DB, body.workspaceId, body.userId, body.sessionId, actionType, 1, now),
             jobType === 'audio_tts'
               ? env.DB.prepare(
                   'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
@@ -45,7 +42,7 @@ export async function handleQueue(batch: MessageBatch, env: Env, ctx: ExecutionC
               : env.DB.prepare(
                   `UPDATE step_audio SET
                     voiceoverKey = COALESCE(originalVoiceoverKey, voiceoverKey),
-                    voiceoverSource = CASE 
+                    voiceoverSource = CASE
                       WHEN originalVoiceoverKey IS NOT NULL THEN (CASE WHEN originalVoiceoverKey LIKE '%tts%' THEN 'tts' ELSE 'original' END)
                       ELSE 'original'
                     END,

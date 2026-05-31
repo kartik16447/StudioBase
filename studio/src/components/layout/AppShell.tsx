@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useStudioStore } from '../../store/useStudioStore';
 import type { RouteName } from '../../store/useStudioStore';
@@ -7,6 +7,7 @@ import { cn, Avatar, Kbd, Tooltip } from '../ui';
 import type { LucideIcon } from 'lucide-react';
 import { sessionManager } from '../../lib/auth/sessionManager';
 import { usePlan, PLAN_FEATURES } from '../../hooks/usePlan';
+import { CreditsModal } from '../CreditsModal';
 
 const SIDEBAR_EXPANDED = 240;
 const SIDEBAR_COLLAPSED = 56;
@@ -70,14 +71,70 @@ const SidebarItem: React.FC<SidebarItemProps> = ({ icon: Icon, label, active, on
   return btn;
 };
 
+const CreditPill: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
+  const balance = useStudioStore(s => s.creditsBalance);
+  const monthly = useStudioStore(s => s.monthlyAllocation);
+  const open = useStudioStore(s => s.setCreditsModalOpen);
+
+  const pct = monthly > 0 ? balance / monthly : 1;
+  const isCritical = pct < 0.1;
+  const isWarn = pct < 0.2 && !isCritical;
+
+  const pillClass = cn(
+    'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold cursor-pointer transition-colors select-none',
+    isCritical ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25' :
+    isWarn     ? 'bg-yellow-400/15 text-yellow-300 hover:bg-yellow-400/25' :
+                 'bg-white/[0.06] text-white/50 hover:bg-white/[0.1] hover:text-white/70'
+  );
+
+  if (collapsed) {
+    const pill = (
+      <button onClick={() => open(true)} className={cn(pillClass, 'w-10 h-10 rounded-lg px-0 justify-center mx-auto')}>
+        <I.Zap size={14} strokeWidth={2.2} />
+      </button>
+    );
+    if (isCritical) {
+      return (
+        <Tooltip content="Running low — top up to keep generating" side="right">
+          {pill}
+        </Tooltip>
+      );
+    }
+    return pill;
+  }
+
+  const pill = (
+    <button onClick={() => open(true)} className={cn(pillClass, 'w-full justify-between px-3 py-2 rounded-lg')}>
+      <span className="flex items-center gap-1.5">
+        <I.Zap size={12} strokeWidth={2.2} />
+        <span>{balance} credits</span>
+      </span>
+      <span className="text-[10px] opacity-60">{monthly}/mo</span>
+    </button>
+  );
+
+  if (isCritical) {
+    return (
+      <Tooltip content="Running low — top up to keep generating" side="right">
+        {pill}
+      </Tooltip>
+    );
+  }
+  return pill;
+};
+
 export const Sidebar: React.FC = () => {
   const route = useStudioStore(state => state.route);
   const navigate = useStudioStore(state => state.navigate);
+  const fetchCredits = useStudioStore(s => s.fetchCredits);
   const active = route.name;
   const plan = usePlan();
+  const userName = sessionManager.getUser()?.name || sessionManager.getUser()?.email?.split('@')[0] || 'You';
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('sb_sidebar_collapsed') === 'true'; } catch { return false; }
   });
+
+  useEffect(() => { fetchCredits(); }, [fetchCredits]);
 
   const toggle = () => {
     const next = !collapsed;
@@ -182,11 +239,16 @@ export const Sidebar: React.FC = () => {
           </button>
         )}
 
+        {/* Credit pill */}
+        <div className={cn('border-b border-white/5', collapsed ? 'p-1.5' : 'px-3 py-2')}>
+          <CreditPill collapsed={collapsed} />
+        </div>
+
         {/* Profile row */}
         <div className={cn('flex items-center gap-3', collapsed ? 'p-2 flex-col' : 'p-4')}>
           {collapsed ? (
             <>
-              <Avatar name="Kartik Upadhyay" size={32} />
+              <Avatar name={userName} size={32} />
               <Tooltip content="Sign out" side="right">
                 <button onClick={() => sessionManager.logout()} className="text-white/40 hover:text-red-400 transition-colors">
                   <I.LogOut size={14} />
@@ -195,9 +257,9 @@ export const Sidebar: React.FC = () => {
             </>
           ) : (
             <>
-              <Avatar name="Kartik Upadhyay" size={32} />
+              <Avatar name={userName} size={32} />
               <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-semibold text-white truncate">Kartik Upadhyay</div>
+                <div className="text-[13px] font-semibold text-white truncate">{userName}</div>
               </div>
               <button title="Sign out" onClick={() => sessionManager.logout()} className="text-white/40 hover:text-red-400 transition-colors">
                 <I.LogOut size={16} />
@@ -216,12 +278,15 @@ export const AppShell: React.FC<{ children: React.ReactNode; hideSidebar?: boole
   hideSidebar = false,
   hideChrome = false,
 }) => {
+  const creditsModalOpen = useStudioStore(s => s.creditsModalOpen);
+
   if (hideChrome) {
     return (
       <div className="flex h-screen w-screen overflow-hidden bg-[#0d0d12]">
         <main className="flex-1 min-w-0 flex flex-col relative overflow-hidden">
           {children}
         </main>
+        {creditsModalOpen && <CreditsModal />}
       </div>
     );
   }
@@ -231,6 +296,7 @@ export const AppShell: React.FC<{ children: React.ReactNode; hideSidebar?: boole
       <main className="flex-1 min-w-0 flex flex-col relative overflow-hidden">
         {children}
       </main>
+      {creditsModalOpen && <CreditsModal />}
     </div>
   );
 };

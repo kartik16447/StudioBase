@@ -4,6 +4,7 @@ import { authMiddleware } from '../../middlewares/auth';
 import { HTTPException } from 'hono/http-exception';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
+import { getWorkspaceCredits, creditDeductStatements, creditRefundStatements, checkLowCreditNotify } from '../../services/CreditService';
 
 const steps = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -234,14 +235,11 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
       throw new HTTPException(409, { message: 'Audio generation already in progress for this step' });
     }
 
-    // Credits check
-    const userRecord = await c.env.DB.prepare(
-      'SELECT creditsBalance FROM users WHERE id = ?'
-    ).bind(user.id).first() as any;
-
-    if ((userRecord?.creditsBalance ?? 0) < AUDIO_TTS_CREDIT_COST) {
+    // Credits check against workspace pool
+    const wsCredits = await getWorkspaceCredits(c.env.DB, workspaceId);
+    if (wsCredits.balanceCredits < AUDIO_TTS_CREDIT_COST) {
       throw new HTTPException(402, {
-        message: `Need ${AUDIO_TTS_CREDIT_COST} credit, have ${userRecord?.creditsBalance ?? 0}`,
+        message: `Need ${AUDIO_TTS_CREDIT_COST} credit, have ${wsCredits.balanceCredits}`,
       });
     }
 
@@ -250,11 +248,7 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
 
     try {
       await c.env.DB.batch([
-        c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance - ? WHERE id = ?')
-          .bind(AUDIO_TTS_CREDIT_COST, user.id),
-        c.env.DB.prepare(
-          'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-        ).bind(crypto.randomUUID(), user.id, -AUDIO_TTS_CREDIT_COST, 'audio_tts', sessionId, now),
+        ...creditDeductStatements(c.env.DB, workspaceId, user.id, sessionId, 'audio_tts', AUDIO_TTS_CREDIT_COST, now),
         c.env.DB.prepare(`
           INSERT INTO step_audio (stepId, sessionId, userId, voiceoverSource, jobId, jobStartedAt, createdAt, updatedAt)
           VALUES (?, ?, ?, 'generating', ?, ?, ?, ?)
@@ -288,11 +282,7 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
       // Queue send failed — refund the credit and surface the error
       console.error('[generate-audio] Queue send failed:', qErr?.message ?? qErr);
       await c.env.DB.batch([
-        c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + ? WHERE id = ?')
-          .bind(AUDIO_TTS_CREDIT_COST, user.id),
-        c.env.DB.prepare(
-          'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-        ).bind(crypto.randomUUID(), user.id, AUDIO_TTS_CREDIT_COST, 'audio_tts_refund_queue_err', sessionId, now),
+        ...creditRefundStatements(c.env.DB, workspaceId, user.id, sessionId, 'audio_tts', AUDIO_TTS_CREDIT_COST, now),
         c.env.DB.prepare(
           'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
         ).bind(now, stepId, sessionId),
@@ -301,6 +291,9 @@ steps.post('/:sessionId/steps/:stepId/generate-audio',
         message: `Queue unavailable: ${qErr?.message ?? 'unknown'}. Credit refunded.`,
       });
     }
+
+    // Best-effort low-credit notification (non-blocking)
+    checkLowCreditNotify(c.env.DB, workspaceId).catch(() => {});
 
     return c.json({ jobId }, 202);
   }
@@ -355,14 +348,11 @@ steps.post('/:sessionId/steps/:stepId/swap-voice',
       throw new HTTPException(409, { message: 'Audio generation or swap already in progress for this step' });
     }
 
-    // Credits check
-    const userRecord = await c.env.DB.prepare(
-      'SELECT creditsBalance FROM users WHERE id = ?'
-    ).bind(user.id).first() as any;
-
-    if ((userRecord?.creditsBalance ?? 0) < AUDIO_SWAP_CREDIT_COST) {
+    // Credits check against workspace pool
+    const wsCreditsSwap = await getWorkspaceCredits(c.env.DB, workspaceId);
+    if (wsCreditsSwap.balanceCredits < AUDIO_SWAP_CREDIT_COST) {
       throw new HTTPException(402, {
-        message: `Need ${AUDIO_SWAP_CREDIT_COST} credit, have ${userRecord?.creditsBalance ?? 0}`,
+        message: `Need ${AUDIO_SWAP_CREDIT_COST} credit, have ${wsCreditsSwap.balanceCredits}`,
       });
     }
 
@@ -371,11 +361,7 @@ steps.post('/:sessionId/steps/:stepId/swap-voice',
 
     try {
       await c.env.DB.batch([
-        c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance - ? WHERE id = ?')
-          .bind(AUDIO_SWAP_CREDIT_COST, user.id),
-        c.env.DB.prepare(
-          'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-        ).bind(crypto.randomUUID(), user.id, -AUDIO_SWAP_CREDIT_COST, 'audio_swap', sessionId, now),
+        ...creditDeductStatements(c.env.DB, workspaceId, user.id, sessionId, 'audio_swap', AUDIO_SWAP_CREDIT_COST, now),
         c.env.DB.prepare(`
           UPDATE step_audio SET
             voiceoverSource = 'generating',
@@ -407,11 +393,7 @@ steps.post('/:sessionId/steps/:stepId/swap-voice',
       // Queue send failed — refund the credit and restore original state
       console.error('[swap-voice] Queue send failed:', qErr?.message ?? qErr);
       await c.env.DB.batch([
-        c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + ? WHERE id = ?')
-          .bind(AUDIO_SWAP_CREDIT_COST, user.id),
-        c.env.DB.prepare(
-          'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-        ).bind(crypto.randomUUID(), user.id, AUDIO_SWAP_CREDIT_COST, 'audio_swap_refund_queue_err', sessionId, now),
+        ...creditRefundStatements(c.env.DB, workspaceId, user.id, sessionId, 'audio_swap', AUDIO_SWAP_CREDIT_COST, now),
         c.env.DB.prepare(
           'UPDATE step_audio SET voiceoverSource = ?, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
         ).bind(existing.voiceoverSource, now, stepId, sessionId),
@@ -420,6 +402,9 @@ steps.post('/:sessionId/steps/:stepId/swap-voice',
         message: `Queue unavailable: ${qErr?.message ?? 'unknown'}. Credit refunded.`,
       });
     }
+
+    // Best-effort low-credit notification (non-blocking)
+    checkLowCreditNotify(c.env.DB, workspaceId).catch(() => {});
 
     return c.json({ jobId }, 202);
   }
@@ -431,7 +416,7 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
   const user = c.get('user');
   const { sessionId, stepId } = c.req.param();
 
-  await requireSession(c.env, sessionId, user.id);
+  const audioStatusSession = await requireSession(c.env, sessionId, user.id);
 
   const row = await c.env.DB.prepare(
     'SELECT voiceoverSource, voiceoverKey, voiceoverDurationMs, swapVoiceId, originalVoiceoverKey, jobId, jobStartedAt, userId, updatedAt FROM step_audio WHERE stepId = ? AND sessionId = ?'
@@ -452,7 +437,6 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
   if (row.voiceoverSource === 'generating' && row.jobStartedAt && (Date.now() - row.jobStartedAt > STUCK_JOB_TTL_MS)) {
     const now = Date.now();
     const isSwapJob = row.originalVoiceoverKey !== null;
-    const ledgerReason = isSwapJob ? 'audio_swap_refund_ttl' : 'audio_tts_refund_ttl';
 
     const updateQuery = isSwapJob
       ? c.env.DB.prepare(`
@@ -473,13 +457,10 @@ steps.get('/:sessionId/steps/:stepId/audio-status', async (c) => {
           'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
         ).bind(now, stepId, sessionId);
 
+    const ttlActionType = isSwapJob ? 'audio_swap' : 'audio_tts';
     await c.env.DB.batch([
       updateQuery,
-      c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + 1 WHERE id = ?')
-        .bind(row.userId),
-      c.env.DB.prepare(
-        'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, 1, ?, ?, ?)'
-      ).bind(crypto.randomUUID(), row.userId, ledgerReason, sessionId, now),
+      ...creditRefundStatements(c.env.DB, audioStatusSession.workspaceId, row.userId, sessionId, ttlActionType, 1, now),
     ]);
 
     const rolledBackVoiceoverKey = isSwapJob ? (row.originalVoiceoverKey ?? row.voiceoverKey) : null;
@@ -603,15 +584,13 @@ steps.post('/:sessionId/generate-narration', async (c) => {
     throw new HTTPException(400, { message: 'No steps with text found to narrate' });
   }
 
-  // Credits check — 1 per step
+  // Credits check — 1 per step, against workspace pool
   const creditCost = stepsWithText.length * AUDIO_TTS_CREDIT_COST;
-  const userRecord = await c.env.DB.prepare(
-    'SELECT creditsBalance FROM users WHERE id = ?'
-  ).bind(user.id).first() as any;
+  const wsCreditsNarration = await getWorkspaceCredits(c.env.DB, workspaceId);
 
-  if ((userRecord?.creditsBalance ?? 0) < creditCost) {
+  if (wsCreditsNarration.balanceCredits < creditCost) {
     throw new HTTPException(402, {
-      message: `Need ${creditCost} credits for ${stepsWithText.length} steps, have ${userRecord?.creditsBalance ?? 0}`,
+      message: `Need ${creditCost} credits for ${stepsWithText.length} steps, have ${wsCreditsNarration.balanceCredits}`,
     });
   }
 
@@ -619,11 +598,7 @@ steps.post('/:sessionId/generate-narration', async (c) => {
 
   // Deduct credits + mark all steps as 'generating' in one batch
   const dbStatements: any[] = [
-    c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance - ? WHERE id = ?')
-      .bind(creditCost, user.id),
-    c.env.DB.prepare(
-      'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(crypto.randomUUID(), user.id, -creditCost, 'audio_narration', sessionId, now),
+    ...creditDeductStatements(c.env.DB, workspaceId, user.id, sessionId, 'audio_narration', creditCost, now),
   ];
 
   const jobs: { stepId: string; jobId: string; text: string }[] = [];
@@ -676,21 +651,21 @@ steps.post('/:sessionId/generate-narration', async (c) => {
   if (failed.length > 0) {
     const refund = failed.length * AUDIO_TTS_CREDIT_COST;
     await c.env.DB.batch([
-      c.env.DB.prepare('UPDATE users SET creditsBalance = creditsBalance + ? WHERE id = ?')
-        .bind(refund, user.id),
-      c.env.DB.prepare(
-        'INSERT INTO credits_ledger (id, userId, delta, reason, sessionId, createdAt) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(crypto.randomUUID(), user.id, refund, 'audio_narration_refund_queue_err', sessionId, now),
-      ...failed.map(stepId =>
+      ...creditRefundStatements(c.env.DB, workspaceId, user.id, sessionId, 'audio_narration', refund, now),
+      ...failed.map(failedStepId =>
         c.env.DB.prepare(
           'UPDATE step_audio SET voiceoverSource = NULL, jobId = NULL, jobStartedAt = NULL, updatedAt = ? WHERE stepId = ? AND sessionId = ?'
-        ).bind(now, stepId, sessionId)
+        ).bind(now, failedStepId, sessionId)
       ),
     ]).catch(() => {});
   }
 
   const queued = jobs.filter(j => !failed.includes(j.stepId)).map(j => j.stepId);
   console.log(`[generate-narration] Finished queueing. Queued: ${queued.length}, Skipped/Failed: ${failed.length}`);
+
+  // Best-effort low-credit notification (non-blocking)
+  checkLowCreditNotify(c.env.DB, workspaceId).catch(() => {});
+
   return c.json({ queued, skipped: failed, totalCost: queued.length }, 202);
 });
 
@@ -758,6 +733,46 @@ steps.post('/:sessionId/steps/:stepId/screenshot', async (c) => {
 
   const origin = new URL(c.req.url).origin;
   return c.json({ screenshotKey: r2Key, screenshotUrl: `${origin}/v1/assets/${r2Key}` });
+});
+
+// DELETE /:sessionId/steps/:stepId — remove a step from the session JSON in R2
+steps.delete('/:sessionId/steps/:stepId', async (c) => {
+  const user = c.get('user');
+  const { sessionId, stepId } = c.req.param();
+
+  await requireSession(c.env, sessionId, user.id);
+
+  const assetKey = `sessions/${sessionId}/session.json`;
+  const assetObj = await c.env.R2.get(assetKey);
+  if (!assetObj) throw new HTTPException(404, { message: 'Session asset not found' });
+
+  let envelope: any;
+  try {
+    envelope = JSON.parse(await assetObj.text());
+  } catch {
+    throw new HTTPException(500, { message: 'Invalid session data' });
+  }
+
+  const originalCount = (envelope.steps ?? []).length;
+  envelope.steps = (envelope.steps ?? []).filter((s: any) => s.id !== stepId);
+
+  if (envelope.steps.length === originalCount) {
+    return c.json({ error: 'Step not found' }, 404);
+  }
+
+  // Re-sequence remaining steps
+  envelope.steps = envelope.steps.map((s: any, i: number) => ({ ...s, sequence: i + 1 }));
+  if (envelope.metadata) envelope.metadata.stepCount = envelope.steps.length;
+
+  await c.env.R2.put(assetKey, JSON.stringify(envelope), {
+    httpMetadata: { contentType: 'application/json' },
+  });
+
+  await c.env.DB.prepare(
+    'UPDATE sessions SET stepCount = ?, updatedAt = ? WHERE id = ?'
+  ).bind(envelope.steps.length, Date.now(), sessionId).run();
+
+  return c.json({ ok: true, stepCount: envelope.steps.length });
 });
 
 export default steps;

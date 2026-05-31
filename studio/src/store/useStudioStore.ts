@@ -92,6 +92,8 @@ interface StudioState {
   // Phase 5 SOP Editor additions
   sopStatus: 'draft' | 'review' | 'published' | null;
   setSopStatus: (status: 'draft' | 'review' | 'published' | null) => void;
+  publishedAt: string | null;
+  lastPublishedMs: number | null;
   saveStep: (stepId: string, updates: { textOverride?: string; annotations?: any[]; cards?: any[]; overlays?: any[]; stepTitle?: string | null; locked?: boolean }) => Promise<void>;
   saveAnnotations: (stepId: string, annotations: any[]) => void;
   saveAnimationTarget: (stepId: string, animationTarget: any) => Promise<void>;
@@ -163,6 +165,13 @@ interface StudioState {
   // Demo preview state
   showDemoPreview: boolean;
   setShowDemoPreview: (show: boolean) => void;
+
+  // Workspace credits (global, fetched once on load)
+  creditsBalance: number;
+  monthlyAllocation: number;
+  creditsModalOpen: boolean;
+  setCreditsModalOpen: (open: boolean) => void;
+  fetchCredits: () => Promise<void>;
 }
 
 // const RESTORABLE_ROUTES: RouteName[] = ['home', 'brand', 'templates', 'team', 'analytics'];
@@ -611,21 +620,29 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       _redoStack: shouldTrack ? [] : state._redoStack,
     };
   }),
-  deleteStep: (stepId) => set((state) => {
-    if (!state.session) return state;
-    const snapshot = state.session.steps;
-    const newSteps = state.session.steps.filter(s => s.id !== stepId);
-    const sequencedSteps = newSteps.map((s, i) => ({ ...s, sequence: i + 1 }));
-    return {
-      session: {
-        ...state.session,
-        steps: sequencedSteps,
-        metadata: { ...state.session.metadata, stepCount: sequencedSteps.length }
-      },
-      _undoStack: [...state._undoStack, snapshot].slice(-50),
-      _redoStack: [],
-    };
-  }),
+  deleteStep: (stepId) => {
+    set((state) => {
+      if (!state.session) return state;
+      const snapshot = state.session.steps;
+      const newSteps = state.session.steps.filter(s => s.id !== stepId);
+      const sequencedSteps = newSteps.map((s, i) => ({ ...s, sequence: i + 1 }));
+      return {
+        session: {
+          ...state.session,
+          steps: sequencedSteps,
+          metadata: { ...state.session.metadata, stepCount: sequencedSteps.length }
+        },
+        _undoStack: [...state._undoStack, snapshot].slice(-50),
+        _redoStack: [],
+      };
+    });
+    const session = get().session;
+    const sessionId = (session as any)?.id || (session as any)?.sessionId;
+    if (sessionId) {
+      apiClient.request(`/sessions/${sessionId}/steps/${stepId}`, { method: 'DELETE' })
+        .catch(err => console.warn('[deleteStep] backend delete failed:', err));
+    }
+  },
   triggerScroll: () => set((state) => ({ scrollTrigger: state.scrollTrigger + 1 })),
   setRenderMode: (mode) => set((state) => {
     const savedKey = state.renderMode === 'hybrid'
@@ -653,6 +670,8 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   // Phase 5 SOP Editor body
   sopStatus: null,
   setSopStatus: (status) => set({ sopStatus: status }),
+  publishedAt: null,
+  lastPublishedMs: null,
 
   // Phase 6 — Comments
   comments: [],
@@ -954,7 +973,11 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
-    set({ sopStatus: status });
+    set({
+      sopStatus: status,
+      publishedAt: status === 'published' ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
+      lastPublishedMs: status === 'published' ? Date.now() : null,
+    });
   },
 
   forkSOP: async (sopId) => {
@@ -1234,6 +1257,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   // Demo preview state
   showDemoPreview: false,
   setShowDemoPreview: (show) => set({ showDemoPreview: show }),
+
+  // Workspace credits
+  creditsBalance: 0,
+  monthlyAllocation: 50,
+  creditsModalOpen: false,
+  setCreditsModalOpen: (open) => set({ creditsModalOpen: open }),
+  fetchCredits: async () => {
+    try {
+      const data = await apiClient.get<{ creditsBalance: number; monthlyAllocation: number }>('/auth/me');
+      set({ creditsBalance: data.creditsBalance ?? 0, monthlyAllocation: data.monthlyAllocation ?? 50 });
+    } catch {}
+  },
 
   // Global undo/redo
   _undoStack: [],

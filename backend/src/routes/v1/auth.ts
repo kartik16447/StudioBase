@@ -41,12 +41,18 @@ auth.post('/google', zValidator('json', GoogleAuthSchema), async (c) => {
   }
 });
 
-// 2. Get current user profile + credit balance
+// 2. Get current user profile + workspace credit balance
 auth.get('/me', authMiddleware(), async (c) => {
   const user = c.get('user');
-  const record = await c.env.DB.prepare(
-    'SELECT id, email, name, avatarUrl, creditsBalance FROM users WHERE id = ?'
-  ).bind(user.id).first() as any;
+  const [record, wsCredits] = await Promise.all([
+    c.env.DB.prepare('SELECT id, email, name, avatarUrl FROM users WHERE id = ?')
+      .bind(user.id).first() as Promise<any>,
+    user.workspaceId
+      ? c.env.DB.prepare(
+          'SELECT balanceCredits, monthlyAllocation FROM workspace_credits WHERE workspaceId = ?'
+        ).bind(user.workspaceId).first() as Promise<any>
+      : Promise.resolve(null),
+  ]);
 
   if (!record) throw new HTTPException(404, { message: 'User not found' });
   return c.json({
@@ -54,7 +60,8 @@ auth.get('/me', authMiddleware(), async (c) => {
     email: record.email,
     name: record.name,
     avatarUrl: record.avatarUrl,
-    creditsBalance: record.creditsBalance ?? 0,
+    creditsBalance: wsCredits?.balanceCredits ?? 0,
+    monthlyAllocation: wsCredits?.monthlyAllocation ?? 50,
   });
 });
 

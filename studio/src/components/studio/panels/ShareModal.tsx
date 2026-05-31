@@ -13,7 +13,7 @@ interface ShareFormats {
   cinematicEnabled: boolean;
 }
 
-const CINEMATIC_CREDIT_COST = 1;
+const CINEMATIC_CREDIT_COST = 2;
 
 // ─── FormatCard ──────────────────────────────────────────────────────────────
 
@@ -113,9 +113,7 @@ const FormatCard: React.FC<FormatCardProps> = ({
           )}
           {unlockLoading
             ? 'Unlocking…'
-            : creditBalance === null
-              ? `Unlock (1cr · —)`
-              : `Unlock (1cr · ${creditBalance} left)`}
+            : `Unlock (${CINEMATIC_CREDIT_COST}cr · ${creditBalance} left)`}
         </button>
       )}
     </div>
@@ -125,8 +123,10 @@ const FormatCard: React.FC<FormatCardProps> = ({
 // ─── ShareModal ───────────────────────────────────────────────────────────────
 
 export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
-  const session    = useStudioStore((s) => s.session);
-  const setSession = useStudioStore((s) => s.setSession);
+  const session          = useStudioStore((s) => s.session);
+  const setSession       = useStudioStore((s) => s.setSession);
+  const creditsBalance   = useStudioStore((s) => s.creditsBalance);
+  const openCreditsModal = useStudioStore((s) => s.setCreditsModalOpen);
   const sessionId  = (session as any)?.sessionId ?? (session as any)?.id ?? null;
   const title      = session?.aiOutputs?.title ?? 'Untitled';
   const hasVideo   = !!((session as any)?.videoKey);
@@ -150,8 +150,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   const [cinematicError,   setCinematicError]   = useState<string | null>(null);
   const [cinematicConfirmOpen, setCinematicConfirmOpen] = useState(false);
 
-  // Credit balance
-  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  // Credit balance comes from the global store (fetched on app load)
 
   const shareUrl = shareToken
     ? `${window.location.origin}/s/${shareToken}`
@@ -169,13 +168,6 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     setCinematicError(null);
   }, [session]);
 
-  // Fetch credit balance when modal opens
-  useEffect(() => {
-    if (!open) return;
-    apiClient.get<{ creditsBalance: number }>('/auth/me')
-      .then(res => setCreditBalance(res.creditsBalance))
-      .catch(() => setCreditBalance(null));
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -235,7 +227,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
         {}
       );
       if ((res as any).error === 'INSUFFICIENT_CREDITS') {
-        setCinematicError(`Not enough credits. You need ${CINEMATIC_CREDIT_COST} credit.`);
+        setCinematicError(`Not enough credits. You need ${CINEMATIC_CREDIT_COST} credits.`);
         return;
       }
       setFormats(f => ({ ...f, cinematicEnabled: true }));
@@ -390,9 +382,23 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
                       locked={!formats.cinematicEnabled}
                       onUnlock={!formats.cinematicEnabled ? requestUnlock : undefined}
                       unlockLoading={cinematicLoading}
-                      creditBalance={creditBalance}
+                      creditBalance={creditsBalance}
                     />
                   </div>
+
+                  {/* Credit preview / insufficient guard for cinematic */}
+                  {!formats.cinematicEnabled && (
+                    creditsBalance < CINEMATIC_CREDIT_COST ? (
+                      <p className="mt-1.5 text-[10.5px] text-text-3 px-1">
+                        Not enough credits —{' '}
+                        <button onClick={() => openCreditsModal(true)} className="text-primary underline underline-offset-2">top up to continue</button>
+                      </p>
+                    ) : (
+                      <p className="mt-1.5 text-[10.5px] text-text-3 px-1">
+                        Uses {CINEMATIC_CREDIT_COST} credits — {creditsBalance} remaining
+                      </p>
+                    )
+                  )}
 
                   {/* Credit error */}
                   {cinematicError && (
@@ -514,10 +520,8 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
 
                   <div className="flex items-center justify-between mb-5 px-3 py-2.5 rounded-lg" style={{ background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.25)' }}>
                     <span className="text-[12px] text-purple-300 font-medium">Cost</span>
-                    <span className="text-[13px] text-white font-semibold">{CINEMATIC_CREDIT_COST} credit</span>
-                    {creditBalance !== null && (
-                      <span className="text-[11px] text-white/40">{creditBalance} remaining</span>
-                    )}
+                    <span className="text-[13px] text-white font-semibold">{CINEMATIC_CREDIT_COST} credits</span>
+                    <span className="text-[11px] text-white/40">{creditsBalance} remaining</span>
                   </div>
 
                   <div className="flex gap-2">

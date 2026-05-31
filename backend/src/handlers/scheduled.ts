@@ -3,6 +3,56 @@ import { Env } from '../types/hono';
 export async function handleScheduled(event: any, env: Env, ctx: ExecutionContext) {
   console.log('[SCHEDULED] Running platform maintenance...');
 
+  // 4. Monthly credit refresh — run for any workspace whose billing cycle day matches today
+  ctx.waitUntil((async () => {
+    try {
+      const todayDay = new Date().getUTCDate(); // 1–31
+
+      // Fetch all workspaces due for refresh today, joining plan for rollover rules
+      const { results: due } = await env.DB.prepare(
+        `SELECT wc.workspaceId, wc.balanceCredits, wc.monthlyAllocation, wc.billingCycleDay,
+                COALESCE(wp.plan, 'free') as plan
+         FROM workspace_credits wc
+         LEFT JOIN workspace_plans wp ON wp.workspaceId = wc.workspaceId
+         WHERE wc.billingCycleDay = ?`
+      ).bind(todayDay).all<{
+        workspaceId: string;
+        balanceCredits: number;
+        monthlyAllocation: number;
+        billingCycleDay: number;
+        plan: string;
+      }>();
+
+      const now = Date.now();
+
+      for (const ws of due) {
+        // Compute how much of the old balance rolls over based on plan
+        let rollover: number;
+        if (ws.plan === 'enterprise') {
+          rollover = ws.balanceCredits; // unlimited rollover
+        } else if (ws.plan === 'pro') {
+          rollover = Math.min(ws.balanceCredits, 250); // cap at 250 carried credits
+        } else {
+          rollover = 0; // free plan: no rollover, unused credits expire
+        }
+
+        const newBalance = rollover + ws.monthlyAllocation;
+
+        await env.DB.prepare(
+          `UPDATE workspace_credits
+           SET balanceCredits = ?, rolloverCredits = ?, lastRefreshedAt = ?, lowCreditNotifiedAt = NULL
+           WHERE workspaceId = ?`
+        ).bind(newBalance, rollover, now, ws.workspaceId).run();
+
+        console.log(`[SCHEDULED] Credit refresh — workspace:${ws.workspaceId} plan:${ws.plan} rollover:${rollover} new_balance:${newBalance}`);
+      }
+
+      console.log(`[SCHEDULED] Credit refresh complete — ${due.length} workspace(s) refreshed.`);
+    } catch (err) {
+      console.error('[SCHEDULED] Credit refresh failed:', err);
+    }
+  })());
+
   // 1. Cleanup old debug logs (14 days)
   ctx.waitUntil((async () => {
     const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;

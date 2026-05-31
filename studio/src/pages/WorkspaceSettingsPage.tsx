@@ -119,7 +119,17 @@ export const WorkspaceSettingsPage: React.FC = () => {
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'members' | 'security'>('members');
+  const [activeTab, setActiveTab] = useState<'members' | 'security' | 'credits'>('members');
+
+  // Credit usage breakdown
+  const [creditData, setCreditData] = useState<{
+    balanceCredits: number;
+    monthlyAllocation: number;
+    totalSpent: number;
+    byActionType: { actionType: string; creditsSpent: number }[];
+    members: { id: string; name: string; email: string; creditsSpent: number }[];
+  } | null>(null);
+  const [creditLoading, setCreditLoading] = useState(false);
 
   // Invite form
   const [inviteRole, setInviteRole] = useState<'Member' | 'Admin' | 'Viewer'>('Member');
@@ -129,8 +139,40 @@ export const WorkspaceSettingsPage: React.FC = () => {
 
   // Role dropdowns
   const [openRoleFor, setOpenRoleFor] = useState<string | null>(null);
+  const [roleUpdating, setRoleUpdating] = useState<string | null>(null);
+
+  const handleRoleChange = async (userId: string, newRole: 'Admin' | 'Member' | 'Viewer') => {
+    if (!workspaceId) return;
+    setRoleUpdating(userId);
+    try {
+      await apiClient.request(`/workspaces/${workspaceId}/members/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+        body: JSON.stringify({ role: newRole }),
+      });
+      setMembers(prev => prev.map(m => m.userId === userId ? { ...m, role: newRole } : m));
+    } catch (e: any) {
+      setError(e.message || 'Failed to update role');
+    } finally {
+      setRoleUpdating(null);
+      setOpenRoleFor(null);
+    }
+  };
+
+  // Load credit usage when credits tab is selected
+  useEffect(() => {
+    if (activeTab !== 'credits' || !workspaceId || creditData) return;
+    setCreditLoading(true);
+    apiClient.get('/usage/credits', { headers: { 'x-workspace-id': workspaceId } })
+      .then((d: any) => setCreditData(d))
+      .catch(() => {})
+      .finally(() => setCreditLoading(false));
+  }, [activeTab, workspaceId, creditData]);
 
   // Security toggles (UI-only; reflect API state)
+  const [ssoTooltipVisible, setSsoTooltipVisible] = useState(false);
+  const [mfaTooltipVisible, setMfaTooltipVisible] = useState(false);
+  const [reauthTooltipVisible, setReauthTooltipVisible] = useState(false);
   const [reauth, setReauth] = useState(true);
   const [reauthDays, setReauthDays] = useState(30);
   const [enforceMfa, setEnforceMfa] = useState(false);
@@ -274,7 +316,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
 
         {/* Tab bar */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: '#ECECEF', borderRadius: 12, padding: 4, width: 'fit-content' }}>
-          {(['members', 'security'] as const).map(tab => (
+          {(['members', 'security', 'credits'] as const).map(tab => (
             <button
               key={tab}
               className="ws-tab-btn"
@@ -287,7 +329,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
                 transition: 'all 0.15s',
               }}
             >
-              {tab === 'members' ? 'Members' : 'Security & SSO'}
+              {tab === 'members' ? 'Members' : tab === 'security' ? 'Security & SSO' : 'Credits'}
               {tab === 'members' && members.length > 0 && (
                 <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, background: '#5E5CE6', color: '#FFFFFF', borderRadius: 999, padding: '1px 6px' }}>
                   {members.length}
@@ -489,7 +531,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
                               {(['Admin', 'Member', 'Viewer'] as const).map(r => (
                                 <div
                                   key={r}
-                                  onClick={() => setOpenRoleFor(null)}
+                                  onClick={() => { if (m.role !== r) handleRoleChange(m.userId, r); else setOpenRoleFor(null); }}
                                   style={{
                                     display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px',
                                     borderRadius: 10, cursor: 'pointer', background: m.role === r ? 'rgba(94,92,230,0.06)' : 'transparent',
@@ -626,29 +668,47 @@ export const WorkspaceSettingsPage: React.FC = () => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       {Ic.shield(16, '#5E5CE6')}
                       <h3 style={{ margin: 0, fontSize: 15.5, fontWeight: 600, letterSpacing: '-0.01em' }}>SAML Single Sign-On</h3>
-                      {PLAN_FEATURES.sso(plan)
-                        ? <span style={{ fontSize: 11.5, fontWeight: 600, background: settings?.ssoEnabled ? 'rgba(16,185,129,0.1)' : 'rgba(180,180,190,0.15)', color: settings?.ssoEnabled ? '#059669' : '#8A8A95', padding: '2px 8px', borderRadius: 999 }}>
-                            {settings?.ssoEnabled ? `● ${settings.ssoProvider ?? 'Enabled'}` : '● Not configured'}
-                          </span>
-                        : <span style={{ fontSize: 11, fontWeight: 600, background: 'rgba(180,180,190,0.15)', color: '#8A8A95', padding: '2px 8px', borderRadius: 999 }}>Enterprise</span>}
+                      <span style={{ fontSize: 11, fontWeight: 600, background: 'rgba(180,180,190,0.12)', color: '#8A8A95', padding: '2px 8px', borderRadius: 999, letterSpacing: '0.01em' }}>Q3 2026</span>
                     </div>
                     <div style={{ fontSize: 13.5, color: '#8A8A95', maxWidth: 500 }}>
                       Require everyone in your workspace to sign in through your identity provider. Available on Team and Enterprise plans.
                     </div>
                   </div>
-                  <button
-                    disabled={!PLAN_FEATURES.sso(plan)}
-                    className="ws-btn-pri"
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 7, flexShrink: 0,
-                      background: PLAN_FEATURES.sso(plan) ? '#5E5CE6' : '#ECECEF',
-                      border: 'none', borderRadius: 10, padding: '9px 16px',
-                      fontSize: 13, fontWeight: 600, color: PLAN_FEATURES.sso(plan) ? '#FFFFFF' : '#B8B8C2',
-                      cursor: PLAN_FEATURES.sso(plan) ? 'pointer' : 'not-allowed',
-                    }}
+                  <div
+                    style={{ position: 'relative', flexShrink: 0 }}
+                    onMouseEnter={() => setSsoTooltipVisible(true)}
+                    onMouseLeave={() => setSsoTooltipVisible(false)}
                   >
-                    {Ic.sparkle(14, PLAN_FEATURES.sso(plan) ? '#FFFFFF' : '#B8B8C2')} Configure SAML
-                  </button>
+                    <button
+                      disabled
+                      className="ws-btn-pri"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 7,
+                        background: '#ECECEF', border: 'none', borderRadius: 10, padding: '9px 16px',
+                        fontSize: 13, fontWeight: 600, color: '#B8B8C2', cursor: 'not-allowed',
+                      }}
+                    >
+                      {Ic.sparkle(14, '#B8B8C2')} Configure SAML
+                    </button>
+                    {ssoTooltipVisible && (
+                      <div style={{
+                        position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50,
+                        background: '#1A1A20', color: '#E0E0E8', borderRadius: 10,
+                        padding: '10px 14px', fontSize: 12.5, lineHeight: 1.5,
+                        whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+                        pointerEvents: 'auto',
+                      }}>
+                        SAML SSO — available Q3 2026.<br />
+                        <span style={{ color: '#A0A0B0' }}>Contact us to join the early access list — </span>
+                        <a
+                          href="mailto:kartik.upadhyay@foyr.com?subject=SSO%20Early%20Access%20Request"
+                          style={{ color: '#8B8BE8', textDecoration: 'underline' }}
+                        >
+                          request access
+                        </a>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* SAML fields */}
@@ -725,27 +785,39 @@ export const WorkspaceSettingsPage: React.FC = () => {
                   padding: '18px 0', borderBottom: '1px solid #F0F0F3',
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: '#0B0B0F', marginBottom: 4 }}>Require re-authentication</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#0B0B0F' }}>Require re-authentication</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, background: 'rgba(180,180,190,0.12)', color: '#8A8A95', padding: '2px 8px', borderRadius: 999 }}>Coming soon</span>
+                    </div>
                     <div style={{ fontSize: 13, color: '#8A8A95', lineHeight: 1.5 }}>
                       Members will be asked to sign in again after a set period of inactivity. Recommended for shared devices.
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+                  <div
+                    style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}
+                    onMouseEnter={() => setReauthTooltipVisible(true)}
+                    onMouseLeave={() => setReauthTooltipVisible(false)}
+                  >
                     <div style={{
-                      display: 'flex', alignItems: 'center', gap: 6,
+                      display: 'flex', alignItems: 'center', gap: 6, opacity: 0.45,
                       background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, padding: '6px 10px',
                     }}>
-                      <button onClick={() => setReauthDays(d => Math.max(1, d - 1))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A4A55', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>−</button>
-                      <input
-                        type="number"
-                        value={reauthDays}
-                        onChange={e => setReauthDays(Math.max(1, parseInt(e.target.value) || 1))}
-                        style={{ width: 40, textAlign: 'center', border: 'none', background: 'transparent', fontSize: 13.5, fontWeight: 600, color: '#0B0B0F', outline: 'none', fontVariantNumeric: 'tabular-nums' }}
-                      />
+                      <button disabled style={{ background: 'none', border: 'none', cursor: 'not-allowed', color: '#4A4A55', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>−</button>
+                      <input readOnly value={reauthDays} style={{ width: 40, textAlign: 'center', border: 'none', background: 'transparent', fontSize: 13.5, fontWeight: 600, color: '#0B0B0F', outline: 'none', fontVariantNumeric: 'tabular-nums', cursor: 'not-allowed' }} />
                       <span style={{ fontSize: 12.5, color: '#8A8A95' }}>days</span>
-                      <button onClick={() => setReauthDays(d => d + 1)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A4A55', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>+</button>
+                      <button disabled style={{ background: 'none', border: 'none', cursor: 'not-allowed', color: '#4A4A55', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>+</button>
                     </div>
-                    <Toggle on={reauth} onChange={() => setReauth(v => !v)} />
+                    <Toggle on={false} onChange={() => {}} />
+                    {reauthTooltipVisible && (
+                      <div style={{
+                        position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50,
+                        background: '#1A1A20', color: '#E0E0E8', borderRadius: 10,
+                        padding: '10px 14px', fontSize: 12.5, lineHeight: 1.5,
+                        whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+                      }}>
+                        Session policy enforcement — coming soon.
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -755,12 +827,31 @@ export const WorkspaceSettingsPage: React.FC = () => {
                   padding: '18px 0', borderBottom: '1px solid #F0F0F3',
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: '#0B0B0F', marginBottom: 4 }}>Enforce two-factor authentication</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#0B0B0F' }}>Enforce two-factor authentication</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, background: 'rgba(180,180,190,0.12)', color: '#8A8A95', padding: '2px 8px', borderRadius: 999 }}>Coming soon</span>
+                    </div>
                     <div style={{ fontSize: 13, color: '#8A8A95', lineHeight: 1.5 }}>
                       Every member must set up 2FA before accessing the workspace. Admins can grant temporary bypass.
                     </div>
                   </div>
-                  <Toggle on={enforceMfa} onChange={() => setEnforceMfa(v => !v)} />
+                  <div
+                    style={{ position: 'relative', flexShrink: 0 }}
+                    onMouseEnter={() => setMfaTooltipVisible(true)}
+                    onMouseLeave={() => setMfaTooltipVisible(false)}
+                  >
+                    <Toggle on={false} onChange={() => {}} />
+                    {mfaTooltipVisible && (
+                      <div style={{
+                        position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50,
+                        background: '#1A1A20', color: '#E0E0E8', borderRadius: 10,
+                        padding: '10px 14px', fontSize: 12.5, lineHeight: 1.5,
+                        whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+                      }}>
+                        MFA enforcement — coming soon.
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Danger: revoke all sessions */}
@@ -785,6 +876,86 @@ export const WorkspaceSettingsPage: React.FC = () => {
                 </div>
               </div>
             </Card>
+          </div>
+        )}
+
+        {/* ── CREDITS TAB ─────────────────────────────────────────────────────── */}
+        {activeTab === 'credits' && (
+          <div style={{ maxWidth: 680 }}>
+            {creditLoading ? (
+              <div style={{ color: '#8A8A95', fontSize: 13, padding: '32px 0' }}>Loading credit usage…</div>
+            ) : creditData ? (
+              <>
+                {/* Summary cards */}
+                <div style={{ display: 'flex', gap: 12, marginBottom: 28 }}>
+                  {[
+                    { label: 'Balance', value: `${creditData.balanceCredits} cr` },
+                    { label: 'Monthly allocation', value: `${creditData.monthlyAllocation} cr` },
+                    { label: 'Spent this period', value: `${creditData.totalSpent} cr` },
+                  ].map(card => (
+                    <div key={card.label} style={{ flex: 1, background: '#F5F5F8', borderRadius: 12, padding: '14px 18px' }}>
+                      <div style={{ fontSize: 11, color: '#8A8A95', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{card.label}</div>
+                      <div style={{ fontSize: 22, fontWeight: 700, color: '#0B0B0F' }}>{card.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* By action type bar chart */}
+                <div style={{ marginBottom: 28 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0B0B0F', marginBottom: 14 }}>Credits spent by category</div>
+                  {creditData.byActionType.length === 0 ? (
+                    <div style={{ color: '#8A8A95', fontSize: 13 }}>No credit spend this billing period.</div>
+                  ) : (() => {
+                    const max = Math.max(...creditData.byActionType.map(r => r.creditsSpent), 1);
+                    const colors: Record<string, string> = {
+                      narration: '#5E5CE6', voiceover: '#8B5CF6', cinematic: '#EC4899',
+                      demo: '#F59E0B', audio_tts: '#3B82F6', audio_narration: '#06B6D4', audio_swap: '#10B981',
+                    };
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {creditData.byActionType.map(row => (
+                          <div key={row.actionType} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{ width: 100, fontSize: 12, color: '#0B0B0F', fontWeight: 500, textTransform: 'capitalize', flexShrink: 0 }}>
+                              {row.actionType.replace(/_/g, ' ')}
+                            </div>
+                            <div style={{ flex: 1, background: '#ECECEF', borderRadius: 6, height: 20, overflow: 'hidden' }}>
+                              <div style={{
+                                height: '100%',
+                                width: `${(row.creditsSpent / max) * 100}%`,
+                                background: colors[row.actionType] ?? '#5E5CE6',
+                                borderRadius: 6,
+                                transition: 'width 0.4s ease',
+                              }} />
+                            </div>
+                            <div style={{ width: 40, fontSize: 12, fontWeight: 600, color: '#0B0B0F', textAlign: 'right', flexShrink: 0 }}>
+                              {row.creditsSpent}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Per-member breakdown */}
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0B0B0F', marginBottom: 14 }}>Credits spent by member</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {creditData.members.map(m => (
+                      <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #ECECEF' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: '#0B0B0F' }}>{m.name || m.email}</div>
+                          {m.name && <div style={{ fontSize: 11, color: '#8A8A95' }}>{m.email}</div>}
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#0B0B0F' }}>{m.creditsSpent} cr</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div style={{ color: '#8A8A95', fontSize: 13 }}>Failed to load credit data.</div>
+            )}
           </div>
         )}
       </div>

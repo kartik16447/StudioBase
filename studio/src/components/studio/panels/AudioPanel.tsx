@@ -5,6 +5,9 @@ import { I } from '../../icons';
 import { cn, Button, AIShimmer } from '../../ui';
 import { displayText } from '../../../lib/textUtils';
 
+// Credit cost for bulk narration (1 per step)
+const NARRATION_CREDIT_PER_STEP = 1;
+
 function formatDuration(ms: number | null | undefined): string {
   if (!ms) return '';
   const s = Math.round(ms / 1000);
@@ -285,6 +288,8 @@ export const AudioPanel: React.FC = () => {
   const generateAllAudio = useStudioStore(s => s.generateAllAudio);
   const fetchNarrationStatus = useStudioStore(s => s.fetchNarrationStatus);
   const sessionStatus = useStudioStore(s => s.sessionStatus);
+  const creditsBalance = useStudioStore(s => s.creditsBalance);
+  const openCreditsModal = useStudioStore(s => s.setCreditsModalOpen);
 
   const sessionId = (session as any)?.id || (session as any)?.sessionId;
 
@@ -474,25 +479,46 @@ export const AudioPanel: React.FC = () => {
           </select>
         </div>
 
-        <Button
-          variant="primary"
-          size="sm"
-          icon={activelyGenerating ? I.Loader : I.Sparkles}
-          disabled={activelyGenerating || stepsWithText.length === 0}
-          onClick={handleGenerateAll}
-          className={cn('w-full', activelyGenerating && '[&_svg]:animate-spin')}
-        >
-          {activelyGenerating
-            ? `Generating ${generatingCount > 0 ? `(${generatingCount} remaining)` : ''}…`
-            : hasAnyAudio
-              ? 'Regenerate AI Voice'
-              : `Generate AI Voice · ${stepsWithText.length} step${stepsWithText.length !== 1 ? 's' : ''}`}
-        </Button>
-        {hasAnyAudio && !activelyGenerating && (
-          <p className="text-[10px] text-text-3 text-center">
-            {stepsWithText.length} credit{stepsWithText.length !== 1 ? 's' : ''} to regenerate all
-          </p>
-        )}
+        {(() => {
+          const cost = stepsWithText.length * NARRATION_CREDIT_PER_STEP;
+          const insufficient = creditsBalance < cost && !activelyGenerating;
+          if (insufficient) {
+            return (
+              <>
+                <Button variant="primary" size="sm" icon={I.Sparkles} disabled className="w-full opacity-50">
+                  {hasAnyAudio ? 'Regenerate AI Voice' : `Generate AI Voice · ${stepsWithText.length} step${stepsWithText.length !== 1 ? 's' : ''}`}
+                </Button>
+                <p className="text-[10px] text-center text-text-3">
+                  Not enough credits —{' '}
+                  <button onClick={() => openCreditsModal(true)} className="text-primary underline underline-offset-2">top up to continue</button>
+                </p>
+              </>
+            );
+          }
+          return (
+            <>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={activelyGenerating ? I.Loader : I.Sparkles}
+                disabled={activelyGenerating || stepsWithText.length === 0}
+                onClick={handleGenerateAll}
+                className={cn('w-full', activelyGenerating && '[&_svg]:animate-spin')}
+              >
+                {activelyGenerating
+                  ? `Generating ${generatingCount > 0 ? `(${generatingCount} remaining)` : ''}…`
+                  : hasAnyAudio
+                    ? 'Regenerate AI Voice'
+                    : `Generate AI Voice · ${stepsWithText.length} step${stepsWithText.length !== 1 ? 's' : ''}`}
+              </Button>
+              {!activelyGenerating && (
+                <p className="text-[10px] text-text-3 text-center">
+                  Uses {cost} credit{cost !== 1 ? 's' : ''} — {creditsBalance} remaining
+                </p>
+              )}
+            </>
+          );
+        })()}
 
         {/* Stale audio warning — shown after AI text was just regenerated */}
         {hasAnyAudio && !activelyGenerating && sessionStatus === 'ready' && (
