@@ -117,8 +117,10 @@ export class AuthService {
           .bind(userId, wsId).run();
 
         // Seed one example session so new users see content immediately
+        let seededSessionId: string | null = null;
         try {
           const seedId = crypto.randomUUID();
+          seededSessionId = seedId;
           const seedShareToken = crypto.randomUUID();
           const seedR2Key = `sessions/${seedId}/session.json`;
           const seedEnvelope = {
@@ -135,8 +137,8 @@ export class AuthService {
           });
           await this.env.DB.prepare(
             `INSERT INTO sessions (id, ownerId, workspaceId, sessionType, status, title, capturedUrl, capturedTitle,
-              stepCount, durationMs, shareToken, r2JsonKey, isPublic, createdAt, updatedAt)
-             VALUES (?, ?, ?, 'steps', 'ready', ?, ?, ?, 5, 45000, ?, ?, 0, ?, ?)`
+              stepCount, durationMs, shareToken, r2JsonKey, isPublic, sopEnabled, rawEnabled, cinematicEnabled, createdAt, updatedAt)
+             VALUES (?, ?, ?, 'steps', 'ready', ?, ?, ?, 8, 72000, ?, ?, 1, 1, 1, 1, ?, ?)`
           ).bind(
             seedId, userId, wsId,
             sampleSession.aiOutputs.title,
@@ -148,6 +150,16 @@ export class AuthService {
           ).run();
         } catch (seedErr) {
           console.warn('[AuthService] Failed to seed example session:', seedErr);
+        }
+
+        // Insert onboarding state for workspace creator
+        try {
+          await this.env.DB.prepare(
+            `INSERT OR IGNORE INTO onboarding_state (id, userId, workspaceId, onboardingType, completedFirstRecording, skippedOnboarding, seededSessionId, createdAt)
+             VALUES (?, ?, ?, 'creator', 0, 0, ?, ?)`
+          ).bind(crypto.randomUUID(), userId, wsId, seededSessionId, now).run();
+        } catch (onbErr) {
+          console.warn('[AuthService] Failed to insert onboarding state:', onbErr);
         }
       }
 

@@ -29,10 +29,16 @@ export class WorkspaceService {
     return await this.env.DB.prepare('SELECT * FROM workspaces WHERE id = ?').bind(id).first() as any;
   }
 
-  async update(id: string, actorId: string, data: { name?: string }) {
-    if (data.name) {
+  async update(id: string, actorId: string, data: { name?: string; brandConfig?: Record<string, any> }) {
+    if (data.name && data.brandConfig !== undefined) {
+      await this.env.DB.prepare('UPDATE workspaces SET name = ?, brandConfig = ?, updatedAt = ? WHERE id = ?')
+        .bind(data.name, JSON.stringify(data.brandConfig), Date.now(), id).run();
+    } else if (data.name) {
       await this.env.DB.prepare('UPDATE workspaces SET name = ?, updatedAt = ? WHERE id = ?')
         .bind(data.name, Date.now(), id).run();
+    } else if (data.brandConfig !== undefined) {
+      await this.env.DB.prepare('UPDATE workspaces SET brandConfig = ?, updatedAt = ? WHERE id = ?')
+        .bind(JSON.stringify(data.brandConfig), Date.now(), id).run();
     }
 
     await this.audit.record({
@@ -84,6 +90,16 @@ export class WorkspaceService {
     await this.env.DB.prepare(
       'INSERT OR IGNORE INTO workspace_members (userId, workspaceId, role, joinedAt, invitedBy) VALUES (?, ?, ?, ?, ?)'
     ).bind(userId, invite.workspaceId, invite.role || 'Member', now, invite.invitedBy || null).run();
+
+    // Insert onboarding state for member joining via invite
+    try {
+      await this.env.DB.prepare(
+        `INSERT OR IGNORE INTO onboarding_state (id, userId, workspaceId, onboardingType, completedFirstRecording, skippedOnboarding, seededSessionId, createdAt)
+         VALUES (?, ?, ?, 'member', 0, 0, NULL, ?)`
+      ).bind(crypto.randomUUID(), userId, invite.workspaceId, now).run();
+    } catch (onbErr) {
+      console.warn('[WorkspaceService] Failed to insert member onboarding state:', onbErr);
+    }
 
     await this.audit.record({
       eventName: 'workspace.member_joined',
