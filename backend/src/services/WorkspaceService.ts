@@ -94,9 +94,9 @@ export class WorkspaceService {
     // Seed default free credits for the workspace if not already present.
     // Without this, invited users land on 0 credits and can't use any paid features.
     await this.env.DB.prepare(
-      `INSERT OR IGNORE INTO workspace_credits (workspaceId, balanceCredits, monthlyAllocation, plan, lastRefreshedAt)
-       VALUES (?, 100, 100, 'free', ?)`
-    ).bind(invite.workspaceId, now).run();
+      `INSERT OR IGNORE INTO workspace_credits (id, workspaceId, balanceCredits, monthlyAllocation, rolloverCredits, lastRefreshedAt, billingCycleDay)
+       VALUES (?, ?, 100, 100, 0, ?, 1)`
+    ).bind(crypto.randomUUID(), invite.workspaceId, now).run();
 
     // Insert onboarding state for member joining via invite
     try {

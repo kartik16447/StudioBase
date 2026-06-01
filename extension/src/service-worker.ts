@@ -381,14 +381,41 @@ async function updateState(patch: Partial<AppState>) {
 
 async function startRecording(target: CaptureTarget) {
   try {
-    const tabUrl = target.tabTitle || target.tabUrl || "";
-    const sessionId = await startSession(tabUrl);
+    // ── If video enabled: show OS window picker FIRST ─────────────────────────
+    // Create offscreen doc → GET_STREAM (triggers window picker) → await user choice.
+    // Only proceed to create a session / start timer / inject toolbar AFTER the
+    // user has confirmed a window. Deny or cancel → silent abort back to idle.
+    if (target.includeVideo) {
+      const hasDoc = await chrome.offscreen.hasDocument().catch(() => false);
+      if (!hasDoc) {
+        await chrome.offscreen.createDocument({
+          url: 'offscreen.html',
+          reasons: [chrome.offscreen.Reason.USER_MEDIA],
+          justification: 'Screen recording for StudioBase session',
+        });
+      }
+      const streamResult = await new Promise<{ status?: string; error?: string }>((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_STREAM' }, (res) => {
+          resolve(res || { error: 'no_response' });
+        });
+      });
+      if (streamResult.error) {
+        // User denied or cancelled — reset popup to idle without creating a session
+        await updateState({ status: 'idle' });
+        return;
+      }
+    }
+
+    // ── Stream confirmed (or no video) — now start session / timer / toolbar ──
+    const tabUrl = target.tabUrl || "";
+    const title  = target.userTitle || target.tabTitle || target.tabUrl || "";
+    const sessionId = await startSession(tabUrl, title);
     await updateState({
       status: "recording",
       sessionId,
       localSessionId: sessionId,
       startedAt: Date.now(),
-      target, // tabId is in here
+      target,
       includeMic: target.includeMic ?? false,
       includeVideo: target.includeVideo ?? false,
     });
@@ -406,14 +433,7 @@ async function startRecording(target: CaptureTarget) {
     }
 
     if (target.includeVideo) {
-      const hasDoc = await chrome.offscreen.hasDocument().catch(() => false);
-      if (!hasDoc) {
-        await chrome.offscreen.createDocument({
-          url: 'offscreen.html',
-          reasons: [chrome.offscreen.Reason.USER_MEDIA],
-          justification: 'Screen recording for StudioBase session'
-        });
-      }
+      // Offscreen already holds the stream from GET_STREAM — just start the recorder
       chrome.runtime.sendMessage({ type: 'START_VIDEO_RECORDING', sessionId }).catch(() => {});
     }
 

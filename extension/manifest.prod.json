@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "StudioBase",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Record your screen, auto-generate step-by-step SOPs, interactive demos, and cinematic videos — powered by AI.",
   "homepage_url": "https://studiobase.app",
   "permissions": [
@@ -48,7 +48,7 @@
     ]
   },
   "oauth2": {
-    "client_id": "813435932187-oktc8br8kq98luccqgmsdnhju3h80lht.apps.googleusercontent.com",
+    "client_id": "813435932187-l9vpdot4lsa51o4qa617o83111jgirot.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/userinfo.email",
       "https://www.googleapis.com/auth/userinfo.profile"

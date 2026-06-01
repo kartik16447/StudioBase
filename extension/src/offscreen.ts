@@ -119,11 +119,26 @@ function handleFocusChange(isChromeFocused: boolean) {
 
 let currentSessionId: string | null = null;
 let chunkIndex = 0;
+let pendingStream: MediaStream | null = null; // stream acquired via GET_STREAM before session starts
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // ── GET_STREAM: called BEFORE session starts so window picker appears first ──
+  if (message.type === 'GET_STREAM') {
+    navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 } as any, audio: false })
+      .then(stream => {
+        pendingStream = stream;
+        sendResponse({ status: 'ready' });
+      })
+      .catch(err => {
+        // NotAllowedError = denied/cancelled by user
+        sendResponse({ error: err.name === 'NotAllowedError' ? 'denied' : 'cancelled' });
+      });
+    return true; // keep channel open for async response
+  }
+
   if (message.type === 'START_VIDEO_RECORDING') {
     startRecording(message.sessionId, sendResponse);
-    return true; 
+    return true;
   } else if (message.type === 'STOP_VIDEO_RECORDING') {
     clearDesktopTimers();
     activeDesktopSession = false;
@@ -168,10 +183,16 @@ async function startRecording(sessionId: string, sendResponse: (response: any) =
     currentSessionId = sessionId;
     chunkIndex = 0;
 
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: 30 } as any,
-      audio: false
-    });
+    // Use the stream pre-acquired by GET_STREAM (window picker already shown).
+    // Fall back to a fresh getDisplayMedia call only if pendingStream is missing.
+    let stream = pendingStream;
+    pendingStream = null;
+    if (!stream) {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 } as any,
+        audio: false
+      });
+    }
 
     const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
       ? 'video/webm;codecs=vp9'

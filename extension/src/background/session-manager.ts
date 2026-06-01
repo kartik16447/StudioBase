@@ -8,6 +8,7 @@ export interface CaptureEvent {
 export interface Session {
   sessionId: string;
   tabUrl: string;
+  title?: string;        // userTitle || tabTitle — sent to backend on upload
   startedAt: string;
   endedAt?: string;
   status: 'recording' | 'paused' | 'stopped';
@@ -132,11 +133,12 @@ export async function clearSessionData(sessionId: string): Promise<void> {
 /**
  * Generates a new session and stores it in session storage.
  */
-export async function startSession(tabUrl: string): Promise<string> {
+export async function startSession(tabUrl: string, title?: string): Promise<string> {
   const sessionId = crypto.randomUUID();
   const session: Session = {
     sessionId,
     tabUrl,
+    title: title || undefined,
     startedAt: new Date().toISOString(),
     status: 'recording',
     events: []
