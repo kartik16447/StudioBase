@@ -3,6 +3,7 @@ import { I } from '../components/icons';
 import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
 import { CinematicPlayer, type CinematicPlayerHandle } from '../components/player/CinematicPlayer';
+import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
 import { displayText } from '../lib/textUtils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -32,7 +33,9 @@ interface PSession {
   assets?: Record<string, string>;
 }
 
-type ViewMode = 'video' | 'guide';
+type ViewMode = 'cinematic' | 'raw' | 'demo' | 'guide';
+
+interface ViewTab { id: ViewMode; label: string; icon: React.ReactNode }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -201,28 +204,21 @@ const GuideView: React.FC<{
 
 // ─── ViewToggle ───────────────────────────────────────────────────────────────
 
-const ViewToggle: React.FC<{ mode: ViewMode; onChange: (m: ViewMode) => void }> = ({ mode, onChange }) => (
-  <div className="flex items-center bg-white/[0.05] border border-white/[0.08] rounded-xl p-1 gap-1">
-    <button
-      onClick={() => onChange('video')}
-      className={cn(
-        'flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200',
-        mode === 'video' ? 'bg-white text-black shadow-sm' : 'text-white/50 hover:text-white',
-      )}
-    >
-      <I.Play size={14} className={mode === 'video' ? 'text-black' : 'text-white/50'} />
-      Video
-    </button>
-    <button
-      onClick={() => onChange('guide')}
-      className={cn(
-        'flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200',
-        mode === 'guide' ? 'bg-white text-black shadow-sm' : 'text-white/50 hover:text-white',
-      )}
-    >
-      <I.FileText size={14} className={mode === 'guide' ? 'text-black' : 'text-white/50'} />
-      Step-by-Step Guide
-    </button>
+const ViewToggle: React.FC<{ tabs: ViewTab[]; mode: ViewMode; onChange: (m: ViewMode) => void }> = ({ tabs, mode, onChange }) => (
+  <div className="flex items-center bg-white/[0.05] border border-white/[0.08] rounded-xl p-1 gap-1 flex-wrap justify-center">
+    {tabs.map(tab => (
+      <button
+        key={tab.id}
+        onClick={() => onChange(tab.id)}
+        className={cn(
+          'flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold transition-all duration-200',
+          mode === tab.id ? 'bg-white text-black shadow-sm' : 'text-white/50 hover:text-white',
+        )}
+      >
+        {tab.icon}
+        {tab.label}
+      </button>
+    ))}
   </div>
 );
 
@@ -234,8 +230,12 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState<string | null>(null);
   const [copied,     setCopied]     = useState(false);
-  const [viewMode,   setViewMode]   = useState<ViewMode>('video');
-  const [isPaidPlan, setIsPaidPlan] = useState(false);
+  const [viewMode,         setViewMode]         = useState<ViewMode>('cinematic');
+  const [isPaidPlan,       setIsPaidPlan]       = useState(false);
+  const [sopEnabled,       setSopEnabled]       = useState(true);
+  const [rawEnabled,       setRawEnabled]       = useState(true);
+  const [cinematicEnabled, setCinematicEnabled] = useState(true);
+  const [demoEnabled,      setDemoEnabled]      = useState(true);
 
   // displayIndex tracks which step the player is on — updated via onStepSelect
   // Used for step info card, transcript highlight, chapter label.
@@ -253,6 +253,10 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
         if (meta.error) throw new Error(meta.error);
         setOwnerName(meta.owner?.name || 'Anonymous');
         setIsPaidPlan(meta.isPaidPlan ?? false);
+        setSopEnabled(meta.sopEnabled !== false);
+        setRawEnabled(meta.rawEnabled !== false);
+        setCinematicEnabled(meta.cinematicEnabled !== false);
+        setDemoEnabled(meta.demoEnabled !== false);
         if (!meta.sessionJsonUrl) throw new Error('Session not ready.');
         sessionJsonUrlRef.current = meta.sessionJsonUrl;
       }
@@ -395,84 +399,94 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
           )}
         </div>
 
-        {/* View toggle */}
-        <div className="flex items-center justify-center mb-8">
-          <ViewToggle mode={viewMode} onChange={setViewMode} />
-        </div>
+        {/* ── Build available tabs based on owner's format flags ── */}
+        {(() => {
+          const tabs: ViewTab[] = [
+            ...(cinematicEnabled ? [{ id: 'cinematic' as ViewMode, label: 'Cinematic', icon: <I.Play size={14} /> }] : []),
+            ...(demoEnabled && steps.length > 0 ? [{ id: 'demo' as ViewMode, label: 'Interactive Demo', icon: <I.MousePointer size={14} /> }] : []),
+            ...(rawEnabled && videoUrl ? [{ id: 'raw' as ViewMode, label: 'Raw Video', icon: <I.Video size={14} /> }] : []),
+            ...(sopEnabled ? [{ id: 'guide' as ViewMode, label: 'Step-by-Step Guide', icon: <I.FileText size={14} /> }] : []),
+          ];
+          // Auto-correct viewMode if current tab got disabled
+          const validMode = tabs.some(t => t.id === viewMode) ? viewMode : (tabs[0]?.id ?? 'cinematic');
+          if (validMode !== viewMode) setTimeout(() => setViewMode(validMode), 0);
 
-        {/* ── VIDEO MODE ── */}
-        {viewMode === 'video' && (
-          <div className="flex flex-col lg:flex-row gap-5 items-start">
-
-            {/* Left: cinematic player + step card */}
-            <div className="flex-1 min-w-0 space-y-4">
-              <CinematicPlayer
-                ref={playerRef}
-                steps={steps}
-                assets={assets}
-                videoUrl={videoUrl}
-                sessionStartMs={sessionStartMs}
-                chapterBreaks={session.metadata?.chapterBreaks}
-                renderMode={videoUrl ? 'hybrid' : 'slideshow'}
-                onStepSelect={setDisplayIndex}
-              />
-
-              {/* Current step info card */}
-              <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-6">
-                {currentChapter && (
-                  <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider mb-2">{currentChapter}</p>
-                )}
-                <h2 className="text-[20px] sm:text-[22px] font-bold text-white leading-snug mb-2">
-                  <span className="text-indigo-400 mr-1.5">Step {displayIndex + 1}.</span>
-                  {currentTitle}
-                </h2>
-                {currentText && <p className="text-[14px] text-white/60 leading-relaxed">{currentText}</p>}
-
-                <div className="flex items-center gap-2 mt-5 pt-4 border-t border-white/[0.06]">
-                  <button onClick={() => playerRef.current?.seekToStep(displayIndex - 1)} disabled={displayIndex === 0}
-                    className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium text-white/50 hover:text-white hover:bg-white/[0.07] disabled:opacity-30 transition-colors">
-                    <I.ChevronLeft size={14} /> Prev
-                  </button>
-                  <span className="text-[12px] text-white/30 flex-1 text-center">{displayIndex + 1} of {steps.length}</span>
-                  <button onClick={() => playerRef.current?.seekToStep(displayIndex + 1)} disabled={displayIndex === steps.length - 1}
-                    className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium text-white/50 hover:text-white hover:bg-white/[0.07] disabled:opacity-30 transition-colors">
-                    Next <I.ChevronRight size={14} />
-                  </button>
-                </div>
-              </div>
-
-              {summary && (
-                <div className="pl-4 border-l-2 border-indigo-500/40">
-                  <p className="text-[14px] text-white/50 leading-relaxed">{summary}</p>
+          return (
+            <>
+              {/* View toggle */}
+              {tabs.length > 1 && (
+                <div className="flex items-center justify-center mb-8">
+                  <ViewToggle tabs={tabs} mode={validMode} onChange={setViewMode} />
                 </div>
               )}
-            </div>
 
-            {/* Right: transcript sidebar */}
-            <div className="w-full lg:w-[300px] flex-shrink-0 lg:sticky lg:top-[72px]">
-              <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl flex flex-col overflow-hidden"
-                style={{ height: 'calc(100vh - 100px)' }}>
-                <TranscriptPanel
-                  steps={steps} assets={assets}
-                  currentIndex={displayIndex} chapterMap={chapterMap}
-                  onSelect={(i) => { playerRef.current?.seekToStep(i); setDisplayIndex(i); }}
-                />
-              </div>
-            </div>
-          </div>
-        )}
+              {/* ── CINEMATIC MODE ── */}
+              {validMode === 'cinematic' && (
+                <div className="flex flex-col lg:flex-row gap-5 items-start">
+                  <div className="flex-1 min-w-0 space-y-4">
+                    <CinematicPlayer
+                      ref={playerRef}
+                      steps={steps}
+                      assets={assets}
+                      videoUrl={videoUrl}
+                      sessionStartMs={sessionStartMs}
+                      chapterBreaks={session.metadata?.chapterBreaks}
+                      renderMode={videoUrl ? 'hybrid' : 'slideshow'}
+                      onStepSelect={setDisplayIndex}
+                    />
+                    <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-6">
+                      {currentChapter && <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider mb-2">{currentChapter}</p>}
+                      <h2 className="text-[20px] sm:text-[22px] font-bold text-white leading-snug mb-2">
+                        <span className="text-indigo-400 mr-1.5">Step {displayIndex + 1}.</span>{currentTitle}
+                      </h2>
+                      {currentText && <p className="text-[14px] text-white/60 leading-relaxed">{currentText}</p>}
+                      <div className="flex items-center gap-2 mt-5 pt-4 border-t border-white/[0.06]">
+                        <button onClick={() => playerRef.current?.seekToStep(displayIndex - 1)} disabled={displayIndex === 0}
+                          className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium text-white/50 hover:text-white hover:bg-white/[0.07] disabled:opacity-30 transition-colors">
+                          <I.ChevronLeft size={14} /> Prev
+                        </button>
+                        <span className="text-[12px] text-white/30 flex-1 text-center">{displayIndex + 1} of {steps.length}</span>
+                        <button onClick={() => playerRef.current?.seekToStep(displayIndex + 1)} disabled={displayIndex === steps.length - 1}
+                          className="flex items-center gap-1.5 px-3 h-8 rounded-lg text-[12px] font-medium text-white/50 hover:text-white hover:bg-white/[0.07] disabled:opacity-30 transition-colors">
+                          Next <I.ChevronRight size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    {summary && <div className="pl-4 border-l-2 border-indigo-500/40"><p className="text-[14px] text-white/50 leading-relaxed">{summary}</p></div>}
+                  </div>
+                  <div className="w-full lg:w-[300px] flex-shrink-0 lg:sticky lg:top-[72px]">
+                    <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl flex flex-col overflow-hidden" style={{ height: 'calc(100vh - 100px)' }}>
+                      <TranscriptPanel steps={steps} assets={assets} currentIndex={displayIndex} chapterMap={chapterMap}
+                        onSelect={(i) => { playerRef.current?.seekToStep(i); setDisplayIndex(i); }} />
+                    </div>
+                  </div>
+                </div>
+              )}
 
-        {/* ── GUIDE MODE ── */}
-        {viewMode === 'guide' && (
-          <GuideView
-            steps={steps}
-            assets={assets}
-            chapterMap={chapterMap}
-            title={title}
-            summary={summary}
-            tags={tags}
-          />
-        )}
+              {/* ── DEMO MODE ── */}
+              {validMode === 'demo' && (
+                <div style={{ height: 'calc(100vh - 180px)', minHeight: 480 }}>
+                  <EmbedDemoView sessionOverride={session} />
+                </div>
+              )}
+
+              {/* ── RAW VIDEO MODE ── */}
+              {validMode === 'raw' && videoUrl && (
+                <div className="max-w-4xl mx-auto space-y-4">
+                  <div className="rounded-2xl overflow-hidden bg-black shadow-2xl">
+                    <video src={videoUrl} controls playsInline className="w-full" style={{ aspectRatio: '16/9' }} />
+                  </div>
+                  <p className="text-center text-[12px] text-white/30">Original, unedited screen recording</p>
+                </div>
+              )}
+
+              {/* ── GUIDE MODE ── */}
+              {validMode === 'guide' && (
+                <GuideView steps={steps} assets={assets} chapterMap={chapterMap} title={title} summary={summary} tags={tags} />
+              )}
+            </>
+          );
+        })()}
 
         {/* Footer — only shown on free plan workspaces */}
         {!isPaidPlan && (
