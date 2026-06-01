@@ -155,9 +155,12 @@ assets.get('/:key{.+}', authMiddleware(), async (c) => {
   if (!object) throw new HTTPException(404, { message: 'Asset not found' });
 
   const contentType = object.httpMetadata?.contentType || 'application/octet-stream';
+  // JSON session files must never be stale-served — use no-store so every fetch
+  // goes straight to R2. Images/audio keep a short private cache for performance.
+  const isJson = contentType.includes('json') || (c.req.param('key') ?? '').endsWith('.json');
   return c.body(object.body as any, 200, {
     'Content-Type': contentType,
-    'Cache-Control': 'private, max-age=3600',
+    'Cache-Control': isJson ? 'no-store' : 'private, max-age=3600',
   });
 });
 
