@@ -11,6 +11,7 @@ interface ShareFormats {
   sopEnabled: boolean;
   rawEnabled: boolean;
   cinematicEnabled: boolean;
+  demoEnabled: boolean;
 }
 
 const CINEMATIC_CREDIT_COST = 2;
@@ -138,10 +139,12 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   const [copied, setCopied] = useState(false);
 
   // Format visibility
+  const hasSteps = (session?.steps?.length ?? 0) > 0;
   const [formats, setFormats] = useState<ShareFormats>({
     sopEnabled:       (session as any)?.sopEnabled       !== false,
     rawEnabled:       (session as any)?.rawEnabled       !== false,
     cinematicEnabled: !!(session as any)?.cinematicEnabled,
+    demoEnabled:      (session as any)?.demoEnabled      !== false,
   });
   const [_formatSaving, setFormatSaving] = useState(false);
 
@@ -164,6 +167,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
       sopEnabled:       (session as any)?.sopEnabled       !== false,
       rawEnabled:       (session as any)?.rawEnabled       !== false,
       cinematicEnabled: !!(session as any)?.cinematicEnabled,
+      demoEnabled:      (session as any)?.demoEnabled      !== false,
     });
     setCinematicError(null);
   }, [session]);
@@ -194,7 +198,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   };
 
   // ── Format toggle ───────────────────────────────────────────────────────────
-  const toggleFormat = async (field: 'sopEnabled' | 'rawEnabled' | 'cinematicEnabled') => {
+  const toggleFormat = async (field: 'sopEnabled' | 'rawEnabled' | 'cinematicEnabled' | 'demoEnabled') => {
     if (!sessionId) return;
     const next = !formats[field];
     setFormats(f => ({ ...f, [field]: next }));
@@ -251,7 +255,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const allDisabled = !formats.sopEnabled && !formats.rawEnabled && !formats.cinematicEnabled;
+  const allDisabled = !formats.sopEnabled && !formats.rawEnabled && !formats.cinematicEnabled && !formats.demoEnabled;
 
   return (
     <AnimatePresence>
@@ -372,6 +376,18 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
                       enabled={formats.rawEnabled && hasVideo}
                       disabled={!isPublic || !hasVideo}
                       onToggle={hasVideo ? () => toggleFormat('rawEnabled') : undefined}
+                    />
+
+                    {/* Interactive Demo */}
+                    <FormatCard
+                      icon={<I.MousePointer size={16} color={formats.demoEnabled ? '#f472b6' : 'rgba(255,255,255,0.35)'} />}
+                      accentColor={formats.demoEnabled ? '#ec4899' : '#666'}
+                      title="Interactive Demo"
+                      description={hasSteps ? 'Click-through product tour' : 'No steps recorded'}
+                      badge="free"
+                      enabled={formats.demoEnabled && hasSteps}
+                      disabled={!isPublic || !hasSteps}
+                      onToggle={hasSteps ? () => toggleFormat('demoEnabled') : undefined}
                     />
 
                     {/* Cinematic */}

@@ -3,6 +3,7 @@ import { I } from '../components/icons';
 import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
 import { CinematicPlayer } from '../components/player/CinematicPlayer';
+import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
 import { displayText } from '../lib/textUtils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,7 +39,7 @@ interface PublicSession {
   owner?: { name: string };
 }
 
-type Tab = 'guide' | 'recording' | 'cinematic';
+type Tab = 'guide' | 'recording' | 'cinematic' | 'demo';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -159,6 +160,7 @@ export const SharePage: React.FC = () => {
   const [cinematicEnabled, setCinematicEnabled] = useState(false);
   const [sopEnabled, setSopEnabled] = useState(true);
   const [_rawEnabled, setRawEnabled] = useState(true);
+  const [demoEnabled, setDemoEnabled] = useState(true);
 
   const [ownerName, setOwnerName] = useState<string>('');
   const [capturedAt, setCapturedAt] = useState<any>(null);
@@ -182,10 +184,11 @@ export const SharePage: React.FC = () => {
   // When ShareModal toggles a format flag, reflect it immediately without reload
   useEffect(() => {
     const handler = (e: Event) => {
-      const { sopEnabled: s, rawEnabled: r, cinematicEnabled: c } = (e as CustomEvent).detail ?? {};
+      const { sopEnabled: s, rawEnabled: r, cinematicEnabled: c, demoEnabled: d } = (e as CustomEvent).detail ?? {};
       if (typeof s === 'boolean') setSopEnabled(s);
       if (typeof r === 'boolean') setRawEnabled(r);
       if (typeof c === 'boolean') setCinematicEnabled(c);
+      if (typeof d === 'boolean') setDemoEnabled(d);
     };
     window.addEventListener('sb_formats_updated', handler);
     return () => window.removeEventListener('sb_formats_updated', handler);
@@ -223,6 +226,7 @@ export const SharePage: React.FC = () => {
       setCinematicEnabled(!!meta.cinematicEnabled);
       setSopEnabled(meta.sopEnabled !== false);
       setRawEnabled(meta.rawEnabled !== false);
+      setDemoEnabled(meta.demoEnabled !== false);
 
       if (meta.status === 'failed') throw new Error('This walkthrough failed to process.');
 
@@ -396,6 +400,7 @@ export const SharePage: React.FC = () => {
   // Cinematic tab appears only when credits have been spent to unlock it.
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     ...(sopEnabled !== false ? [{ id: 'guide' as Tab, label: 'Step Guide', icon: <I.List size={13} /> }] : []),
+    ...(demoEnabled && (session?.steps?.length ?? 0) > 0 ? [{ id: 'demo' as Tab, label: 'Interactive Demo', icon: <I.MousePointer size={13} /> }] : []),
     ...(_rawEnabled !== false && videoUrl ? [{ id: 'recording' as Tab, label: 'Raw Video', icon: <I.Video size={13} /> }] : []),
     ...(cinematicEnabled ? [{ id: 'cinematic' as Tab, label: 'Cinematic AI', icon: <I.Play size={13} /> }] : []),
   ];
@@ -593,6 +598,13 @@ export const SharePage: React.FC = () => {
               </React.Fragment>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── Demo Tab ── (full viewport) */}
+      {resolvedTab === 'demo' && session && (
+        <div className="w-full" style={{ height: 'calc(100vh - 120px)', minHeight: 480 }}>
+          <EmbedDemoView sessionOverride={session} readOnly />
         </div>
       )}
 

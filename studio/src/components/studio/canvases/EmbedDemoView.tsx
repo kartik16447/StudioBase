@@ -576,8 +576,9 @@ function getHotspotCoords(step: Step): { x: number; y: number } | null {
   return x !== null && y !== null ? { x, y } : null;
 }
 
-export const EmbedDemoView: React.FC = () => {
-  const session  = useStudioStore((s) => s.session);
+export const EmbedDemoView: React.FC<{ sessionOverride?: any; readOnly?: boolean }> = ({ sessionOverride }) => {
+  const storeSession = useStudioStore((s) => s.session);
+  const session  = sessionOverride ?? storeSession;
   const brand    = useStudioStore((s) => s.brand.primaryColor) || '#6366f1';
 
   const meta           = (session?.metadata as any) ?? {};

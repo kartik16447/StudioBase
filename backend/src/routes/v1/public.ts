@@ -10,7 +10,7 @@ async function resolveSession(db: Env['DB'], token: string) {
   // Try shareToken first (production share links — must be public)
   let row = await db.prepare(
     `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, r2VideoKey, status, ownerId, workspaceId, shareToken,
-            cinematicEnabled, sopEnabled, rawEnabled
+            cinematicEnabled, sopEnabled, rawEnabled, demoEnabled
      FROM sessions WHERE shareToken = ? AND isPublic = 1`
   ).bind(token).first<any>();
 
@@ -18,7 +18,7 @@ async function resolveSession(db: Env['DB'], token: string) {
   if (!row) {
     row = await db.prepare(
       `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, r2VideoKey, status, ownerId, workspaceId, shareToken,
-              cinematicEnabled, sopEnabled, rawEnabled
+              cinematicEnabled, sopEnabled, rawEnabled, demoEnabled
        FROM sessions WHERE id = ? AND isPublic = 1 AND deletedAt IS NULL`
     ).bind(token).first<any>();
   }
@@ -78,8 +78,9 @@ publicRoutes.get('/:shareToken', async (c) => {
     status: session.status,
     sessionJsonUrl,
     cinematicEnabled: session.cinematicEnabled === 1,
-    sopEnabled: session.sopEnabled !== 0,   // default true (column defaults to 1)
-    rawEnabled: session.rawEnabled !== 0,   // default true
+    sopEnabled: session.sopEnabled !== 0,
+    rawEnabled: session.rawEnabled !== 0,
+    demoEnabled: session.demoEnabled !== 0,  // default true
     isPaidPlan,
     owner: owner
       ? { name: owner.name || owner.email?.split('@')[0] || 'Anonymous' }
