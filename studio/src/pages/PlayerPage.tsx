@@ -465,7 +465,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
 
               {/* ── DEMO MODE ── */}
               {validMode === 'demo' && (
-                <div style={{ height: 'calc(100vh - 180px)', minHeight: 480 }}>
+                <div style={{ position: 'relative', height: 'calc(100vh - 180px)', minHeight: 480, borderRadius: 16, overflow: 'hidden' }}>
                   <EmbedDemoView sessionOverride={session} />
                 </div>
               )}

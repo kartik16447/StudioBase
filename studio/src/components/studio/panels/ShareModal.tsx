@@ -152,6 +152,10 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   const [cinematicLoading, setCinematicLoading] = useState(false);
   const [cinematicError,   setCinematicError]   = useState<string | null>(null);
   const [cinematicConfirmOpen, setCinematicConfirmOpen] = useState(false);
+  // Track whether credits were ever spent on cinematic for this session.
+  // True if the session came from the server with cinematicEnabled = true,
+  // OR if the user just unlocked it in this session. Used to allow free re-enable.
+  const cinematicPaidRef = React.useRef(!!(session as any)?.cinematicEnabled);
 
   // Credit balance comes from the global store (fetched on app load)
 
@@ -170,6 +174,8 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
       demoEnabled:      (session as any)?.demoEnabled      !== false,
     });
     setCinematicError(null);
+    // If session comes back with cinematic enabled, mark as paid
+    if (!!(session as any)?.cinematicEnabled) cinematicPaidRef.current = true;
   }, [session]);
 
 
@@ -239,7 +245,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
         return;
       }
       setFormats(f => ({ ...f, cinematicEnabled: true }));
-      // Keep store in sync — cinematic is now unlocked (credit spent)
+      cinematicPaidRef.current = true; // credits spent — re-enable is always free from now on
       if (session) setSession({ ...session, cinematicEnabled: true } as any);
     } catch (e: any) {
       setCinematicError(e?.message || 'Failed to unlock cinematic.');
@@ -395,13 +401,17 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
                       icon={<I.Play size={16} color={formats.cinematicEnabled ? '#a78bfa' : 'rgba(255,255,255,0.35)'} />}
                       accentColor={formats.cinematicEnabled ? '#8b5cf6' : '#666'}
                       title="Cinematic"
-                      description={formats.cinematicEnabled ? 'AI camera · smooth transitions' : 'Unlock to share'}
-                      badge={formats.cinematicEnabled ? 'on' : 'credit'}
+                      description={
+                        formats.cinematicEnabled ? 'AI camera · smooth transitions'
+                        : cinematicPaidRef.current ? 'Paid · toggle to re-share'
+                        : 'Unlock to share'
+                      }
+                      badge={formats.cinematicEnabled ? 'on' : cinematicPaidRef.current ? 'on' : 'credit'}
                       enabled={formats.cinematicEnabled}
                       disabled={!isPublic}
-                      locked={false}
-                      onToggle={formats.cinematicEnabled ? () => toggleFormat('cinematicEnabled') : undefined}
-                      onUnlock={!formats.cinematicEnabled ? requestUnlock : undefined}
+                      locked={!cinematicPaidRef.current && !formats.cinematicEnabled}
+                      onToggle={cinematicPaidRef.current ? () => toggleFormat('cinematicEnabled') : undefined}
+                      onUnlock={!cinematicPaidRef.current && !formats.cinematicEnabled ? requestUnlock : undefined}
                       unlockLoading={cinematicLoading}
                       creditBalance={creditsBalance}
                     />

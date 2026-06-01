@@ -603,8 +603,8 @@ export const SharePage: React.FC = () => {
 
       {/* ── Demo Tab ── (full viewport) */}
       {resolvedTab === 'demo' && session && (
-        <div className="w-full" style={{ height: 'calc(100vh - 120px)', minHeight: 480 }}>
-          <EmbedDemoView sessionOverride={session} readOnly />
+        <div className="w-full" style={{ position: 'relative', height: 'calc(100vh - 120px)', minHeight: 480, borderRadius: 16, overflow: 'hidden' }}>
+          <EmbedDemoView sessionOverride={session} />
         </div>
       )}
 

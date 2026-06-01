@@ -230,6 +230,18 @@ sessions.patch('/:id/enable-cinematic', requirePermission('sop:edit'), async (c)
     return c.json({ cinematicEnabled: true, charged: false });
   }
 
+  // Previously paid (credits_ledger has entry) — re-enable for free, no second charge
+  const alreadyPaid = await c.env.DB
+    .prepare('SELECT id FROM credits_ledger WHERE sessionId = ? AND actionType = ? LIMIT 1')
+    .bind(id, 'cinematic')
+    .first<{ id: string }>();
+
+  if (alreadyPaid) {
+    await c.env.DB.prepare('UPDATE sessions SET cinematicEnabled = 1, updatedAt = ? WHERE id = ?')
+      .bind(Date.now(), id).run();
+    return c.json({ cinematicEnabled: true, charged: false });
+  }
+
   // Credit check against workspace pool
   const CINEMATIC_CREDIT_COST = 2;
   const wsCredits = await c.env.DB
