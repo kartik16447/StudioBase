@@ -92,6 +92,7 @@ export const EmbedSOPView: React.FC = () => {
                     imgLoaded ? 'opacity-100' : 'opacity-0',
                   )}
                   onLoad={() => setImgLoaded(true)}
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                   draggable={false}
                 />
               )}

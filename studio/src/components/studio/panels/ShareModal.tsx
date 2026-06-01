@@ -194,7 +194,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   };
 
   // ── Format toggle ───────────────────────────────────────────────────────────
-  const toggleFormat = async (field: 'sopEnabled' | 'rawEnabled') => {
+  const toggleFormat = async (field: 'sopEnabled' | 'rawEnabled' | 'cinematicEnabled') => {
     if (!sessionId) return;
     const next = !formats[field];
     setFormats(f => ({ ...f, [field]: next }));
@@ -203,6 +203,10 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
       await apiClient.patch(`/sessions/${sessionId}/share-formats`, { [field]: next });
       // Keep store in sync so re-opening the modal reads fresh values
       if (session) setSession({ ...session, [field]: next } as any);
+      // Notify any open SharePage preview so it can update its tab list
+      window.dispatchEvent(new CustomEvent('sb_formats_updated', {
+        detail: { ...formats, [field]: next },
+      }));
     } catch {
       setFormats(f => ({ ...f, [field]: !next }));
     } finally {
@@ -375,11 +379,12 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
                       icon={<I.Play size={16} color={formats.cinematicEnabled ? '#a78bfa' : 'rgba(255,255,255,0.35)'} />}
                       accentColor={formats.cinematicEnabled ? '#8b5cf6' : '#666'}
                       title="Cinematic"
-                      description={formats.cinematicEnabled ? 'AI camera · math transitions' : 'Unlock to share'}
+                      description={formats.cinematicEnabled ? 'AI camera · smooth transitions' : 'Unlock to share'}
                       badge={formats.cinematicEnabled ? 'on' : 'credit'}
                       enabled={formats.cinematicEnabled}
                       disabled={!isPublic}
-                      locked={!formats.cinematicEnabled}
+                      locked={false}
+                      onToggle={formats.cinematicEnabled ? () => toggleFormat('cinematicEnabled') : undefined}
                       onUnlock={!formats.cinematicEnabled ? requestUnlock : undefined}
                       unlockLoading={cinematicLoading}
                       creditBalance={creditsBalance}

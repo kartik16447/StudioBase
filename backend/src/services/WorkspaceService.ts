@@ -91,6 +91,13 @@ export class WorkspaceService {
       'INSERT OR IGNORE INTO workspace_members (userId, workspaceId, role, joinedAt, invitedBy) VALUES (?, ?, ?, ?, ?)'
     ).bind(userId, invite.workspaceId, invite.role || 'Member', now, invite.invitedBy || null).run();
 
+    // Seed default free credits for the workspace if not already present.
+    // Without this, invited users land on 0 credits and can't use any paid features.
+    await this.env.DB.prepare(
+      `INSERT OR IGNORE INTO workspace_credits (workspaceId, balanceCredits, monthlyAllocation, plan, lastRefreshedAt)
+       VALUES (?, 100, 100, 'free', ?)`
+    ).bind(invite.workspaceId, now).run();
+
     // Insert onboarding state for member joining via invite
     try {
       await this.env.DB.prepare(

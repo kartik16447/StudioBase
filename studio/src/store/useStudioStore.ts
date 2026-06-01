@@ -156,6 +156,7 @@ interface StudioState {
   setScriptDirty: (dirty: boolean) => void;
 
   // Global undo/redo (narration edits, step deletion, overlay moves)
+  _pendingDeletes: Set<string>;
   _undoStack: Step[][];
   _redoStack: Step[][];
   pushUndo: () => void;
@@ -540,6 +541,12 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       sessionData.assets = assets;
 
       const status = (data as any).status ?? null;
+      // Filter out steps that were optimistically deleted but whose backend DELETE
+      // hasn't confirmed yet — prevents the race where fetchSession resurrects them.
+      const pendingDeletes = get()._pendingDeletes;
+      if (pendingDeletes.size > 0 && sessionData.steps) {
+        sessionData = { ...sessionData, steps: sessionData.steps.filter(s => !pendingDeletes.has(s.id)) };
+      }
       set({ session: sessionData, sessionStatus: status });
       if (sessionData.steps?.length > 0) {
         set({ focusedStepId: sessionData.steps[0].id, focusedStepIndex: 0 });
@@ -626,12 +633,16 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       const snapshot = state.session.steps;
       const newSteps = state.session.steps.filter(s => s.id !== stepId);
       const sequencedSteps = newSteps.map((s, i) => ({ ...s, sequence: i + 1 }));
+      // Mark as pending-delete so fetchSession doesn't resurrect it during the race window
+      const pendingDeletes = new Set(state._pendingDeletes);
+      pendingDeletes.add(stepId);
       return {
         session: {
           ...state.session,
           steps: sequencedSteps,
           metadata: { ...state.session.metadata, stepCount: sequencedSteps.length }
         },
+        _pendingDeletes: pendingDeletes,
         _undoStack: [...state._undoStack, snapshot].slice(-50),
         _redoStack: [],
       };
@@ -640,7 +651,15 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     const sessionId = (session as any)?.id || (session as any)?.sessionId;
     if (sessionId) {
       apiClient.request(`/sessions/${sessionId}/steps/${stepId}`, { method: 'DELETE' })
-        .catch(err => console.warn('[deleteStep] backend delete failed:', err));
+        .then(() => {
+          // Backend confirmed — remove from pending set
+          set(s => { const pd = new Set(s._pendingDeletes); pd.delete(stepId); return { _pendingDeletes: pd }; });
+        })
+        .catch(err => {
+          console.warn('[deleteStep] backend delete failed:', err);
+          // Also clear pending on error to avoid permanently hiding the step
+          set(s => { const pd = new Set(s._pendingDeletes); pd.delete(stepId); return { _pendingDeletes: pd }; });
+        });
     }
   },
   triggerScroll: () => set((state) => ({ scrollTrigger: state.scrollTrigger + 1 })),
@@ -1271,6 +1290,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   },
 
   // Global undo/redo
+  _pendingDeletes: new Set<string>(),
   _undoStack: [],
   _redoStack: [],
   pushUndo: () => set((state) => {

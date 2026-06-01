@@ -57,13 +57,14 @@ const domain = (url?: string) => {
 
 const PublicStepCard: React.FC<{ step: PublicStep; index: number; assets?: Record<string, string> }> = ({ step, index, assets }) => {
   const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
   const screenshotUrl = step.screenshotKey && assets?.[step.screenshotKey] ? assets[step.screenshotKey] : null;
   const title = step.stepTitle || step.elementText || `Step ${index + 1}`;
   const text = displayText(step.textOverride || step.generatedText) || step.elementText || '';
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      {screenshotUrl && (
+      {screenshotUrl && !imgFailed && (
         <div className="bg-gray-50 border-b border-gray-100 relative">
           {!imgLoaded && <div className="w-full aspect-video bg-gray-100 animate-pulse absolute inset-0" />}
           <img
@@ -71,7 +72,14 @@ const PublicStepCard: React.FC<{ step: PublicStep; index: number; assets?: Recor
             alt={title}
             className={cn('w-full object-contain transition-opacity duration-300', imgLoaded ? 'opacity-100' : 'opacity-0')}
             onLoad={() => setImgLoaded(true)}
+            onError={() => setImgFailed(true)}
           />
+        </div>
+      )}
+      {imgFailed && (
+        <div className="w-full aspect-video bg-gray-100 border-b border-gray-100 flex flex-col items-center justify-center gap-2">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m8.5 8.5 7 7M15.5 8.5l-7 7"/></svg>
+          <span className="text-[11px] text-gray-400">Screenshot unavailable</span>
         </div>
       )}
       <div className="px-4 sm:px-7 py-4 sm:py-5">
@@ -151,6 +159,7 @@ export const SharePage: React.FC = () => {
   const [cinematicEnabled, setCinematicEnabled] = useState(false);
   const [sopEnabled, setSopEnabled] = useState(true);
   const [_rawEnabled, setRawEnabled] = useState(true);
+
   const [ownerName, setOwnerName] = useState<string>('');
   const [capturedAt, setCapturedAt] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -169,6 +178,18 @@ export const SharePage: React.FC = () => {
   const [accessRequestSent, setAccessRequestSent] = useState(false);
   const isPreview = new URLSearchParams(window.location.search).get('preview') === '1';
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // When ShareModal toggles a format flag, reflect it immediately without reload
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { sopEnabled: s, rawEnabled: r, cinematicEnabled: c } = (e as CustomEvent).detail ?? {};
+      if (typeof s === 'boolean') setSopEnabled(s);
+      if (typeof r === 'boolean') setRawEnabled(r);
+      if (typeof c === 'boolean') setCinematicEnabled(c);
+    };
+    window.addEventListener('sb_formats_updated', handler);
+    return () => window.removeEventListener('sb_formats_updated', handler);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

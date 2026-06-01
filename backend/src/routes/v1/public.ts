@@ -14,12 +14,12 @@ async function resolveSession(db: Env['DB'], token: string) {
      FROM sessions WHERE shareToken = ? AND isPublic = 1`
   ).bind(token).first<any>();
 
-  // Fallback: treat token as session id — allows direct links without Publish step
+  // Fallback: treat token as session id — only if explicitly published (isPublic = 1)
   if (!row) {
     row = await db.prepare(
       `SELECT id, title, capturedTitle, createdAt, capturedUrl, r2JsonKey, r2VideoKey, status, ownerId, workspaceId, shareToken,
               cinematicEnabled, sopEnabled, rawEnabled
-       FROM sessions WHERE id = ? AND deletedAt IS NULL`
+       FROM sessions WHERE id = ? AND isPublic = 1 AND deletedAt IS NULL`
     ).bind(token).first<any>();
   }
 

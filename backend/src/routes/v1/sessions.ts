@@ -159,11 +159,11 @@ sessions.patch('/:id/share', requirePermission('sop:edit'), async (c) => {
   return c.json({ isPublic, shareToken, shareUrl });
 });
 
-// PATCH /v1/sessions/:id/share-formats — toggle SOP and Raw Recording visibility
+// PATCH /v1/sessions/:id/share-formats — toggle SOP, Raw Recording, and Cinematic visibility
 sessions.patch('/:id/share-formats', requirePermission('sop:edit'), async (c) => {
   const ws   = c.get('workspace');
   const id   = c.req.param('id') as string;
-  const body = await c.req.json<{ sopEnabled?: boolean; rawEnabled?: boolean }>();
+  const body = await c.req.json<{ sopEnabled?: boolean; rawEnabled?: boolean; cinematicEnabled?: boolean }>();
 
   const row = await c.env.DB
     .prepare('SELECT id FROM sessions WHERE id = ? AND workspaceId = ? AND deletedAt IS NULL')
@@ -183,6 +183,11 @@ sessions.patch('/:id/share-formats', requirePermission('sop:edit'), async (c) =>
   if (typeof body.rawEnabled === 'boolean') {
     updates.push('rawEnabled = ?');
     values.push(body.rawEnabled ? 1 : 0);
+  }
+  // Allow toggling cinematic visibility off (once unlocked, owner can still hide it)
+  if (typeof body.cinematicEnabled === 'boolean') {
+    updates.push('cinematicEnabled = ?');
+    values.push(body.cinematicEnabled ? 1 : 0);
   }
 
   if (updates.length === 0) return c.json({ error: 'Nothing to update' }, 400);
