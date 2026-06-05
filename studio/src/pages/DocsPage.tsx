@@ -601,6 +601,23 @@ const DocsPageInner: React.FC = () => {
         onNewDoc={() => handleNewDoc()}
         showTemplates={showTemplatesSection}
         setShowTemplates={setShowTemplatesSection}
+        onUseTemplate={async (templateId, blocks) => {
+          try {
+            let doc;
+            if (templateId.startsWith('__')) {
+              const { STARTER_TEMPLATES } = await import('../features/editor/data/starterTemplates');
+              const tpl = STARTER_TEMPLATES.find(t => t.id === templateId);
+              doc = await docsApi.create({ title: tpl?.name ?? 'Untitled', blocks: blocks ?? tpl?.blocks });
+            } else {
+              doc = await docsApi.createFromTemplate(templateId);
+            }
+            const node: PageNode = { id: doc.id, title: doc.title, emoji: doc.emoji ?? undefined, children: [] };
+            setPages((prev) => [...prev, node]);
+            setActiveId(doc.id);
+          } catch (err) {
+            console.error('Failed to create from template:', err);
+          }
+        }}
         renamingId={renamingId}
         onRenameCommit={handleRenameCommit}
         onRenameCancel={() => setRenamingId(null)}

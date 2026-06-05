@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
+import type { JSONContent } from '@tiptap/react';
 import { I } from '../../../components/icons';
 import type { PageNode } from '../types';
 import { docsApi } from '../lib/docsApi';
 import type { ApiDocSummary } from '../lib/docsApi';
+import { STARTER_TEMPLATES } from '../data/starterTemplates';
 
 interface DocsSidebarProps {
   pages: PageNode[];
@@ -16,6 +18,7 @@ interface DocsSidebarProps {
   dropTarget?: { id: string; position: 'above' | 'below' } | null;
   showTemplates: boolean;
   setShowTemplates: (v: boolean) => void;
+  onUseTemplate?: (id: string, blocks?: JSONContent[]) => void;
   renamingId?: string | null;
   onRenameCommit?: (id: string, title: string) => void;
   onRenameCancel?: () => void;
@@ -29,7 +32,7 @@ interface DocsSidebarProps {
 export const DocsSidebar: React.FC<DocsSidebarProps> = ({
   pages, activeId, expandedIds, onToggleExpand, onSelect,
   onOpenSearch, onOpenContext, onNewDoc, dropTarget,
-  showTemplates, setShowTemplates,
+  showTemplates, setShowTemplates, onUseTemplate,
   renamingId, onRenameCommit, onRenameCancel, loading,
   onDragStart, onDragOver, onDrop, onDragEnd,
 }) => {
@@ -87,14 +90,33 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
         collapsed={!showTemplates}
         onToggle={() => setShowTemplates(!showTemplates)}
       />
-      {showTemplates && sidebarTemplates.length === 0 && (
-        <div style={{ padding: '6px 8px 4px 8px', color: 'var(--doc-text-3)', fontSize: 11 }}>
-          No templates yet
-        </div>
+      {showTemplates && (
+        <>
+          {STARTER_TEMPLATES.map((t) => (
+            <TemplateRow
+              key={t.id}
+              emoji={t.emoji}
+              title={t.name}
+              onClick={() => onUseTemplate?.(t.id, t.blocks)}
+            />
+          ))}
+          {sidebarTemplates.length > 0 && (
+            <>
+              <div style={{ padding: '8px 8px 2px 8px', color: 'var(--doc-text-3)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Saved
+              </div>
+              {sidebarTemplates.map((t) => (
+                <TemplateRow
+                  key={t.id}
+                  emoji={t.emoji || '📄'}
+                  title={t.title || 'Untitled'}
+                  onClick={() => onUseTemplate?.(t.id)}
+                />
+              ))}
+            </>
+          )}
+        </>
       )}
-      {showTemplates && sidebarTemplates.map((t) => (
-        <TemplateRow key={t.id} emoji={t.emoji || '📄'} title={t.title || 'Untitled'} />
-      ))}
     </div>
   </div>
   );
@@ -261,8 +283,13 @@ const PageNodeItem: React.FC<PageNodeItemProps> = ({
   );
 };
 
-const TemplateRow: React.FC<{ emoji: string; title: string }> = ({ emoji, title }) => (
-  <div className="doc-tree-item" style={{ paddingLeft: 8 }}>
+const TemplateRow: React.FC<{ emoji: string; title: string; onClick?: () => void }> = ({ emoji, title, onClick }) => (
+  <div
+    className="doc-tree-item"
+    style={{ paddingLeft: 8, cursor: onClick ? 'pointer' : 'default' }}
+    onClick={onClick}
+    title={onClick ? `Create doc from "${title}"` : undefined}
+  >
     <span className="doc-tree-expander empty" />
     <span className="doc-tree-icon">{emoji}</span>
     <span className="doc-tree-title" style={{ color: 'var(--doc-text-2)' }}>{title}</span>
