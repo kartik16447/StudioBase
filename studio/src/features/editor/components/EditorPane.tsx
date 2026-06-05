@@ -25,6 +25,8 @@ interface EditorPaneProps {
   onExportPlainText: () => void;
   onExportPDF: () => void;
   onCopyMarkdown: () => void;
+  onOpenShareSheet?: () => void;
+  onTriggerPdfExport?: () => void;
 }
 
 export const EditorPane: React.FC<EditorPaneProps> = ({
@@ -33,6 +35,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   initialContent, onContentChange, onEditorReady,
   onShare, onMore,
   onExportMarkdown, onExportPlainText, onExportPDF, onCopyMarkdown,
+  onOpenShareSheet, onTriggerPdfExport,
 }) => (
   <div className="doc-editor">
     {/* Breadcrumb */}
@@ -75,8 +78,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
           {saving ? 'Saving…' : dirty ? '• Unsaved' : 'Saved ✓'}
         </span>
         <div style={{ position: 'relative' }}>
-          <button className="doc-btn doc-btn-ghost sm" onClick={onOpenExport}>
+          <button className="doc-btn doc-btn-ghost sm" onClick={onOpenExport} title="Export (⌘E for PDF)">
             <I.FileDown size={14} /> Export
+            <span className="doc-shortcut-hint">⌘E</span>
           </button>
           {exportOpen && (
             <ExportMenuDropdown
@@ -88,8 +92,9 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             />
           )}
         </div>
-        <button className="doc-btn doc-btn-ghost sm" onClick={onShare}>
+        <button className="doc-btn doc-btn-ghost sm" onClick={onShare} title="Share (⌘S)">
           <I.Share2 size={14} /> Share
+          <span className="doc-shortcut-hint">⌘S</span>
         </button>
         <button className="doc-btn-icon" onClick={onMore}>
           <I.MoreHorizontal size={16} />
@@ -98,6 +103,6 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
     </div>
 
     {/* Tiptap canvas — key=docId forces remount when switching docs */}
-    <TiptapEditor key={docId} initialContent={initialContent} onChange={onContentChange} onEditorReady={onEditorReady} />
+    <TiptapEditor key={docId} initialContent={initialContent} onChange={onContentChange} onEditorReady={onEditorReady} onOpenShareSheet={onOpenShareSheet} onTriggerPdfExport={onTriggerPdfExport} />
   </div>
 );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import type { JSONContent, Editor } from '@tiptap/react';
 import { blocksToMarkdown, blocksToPlainText } from '../features/editor/lib/tiptapToMarkdown';
 import { DocsSidebar } from '../features/editor/components/DocsSidebar';
@@ -205,6 +206,28 @@ const DocsPageInner: React.FC = () => {
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [emojiAnchor, setEmojiAnchor] = useState({ left: 0, top: 0 });
   const [exportOpen, setExportOpen] = useState(false);
+  const [shareSheetOpen, setShareSheetOpen] = useState(false);
+  const [shareSheetCopying, setShareSheetCopying] = useState(false);
+
+  // SOP-to-Doc coach card — shown once on first arrival via ?fromSop=true
+  const SOP_COACH_KEY = 'sb_sop_to_doc_coach_dismissed';
+  const [showFromSopCoach, setShowFromSopCoach] = useState(false);
+  const dismissCoach = useCallback(() => {
+    setShowFromSopCoach(false);
+    localStorage.setItem(SOP_COACH_KEY, '1');
+    // Clean up the URL param without navigating
+    const search = new URLSearchParams(window.location.search);
+    search.delete('fromSop');
+    const next = search.toString();
+    window.history.replaceState({}, '', window.location.pathname + (next ? '?' + next : ''));
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('fromSop') === 'true' && !localStorage.getItem(SOP_COACH_KEY)) {
+      setShowFromSopCoach(true);
+    }
+  }, []);
   const editorInstanceRef = useRef<Editor | null>(null);
   const [blockMenuAnchor, setBlockMenuAnchor] = useState<{ x: number; y: number } | null>(null);
 
@@ -439,14 +462,28 @@ const DocsPageInner: React.FC = () => {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
-      if (meta && (e.key.toLowerCase() === 'p' || e.key.toLowerCase() === 'k')) {
+      if (!meta) return;
+      const key = e.key.toLowerCase();
+      if (key === 'p' || key === 'k') {
         e.preventDefault();
         setSearchOpen(true);
+      }
+      // Cmd+S — share sheet (global: fires when editor is not focused)
+      if (key === 's') {
+        const active = document.activeElement;
+        const editorFocused = active && (active.classList.contains('ProseMirror') || active.closest('.ProseMirror'));
+        if (!editorFocused) { e.preventDefault(); openShareSheet(); }
+      }
+      // Cmd+E — PDF export (global: fires when editor is not focused)
+      if (key === 'e') {
+        const active = document.activeElement;
+        const editorFocused = active && (active.classList.contains('ProseMirror') || active.closest('.ProseMirror'));
+        if (!editorFocused) { e.preventDefault(); triggerPdfExport(); }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [openShareSheet, triggerPdfExport]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -532,6 +569,16 @@ const DocsPageInner: React.FC = () => {
     window.print();
   }, []);
 
+  const openShareSheet = useCallback(() => {
+    setShareSheetOpen(true);
+    if (showFromSopCoach) dismissCoach();
+  }, [showFromSopCoach, dismissCoach]);
+
+  const triggerPdfExport = useCallback(() => {
+    if (showFromSopCoach) dismissCoach();
+    window.print();
+  }, [showFromSopCoach, dismissCoach]);
+
   const handleCopyMarkdown = useCallback(() => {
     const blocks = editorInstanceRef.current?.getJSON()?.content ?? [];
     const md = blocksToMarkdown(blocks, title);
@@ -596,6 +643,8 @@ const DocsPageInner: React.FC = () => {
           onExportPlainText={handleExportPlainText}
           onExportPDF={handleExportPDF}
           onCopyMarkdown={handleCopyMarkdown}
+          onOpenShareSheet={openShareSheet}
+          onTriggerPdfExport={triggerPdfExport}
         />
       )}
 
@@ -676,6 +725,164 @@ const DocsPageInner: React.FC = () => {
           }}
         />
       )}
+
+      {/* Share sheet — slide-up panel triggered by Cmd+S */}
+      <AnimatePresence>
+        {shareSheetOpen && (
+          <>
+            <motion.div
+              key="share-sheet-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => setShareSheetOpen(false)}
+              style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(0,0,0,0.45)' }}
+            />
+            <motion.div
+              key="share-sheet-panel"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+              style={{
+                position: 'fixed',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                zIndex: 71,
+                background: 'var(--doc-surface-2, #1c1c1f)',
+                borderTop: '1px solid var(--doc-border, #27272a)',
+                borderRadius: '20px 20px 0 0',
+                padding: '20px 24px 32px',
+                maxWidth: 480,
+                margin: '0 auto',
+              }}
+            >
+              <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--doc-border, #3f3f46)', margin: '0 auto 20px' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* Copy public link */}
+                <button
+                  disabled={shareSheetCopying}
+                  onClick={async () => {
+                    if (!activeId) return;
+                    setShareSheetCopying(true);
+                    try {
+                      const { shareUrl } = await docsApi.shareDoc(activeId);
+                      await navigator.clipboard.writeText(shareUrl);
+                      setShareSheetOpen(false);
+                      showToast('success', 'Layrd. Send it.');
+                    } catch {
+                      showToast('error', 'Failed to generate share link');
+                    } finally {
+                      setShareSheetCopying(false);
+                    }
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 16,
+                    padding: '16px 20px', borderRadius: 12,
+                    background: 'var(--doc-surface-3, #27272a)',
+                    border: '1px solid var(--doc-border, #3f3f46)',
+                    cursor: 'pointer', textAlign: 'left', width: '100%',
+                    opacity: shareSheetCopying ? 0.6 : 1,
+                  }}
+                >
+                  <span style={{ fontSize: 22 }}>🔗</span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--doc-text, #f4f4f5)', marginBottom: 2 }}>
+                      {shareSheetCopying ? 'Copying…' : 'Copy public link'}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--doc-text-3, #71717a)' }}>Anyone with the link can view</div>
+                  </div>
+                </button>
+
+                {/* Export as PDF */}
+                <button
+                  onClick={() => { setShareSheetOpen(false); triggerPdfExport(); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 16,
+                    padding: '16px 20px', borderRadius: 12,
+                    background: 'var(--doc-surface-3, #27272a)',
+                    border: '1px solid var(--doc-border, #3f3f46)',
+                    cursor: 'pointer', textAlign: 'left', width: '100%',
+                  }}
+                >
+                  <span style={{ fontSize: 22 }}>⬇︎</span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--doc-text, #f4f4f5)', marginBottom: 2 }}>Export as PDF</div>
+                    <div style={{ fontSize: 12, color: 'var(--doc-text-3, #71717a)' }}>Download a print-ready document</div>
+                  </div>
+                </button>
+
+                {/* Open full editor */}
+                <button
+                  onClick={() => { setShareSheetOpen(false); editorInstanceRef.current?.commands.focus(); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 16,
+                    padding: '16px 20px', borderRadius: 12,
+                    background: 'transparent',
+                    border: '1px solid var(--doc-border, #3f3f46)',
+                    cursor: 'pointer', textAlign: 'left', width: '100%',
+                  }}
+                >
+                  <span style={{ fontSize: 22 }}>⛶</span>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--doc-text, #f4f4f5)', marginBottom: 2 }}>Open full editor</div>
+                    <div style={{ fontSize: 12, color: 'var(--doc-text-3, #71717a)' }}>Return focus to the document</div>
+                  </div>
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* SOP-to-Doc first-time coach card */}
+      <AnimatePresence>
+        {showFromSopCoach && (
+          <motion.div
+            key="sop-coach"
+            initial={{ opacity: 0, y: 16, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 16, scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 28, delay: 0.4 }}
+            style={{
+              position: 'fixed',
+              bottom: 28,
+              right: 28,
+              zIndex: 60,
+              width: 272,
+              background: 'var(--doc-surface-2, #1c1c1f)',
+              border: '1px solid var(--doc-border, #27272a)',
+              borderRadius: 14,
+              padding: '16px 16px 14px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.32)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--doc-text, #f4f4f5)', lineHeight: 1.3 }}>
+                Your SOP is now a document
+              </span>
+              <button
+                onClick={dismissCoach}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--doc-text-3, #71717a)', padding: '0 0 0 8px', lineHeight: 1, flexShrink: 0 }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <kbd style={{ fontSize: 10.5, fontFamily: 'monospace', background: 'var(--doc-surface-3, #27272a)', border: '1px solid var(--doc-border, #3f3f46)', borderRadius: 4, padding: '2px 5px', color: 'var(--doc-text-2, #a1a1aa)', flexShrink: 0 }}>⌘E</kbd>
+                <span style={{ fontSize: 12.5, color: 'var(--doc-text-2, #a1a1aa)' }}>Export as PDF</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <kbd style={{ fontSize: 10.5, fontFamily: 'monospace', background: 'var(--doc-surface-3, #27272a)', border: '1px solid var(--doc-border, #3f3f46)', borderRadius: 4, padding: '2px 5px', color: 'var(--doc-text-2, #a1a1aa)', flexShrink: 0 }}>⌘S</kbd>
+                <span style={{ fontSize: 12.5, color: 'var(--doc-text-2, #a1a1aa)' }}>Share a public link</span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

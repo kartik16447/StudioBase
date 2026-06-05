@@ -304,6 +304,17 @@
 .doc-btn-icon:hover { background: var(--doc-surface-2); color: var(--doc-text); }
 .doc-btn-icon.sm { width: 24px; height: 24px; }
 
+/* Keyboard shortcut hint — hidden by default, visible on parent hover */
+.doc-shortcut-hint {
+  display: none;
+  font-size: 10.5px;
+  color: var(--doc-text-3);
+  font-weight: 500;
+  margin-left: 4px;
+  letter-spacing: 0;
+}
+.doc-btn:hover .doc-shortcut-hint { display: inline; }
+
 /* Page tree */
 .doc-tree {
   flex: 1;

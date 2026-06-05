@@ -19,6 +19,9 @@ export interface StudioHeaderProps {
   onOpenInDocs?: () => void;
   isOpeningInDocs?: boolean;
   onSaveAsTemplate?: (data: { title: string; description: string; category: string; isGlobal: boolean }) => Promise<void>;
+  sopToDocPromptSeen?: boolean;
+  onMarkSopToDocSeen?: () => void;
+  onOpenInDocsFromSop?: () => void;
 }
 
 const zn = {
@@ -225,12 +228,16 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
   onOpenInDocs,
   isOpeningInDocs,
   onSaveAsTemplate,
+  sopToDocPromptSeen,
+  onMarkSopToDocSeen,
+  onOpenInDocsFromSop,
 }) => {
   const [showBranding, setShowBranding] = useState(false);
   const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
   const [templateForm, setTemplateForm] = useState({ title: '', description: '', category: 'feature-walkthrough', isGlobal: false });
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [showSessionMenu, setShowSessionMenu] = useState(false);
+  const [sopToDocDismissed, setSopToDocDismissed] = useState(false);
 
   const session = useStudioStore((s) => s.session);
   const brand = useStudioStore((s) => s.brand);
@@ -537,6 +544,46 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
                 >
                   Last published {publishedAt}
                 </motion.span>
+              )}
+            </AnimatePresence>
+
+            {/* SOP-to-Doc delight prompt — shown once after first publish */}
+            <AnimatePresence>
+              {publishedRecently && !sopToDocPromptSeen && !sopToDocDismissed && onOpenInDocs && (
+                <motion.div
+                  key="sop-to-doc-prompt"
+                  initial={{ opacity: 0, y: -6, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -6, scale: 0.97 }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 28, delay: 0.6 }}
+                  className="absolute right-4 top-[52px] z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl border border-blue-400/30 bg-blue-500/8 shadow-lg backdrop-blur-sm"
+                  style={{ minWidth: 320 }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <I.FileText size={15} className="text-blue-400 shrink-0" />
+                  <span className="text-[12.5px] text-text flex-1 leading-snug">
+                    Want a shareable document? Send this to Docs in one click.
+                  </span>
+                  <button
+                    className="h-7 px-3 rounded-lg bg-blue-500 text-white text-[12px] font-semibold hover:bg-blue-600 transition-colors shrink-0"
+                    onClick={() => {
+                      setSopToDocDismissed(true);
+                      onMarkSopToDocSeen?.();
+                      (onOpenInDocsFromSop ?? onOpenInDocs)?.();
+                    }}
+                  >
+                    Create Doc
+                  </button>
+                  <button
+                    className="text-[11.5px] text-text-3 hover:text-text transition-colors shrink-0 ml-1"
+                    onClick={() => {
+                      setSopToDocDismissed(true);
+                      onMarkSopToDocSeen?.();
+                    }}
+                  >
+                    Not now
+                  </button>
+                </motion.div>
               )}
             </AnimatePresence>
 

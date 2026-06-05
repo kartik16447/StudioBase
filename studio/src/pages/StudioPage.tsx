@@ -56,15 +56,19 @@ export const StudioPage: React.FC = () => {
   const [shareOpen, setShareOpen] = useState(false);
   const [isOpeningInDocs, setIsOpeningInDocs] = useState(false);
   const [isSeededSession, setIsSeededSession] = useState(false);
+  const [sopToDocPromptSeen, setSopToDocPromptSeen] = useState(true); // default true — only show when explicitly false
 
   useSessionManager();
 
   useEffect(() => {
     if (!session?.sessionId) return;
-    apiClient.get<{ seededSessionId: string | null }>('/onboarding/state')
+    apiClient.get<{ seededSessionId: string | null; sopToDocPromptSeen?: boolean }>('/onboarding/state')
       .then(data => {
         if (data?.seededSessionId && data.seededSessionId === session.sessionId) {
           setIsSeededSession(true);
+        }
+        if (typeof data?.sopToDocPromptSeen === 'boolean') {
+          setSopToDocPromptSeen(data.sopToDocPromptSeen);
         }
       })
       .catch(() => {});
@@ -152,7 +156,7 @@ export const StudioPage: React.FC = () => {
     );
   }
 
-  const handleOpenInDocs = async () => {
+  const handleOpenInDocs = async (fromSop = false) => {
     if (isOpeningInDocs || !session) return;
     setIsOpeningInDocs(true);
     try {
@@ -164,6 +168,11 @@ export const StudioPage: React.FC = () => {
         sourceSopId: session.sessionId,
       });
       setPendingDocId(doc.id);
+      if (fromSop) {
+        const search = new URLSearchParams(window.location.search);
+        search.set('fromSop', 'true');
+        window.history.replaceState({}, '', '?' + search.toString());
+      }
       setActiveTab('docs');
     } catch (err) {
       console.error('Failed to export SOP to Docs:', err);
@@ -189,8 +198,14 @@ export const StudioPage: React.FC = () => {
         onNavigateHome={() => navigate('home')}
         onShareClick={() => setShareOpen(true)}
         onSandboxExport={() => handleSOPVideoExport({ session, theme: useStudioStore.getState().brand, renderMode, masterAudioUrl })}
-        onOpenInDocs={handleOpenInDocs}
+        onOpenInDocs={() => handleOpenInDocs(false)}
+        onOpenInDocsFromSop={() => handleOpenInDocs(true)}
         isOpeningInDocs={isOpeningInDocs}
+        sopToDocPromptSeen={sopToDocPromptSeen}
+        onMarkSopToDocSeen={() => {
+          setSopToDocPromptSeen(true);
+          apiClient.patch('/onboarding/state', { sopToDocPromptSeen: true }).catch(() => {});
+        }}
         onSaveAsTemplate={async (data) => {
           const sessionId = session?.sessionId ?? (session as any)?.id;
           if (!sessionId) { showToast('error', 'No session loaded'); return; }

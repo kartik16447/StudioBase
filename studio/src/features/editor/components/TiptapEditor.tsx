@@ -22,6 +22,8 @@ interface TiptapEditorProps {
   onChange?: (json: JSONContent) => void;
   onEditorReady?: (editor: Editor) => void;
   editable?: boolean;
+  onOpenShareSheet?: () => void;
+  onTriggerPdfExport?: () => void;
 }
 
 interface SlashState {
@@ -30,7 +32,7 @@ interface SlashState {
   activeIdx: number;
 }
 
-export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onChange, onEditorReady, editable = true }) => {
+export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onChange, onEditorReady, editable = true, onOpenShareSheet, onTriggerPdfExport }) => {
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [tbTurnOpen, setTbTurnOpen] = useState(false);
   const [tbColorOpen, setTbColorOpen] = useState(false);
@@ -52,6 +54,12 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onCh
 
   // openLinkEditorRef: called by Mod-k to open the link popover in FloatingToolbar
   const openLinkEditorRef = useRef<() => void>(() => {});
+
+  // Share sheet and PDF export refs — always current, no stale-closure issues in KeyboardExtension
+  const openShareSheetRef = useRef<() => void>(() => {});
+  openShareSheetRef.current = onOpenShareSheet ?? (() => {});
+  const triggerPdfExportRef = useRef<() => void>(() => {});
+  triggerPdfExportRef.current = onTriggerPdfExport ?? (() => {});
   openLinkEditorRef.current = () => {
     setTbLinkOpen(true);
     setTbTurnOpen(false);
@@ -114,6 +122,14 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onCh
         },
         'Mod-k': () => {
           openLinkEditorRef.current();
+          return true;
+        },
+        'Mod-s': () => {
+          openShareSheetRef.current();
+          return true;
+        },
+        'Mod-e': () => {
+          triggerPdfExportRef.current();
           return true;
         },
         'Mod-Enter': () => {
