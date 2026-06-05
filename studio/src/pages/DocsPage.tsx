@@ -700,19 +700,15 @@ const DocsPageInner: React.FC = () => {
       {templateOpen && (
         <TemplateModal
           onClose={() => setTemplateOpen(false)}
-          onUse={async (templateId) => {
+          onUse={async (templateId, blocks) => {
             setTemplateOpen(false);
             try {
               let doc;
               if (templateId.startsWith('__')) {
-                // Starter template — create a blank doc with a matching title
-                const starterTitles: Record<string, string> = {
-                  '__creative-brief': 'Creative Brief',
-                  '__meeting-notes': 'Meeting Notes',
-                  '__decision-log': 'Decision Log',
-                  '__project-retro': 'Project Retro',
-                };
-                doc = await docsApi.create({ title: starterTitles[templateId] ?? 'Untitled' });
+                // Starter template — create doc with pre-built TipTap content
+                const { STARTER_TEMPLATES } = await import('../features/editor/data/starterTemplates');
+                const tpl = STARTER_TEMPLATES.find(t => t.id === templateId);
+                doc = await docsApi.create({ title: tpl?.name ?? 'Untitled', blocks: blocks ?? tpl?.blocks });
               } else {
                 doc = await docsApi.createFromTemplate(templateId);
               }

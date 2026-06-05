@@ -1,18 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import type { JSONContent } from '@tiptap/react';
 import { I } from '../../../components/icons';
 import { docsApi } from '../lib/docsApi';
 import type { ApiDocSummary } from '../lib/docsApi';
-
-const STARTER_TEMPLATES = [
-  { id: '__creative-brief', emoji: '📝', name: 'Creative brief' },
-  { id: '__meeting-notes', emoji: '🗒️', name: 'Meeting notes' },
-  { id: '__decision-log', emoji: '✅', name: 'Decision log' },
-  { id: '__project-retro', emoji: '🔁', name: 'Project retro' },
-];
+import { STARTER_TEMPLATES } from '../data/starterTemplates';
 
 interface TemplateModalProps {
   onClose: () => void;
-  onUse: (id: string) => void;
+  onUse: (id: string, blocks?: JSONContent[]) => void;
 }
 
 export const TemplateModal: React.FC<TemplateModalProps> = ({ onClose, onUse }) => {
@@ -35,6 +30,12 @@ export const TemplateModal: React.FC<TemplateModalProps> = ({ onClose, onUse }) 
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [tab]);
+
+  const handleUse = () => {
+    if (!selected) return;
+    const starter = STARTER_TEMPLATES.find(t => t.id === selected);
+    onUse(selected, starter?.blocks);
+  };
 
   return (
     <>
@@ -67,12 +68,17 @@ export const TemplateModal: React.FC<TemplateModalProps> = ({ onClose, onUse }) 
               onClick={() => setSelected(t.id)}
             >
               <div className="doc-template-preview">
-                <div style={{ fontSize: 28, textAlign: 'center', padding: '12px 0' }}>{t.emoji}</div>
-                <div className="doc-bar" style={{ width: '75%' }} />
+                <div style={{ fontSize: 28, textAlign: 'center', padding: '8px 0 4px' }}>{t.emoji}</div>
+                <div style={{ fontSize: 10, fontWeight: 600, textAlign: 'center', color: 'var(--doc-text-3)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{t.category.replace(/-/g, ' ')}</div>
+                <div className="doc-bar" style={{ width: '80%' }} />
+                <div className="doc-bar" style={{ width: '60%' }} />
                 <div className="doc-bar" style={{ width: '90%' }} />
               </div>
               <div className="doc-template-foot">
-                <span className="doc-template-name">{t.name}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span className="doc-template-name">{t.name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--doc-text-3)', lineHeight: 1.35 }}>{t.description}</span>
+                </div>
               </div>
             </div>
           ))}
@@ -111,7 +117,7 @@ export const TemplateModal: React.FC<TemplateModalProps> = ({ onClose, onUse }) 
           <button
             className="doc-btn doc-btn-primary"
             disabled={!selected}
-            onClick={() => selected && onUse(selected)}
+            onClick={handleUse}
           >
             Use template
           </button>
