@@ -457,33 +457,6 @@ const DocsPageInner: React.FC = () => {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Keyboard shortcuts
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const meta = e.metaKey || e.ctrlKey;
-      if (!meta) return;
-      const key = e.key.toLowerCase();
-      if (key === 'p' || key === 'k') {
-        e.preventDefault();
-        setSearchOpen(true);
-      }
-      // Cmd+S — share sheet (global: fires when editor is not focused)
-      if (key === 's') {
-        const active = document.activeElement;
-        const editorFocused = active && (active.classList.contains('ProseMirror') || active.closest('.ProseMirror'));
-        if (!editorFocused) { e.preventDefault(); openShareSheet(); }
-      }
-      // Cmd+E — PDF export (global: fires when editor is not focused)
-      if (key === 'e') {
-        const active = document.activeElement;
-        const editorFocused = active && (active.classList.contains('ProseMirror') || active.closest('.ProseMirror'));
-        if (!editorFocused) { e.preventDefault(); triggerPdfExport(); }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [openShareSheet, triggerPdfExport]);
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -578,6 +551,34 @@ const DocsPageInner: React.FC = () => {
     if (showFromSopCoach) dismissCoach();
     window.print();
   }, [showFromSopCoach, dismissCoach]);
+
+  // Keyboard shortcuts
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta) return;
+      const key = e.key.toLowerCase();
+      if (key === 'p' || key === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+      // Cmd+S — share sheet (global: fires when editor is not focused)
+      if (key === 's') {
+        const active = document.activeElement;
+        const editorFocused = active && (active.classList.contains('ProseMirror') || active.closest('.ProseMirror'));
+        if (!editorFocused) { e.preventDefault(); openShareSheet(); }
+      }
+      // Cmd+E — PDF export (global: fires when editor is not focused)
+      if (key === 'e') {
+        const active = document.activeElement;
+        const editorFocused = active && (active.classList.contains('ProseMirror') || active.closest('.ProseMirror'));
+        if (!editorFocused) { e.preventDefault(); triggerPdfExport(); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [openShareSheet, triggerPdfExport]);
 
   const handleCopyMarkdown = useCallback(() => {
     const blocks = editorInstanceRef.current?.getJSON()?.content ?? [];
@@ -784,7 +785,7 @@ const DocsPageInner: React.FC = () => {
                       const { shareUrl } = await docsApi.shareDoc(activeId);
                       await navigator.clipboard.writeText(shareUrl);
                       setShareSheetOpen(false);
-                      showToast('success', 'Layrd. Send it.');
+                      showToast('info', 'Layrd. Send it.');
                     } catch {
                       showToast('error', 'Failed to generate share link');
                     } finally {
