@@ -61,17 +61,24 @@ docs.post('/', requireWorkspaceMembership('editor'), async (c) => {
 
   const service = new DocumentService(c.env.DB);
   const sortOrder = await service.nextSortOrder(workspaceId, parsed.data.parentId);
-  const doc = await service.create({
-    id: crypto.randomUUID(),
-    workspaceId,
-    parentId: parsed.data.parentId,
-    title: parsed.data.title,
-    emoji: parsed.data.emoji,
-    blocks: parsed.data.blocks,
-    sortOrder,
-    userId: user.id,
-    sourceSopId: parsed.data.sourceSopId ?? null,
-  });
+
+  let doc;
+  try {
+    doc = await service.create({
+      id: crypto.randomUUID(),
+      workspaceId,
+      parentId: parsed.data.parentId,
+      title: parsed.data.title,
+      emoji: parsed.data.emoji,
+      blocks: parsed.data.blocks,
+      sortOrder,
+      userId: user.id,
+      sourceSopId: parsed.data.sourceSopId ?? null,
+    });
+  } catch (err: any) {
+    console.error('[docs.create] DB error:', err?.message ?? err);
+    return c.json({ error: err?.message ?? 'Failed to create document' }, 500);
+  }
 
   AuditService.record(c.env, {
     actorId: user.id,
