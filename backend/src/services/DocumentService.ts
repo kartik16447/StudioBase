@@ -117,11 +117,14 @@ export class DocumentService {
         now,
       )
       .run();
+    // Best-effort FTS body update — D1 FTS5 content tables don't support
+    // direct UPDATE; failures here are non-fatal, title search still works.
     const body = extractText(params.blocks);
     await this.db
       .prepare('UPDATE documents_fts SET body = ? WHERE id = ?')
       .bind(body, params.id)
-      .run();
+      .run()
+      .catch(() => {});
     return (await this.getById(params.id, params.workspaceId))!;
   }
 
@@ -161,7 +164,8 @@ export class DocumentService {
     await this.db
       .prepare('UPDATE documents_fts SET body = ? WHERE id = ?')
       .bind(body, id)
-      .run();
+      .run()
+      .catch(() => {});
 
     return (await this.getById(id, workspaceId))!;
   }

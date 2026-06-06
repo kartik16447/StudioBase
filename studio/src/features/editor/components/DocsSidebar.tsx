@@ -18,7 +18,7 @@ interface DocsSidebarProps {
   dropTarget?: { id: string; position: 'above' | 'below' } | null;
   showTemplates: boolean;
   setShowTemplates: (v: boolean) => void;
-  onUseTemplate?: (id: string, blocks?: JSONContent[]) => void;
+  onUseTemplate?: (id: string, blocks?: JSONContent[]) => Promise<void> | void;
   renamingId?: string | null;
   onRenameCommit?: (id: string, title: string) => void;
   onRenameCancel?: () => void;
@@ -37,14 +37,40 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
   onDragStart, onDragOver, onDrop, onDragEnd,
 }) => {
   const [sidebarTemplates, setSidebarTemplates] = useState<ApiDocSummary[]>([]);
+  const [previewTemplate, setPreviewTemplate] = useState<typeof STARTER_TEMPLATES[0] | null>(null);
+  const [creating, setCreating] = useState(false);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!showTemplates) return;
     docsApi.listTemplates().then(setSidebarTemplates).catch(() => {});
   }, [showTemplates]);
 
+  // Close preview on outside click
+  useEffect(() => {
+    if (!previewTemplate) return;
+    const onDown = (e: MouseEvent) => {
+      if (previewRef.current && !previewRef.current.contains(e.target as Node)) {
+        setPreviewTemplate(null);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [previewTemplate]);
+
+  const handleUseTemplate = async () => {
+    if (!previewTemplate || !onUseTemplate) return;
+    setCreating(true);
+    try {
+      await onUseTemplate(previewTemplate.id, previewTemplate.blocks);
+      setPreviewTemplate(null);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
-  <div className="docsside">
+  <div className="docsside" style={{ position: 'relative' }}>
     <div className="docsside-header">
       <button
         className="doc-btn doc-btn-subtle sm"
@@ -97,7 +123,8 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
               key={t.id}
               emoji={t.emoji}
               title={t.name}
-              onClick={() => onUseTemplate?.(t.id, t.blocks)}
+              active={previewTemplate?.id === t.id}
+              onClick={() => setPreviewTemplate(previewTemplate?.id === t.id ? null : t)}
             />
           ))}
           {sidebarTemplates.length > 0 && (
@@ -118,6 +145,88 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
         </>
       )}
     </div>
+
+    {/* Template preview panel — slides in above the sidebar */}
+    {previewTemplate && (
+      <div
+        ref={previewRef}
+        style={{
+          position: 'absolute',
+          left: '100%',
+          top: 0,
+          width: 280,
+          background: 'var(--doc-surface)',
+          border: '1px solid var(--doc-border)',
+          borderRadius: 10,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+          zIndex: 50,
+          marginLeft: 8,
+          padding: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 22 }}>{previewTemplate.emoji}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--doc-text)', lineHeight: 1.3 }}>{previewTemplate.name}</div>
+            <div style={{ fontSize: 11, color: 'var(--doc-text-3)', lineHeight: 1.4, marginTop: 2 }}>{previewTemplate.description}</div>
+          </div>
+        </div>
+
+        {/* Block preview — first 6 headings/paragraphs */}
+        <div style={{
+          background: 'var(--doc-bg)',
+          border: '1px solid var(--doc-border)',
+          borderRadius: 6,
+          padding: '10px 12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          maxHeight: 180,
+          overflow: 'hidden',
+        }}>
+          {previewTemplate.blocks
+            .filter(b => b.type === 'heading' || b.type === 'paragraph')
+            .slice(0, 7)
+            .map((b, i) => {
+              const text = (b.content as any)?.[0]?.text ?? '';
+              if (!text) return null;
+              const isH = b.type === 'heading';
+              const level = (b.attrs as any)?.level ?? 2;
+              return (
+                <div key={i} style={{
+                  fontSize: isH ? (level === 2 ? 11 : 10) : 10,
+                  fontWeight: isH ? 600 : 400,
+                  color: isH ? 'var(--doc-text)' : 'var(--doc-text-3)',
+                  lineHeight: 1.4,
+                  paddingLeft: isH ? 0 : 8,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {text}
+                </div>
+              );
+            })}
+          <div style={{ fontSize: 10, color: 'var(--doc-text-3)', opacity: 0.6, marginTop: 2 }}>
+            {previewTemplate.blocks.length} blocks
+          </div>
+        </div>
+
+        {/* CTA */}
+        <button
+          className="doc-btn doc-btn-primary"
+          style={{ width: '100%', justifyContent: 'center' }}
+          disabled={creating}
+          onClick={handleUseTemplate}
+        >
+          {creating ? 'Creating…' : 'Use this template'}
+        </button>
+      </div>
+    )}
   </div>
   );
 };
@@ -283,15 +392,16 @@ const PageNodeItem: React.FC<PageNodeItemProps> = ({
   );
 };
 
-const TemplateRow: React.FC<{ emoji: string; title: string; onClick?: () => void }> = ({ emoji, title, onClick }) => (
+const TemplateRow: React.FC<{ emoji: string; title: string; active?: boolean; onClick?: () => void }> = ({ emoji, title, active, onClick }) => (
   <div
-    className="doc-tree-item"
-    style={{ paddingLeft: 8, cursor: onClick ? 'pointer' : 'default' }}
+    className={`doc-tree-item${active ? ' active' : ''}`}
+    style={{ paddingLeft: 8, cursor: 'pointer', background: active ? 'var(--doc-hover)' : undefined }}
     onClick={onClick}
-    title={onClick ? `Create doc from "${title}"` : undefined}
+    title={`Preview "${title}"`}
   >
     <span className="doc-tree-expander empty" />
     <span className="doc-tree-icon">{emoji}</span>
-    <span className="doc-tree-title" style={{ color: 'var(--doc-text-2)' }}>{title}</span>
+    <span className="doc-tree-title" style={{ color: active ? 'var(--doc-text)' : 'var(--doc-text-2)' }}>{title}</span>
+    <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--doc-text-3)', paddingRight: 4 }}>›</span>
   </div>
 );
