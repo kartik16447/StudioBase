@@ -5,5 +5,13 @@
   "dependencies": {
     "@tiptap/extension-drag-handle-react": "^3.23.6",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "wrangler": "^4.98.0"
+  },
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   }
 }

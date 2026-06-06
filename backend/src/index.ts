@@ -28,6 +28,7 @@ import stepRoutes from './routes/v1/steps';
 import waitlistRoutes from './routes/v1/waitlist';
 import onboardingRoutes from './routes/v1/onboarding';
 import templateRoutes from './routes/v1/templates';
+import { webhookRoutes } from './routes/v1/webhooks';
 
 import { handleScheduled } from './handlers/scheduled';
 import { handleQueue } from './handlers/queue';
@@ -62,6 +63,7 @@ v1.route('/public', publicRoutes);
 v1.route('/waitlist', waitlistRoutes);
 v1.route('/onboarding', onboardingRoutes);
 v1.route('/templates', templateRoutes);
+v1.route('/webhooks', webhookRoutes);
 
 // Maintenance & Recovery (Governance hardened)
 v1.get('/maintenance/recovery', authMiddleware(), async (c) => {

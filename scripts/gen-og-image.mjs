@@ -1,34 +1,16 @@
 /**
  * Generates studio/public/og-image.png (1200×630) from an inline SVG.
- * Uses sharp from wrangler's node_modules — no extra install needed.
+ * Uses @resvg/resvg-js.
  * Run: node scripts/gen-og-image.mjs
  */
 
-import { createRequire } from 'module';
 import { writeFileSync }  from 'fs';
 import { fileURLToPath }  from 'url';
 import { dirname, resolve } from 'path';
+import { Resvg } from '@resvg/resvg-js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT       = resolve(__dirname, '../studio/public/og-image.png');
-
-// Resolve sharp from wrangler's subtree
-const require = createRequire(
-  resolve(__dirname, '../node_modules/.bin/wrangler')
-);
-let sharp;
-try {
-  sharp = require(resolve(
-    __dirname,
-    '../node_modules/wrangler/node_modules/miniflare/node_modules/sharp/lib/index.cjs'
-  ));
-} catch {
-  // Try alternate path
-  sharp = require(resolve(
-    __dirname,
-    '../node_modules/.pnpm/sharp@0.34.5/node_modules/sharp'
-  ));
-}
 
 const W = 1200;
 const H = 630;
@@ -143,9 +125,9 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" 
         font-size="14" font-weight="500" fill="rgba(255,255,255,0.30)">studiobase.app</text>
 </svg>`;
 
-const buf = await sharp(Buffer.from(svg))
-  .png()
-  .toBuffer();
+const resvg = new Resvg(svg);
+const pngData = resvg.render();
+const buf = pngData.asPng();
 
 writeFileSync(OUT, buf);
 console.log(`✓ og-image.png written (${W}×${H}) → ${OUT}`);

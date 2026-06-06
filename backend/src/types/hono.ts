@@ -19,6 +19,11 @@ export interface Env {
   ENVIRONMENT: 'production' | 'staging' | 'development';
   DEV_BYPASS_EMAIL?: string; // Only present in local dev via wrangler.jsonc [env.development] — never in production.
   ELEVENLABS_API_KEY?: string;
+  // Webhook secrets — set via wrangler secret put
+  VERCEL_TOKEN?: string;
+  VERCEL_WEBHOOK_SECRET?: string;
+  GITHUB_TOKEN?: string;
+  POLL_SECRET?: string;
 }
 
 export interface User {

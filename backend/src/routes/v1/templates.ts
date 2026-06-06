@@ -124,6 +124,24 @@ templates.post('/:id/use', requireWorkspaceMembership('editor'), async (c) => {
   return c.json({ sessionId, shareToken }, 201);
 });
 
+// GET /v1/templates/:id/json — return raw session JSON for doc conversion
+templates.get('/:id/json', requireWorkspaceMembership('viewer'), async (c) => {
+  const user = c.get('user');
+  const { id } = c.req.param();
+
+  const template = await c.env.DB.prepare(
+    `SELECT * FROM templates WHERE id = ? AND (isGlobal = 1 OR workspaceId = ?)`
+  ).bind(id, user.workspaceId).first() as any;
+
+  if (!template) throw new HTTPException(404, { message: 'Template not found' });
+
+  const obj = await c.env.R2.get(template.sessionJsonKey);
+  if (!obj) throw new HTTPException(404, { message: 'Template content not found in storage' });
+
+  const json = await obj.json();
+  return c.json(json);
+});
+
 // POST /v1/templates/:id/publish — set isGlobal = 1, admin only
 templates.post('/:id/publish', requireWorkspaceMembership('editor'), async (c) => {
   const user = c.get('user');

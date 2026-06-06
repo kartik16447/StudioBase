@@ -10,6 +10,8 @@ import { apiClient } from '../lib/apiClient';
 import { showToast } from '../components/GlobalToast';
 import { sessionManager } from '../lib/auth/sessionManager';
 import type { SessionEnvelope } from '../../../shared/types/session';
+import { docsApi } from '../features/editor/lib/docsApi';
+import { sopToTiptapContent } from '../features/sop/utils/sopToTiptapContent';
 
 interface BackendSession {
   id: string;
@@ -72,6 +74,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 export const HomePage: React.FC = () => {
   const navigate = useStudioStore(state => state.navigate);
   const setSession = useStudioStore(state => state.setSession);
+  const setPendingDocId = useStudioStore(state => state.setPendingDocId);
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [filter, setFilter] = useState<'all' | 'sop' | 'video'>('all');
   const [search, setSearch] = useState('');
@@ -257,11 +260,21 @@ export const HomePage: React.FC = () => {
   const useTemplate = async (templateId: string) => {
     setUsingTemplate(templateId);
     try {
-      const result = await apiClient.post<{ sessionId: string }>(`/templates/${templateId}/use`, {});
-      setSession(null);
-      navigate('studio', { sessionId: result.sessionId });
+      // 1. Fetch the raw session JSON stored in R2 for this template
+      const sessionJson = await apiClient.get<any>(`/templates/${templateId}/json`);
+
+      // 2. Convert session steps → TipTap blocks (same as Studio → Docs flow)
+      const title = sessionJson?.aiOutputs?.title || 'Untitled';
+      const blocks = sopToTiptapContent(title, sessionJson?.steps || [], sessionJson?.assets || {});
+
+      // 3. Create a new doc from those blocks
+      const doc = await docsApi.create({ title, blocks });
+
+      // 4. Open the doc in the Docs editor
+      setPendingDocId(doc.id);
+      navigate('docs');
     } catch (err: any) {
-      showToast(err.message || 'Failed to create session from template', 'error');
+      showToast(err.message || 'Failed to open template', 'error');
     } finally {
       setUsingTemplate(null);
     }
@@ -357,9 +370,12 @@ export const HomePage: React.FC = () => {
                           onClick={async () => {
                             setUsingOnboardingTemplate(t.id);
                             try {
-                              const result = await apiClient.post<{ sessionId: string }>(`/templates/${t.id}/use`, {});
-                              setSession(null);
-                              navigate('studio', { sessionId: result.sessionId });
+                              const sessionJson = await apiClient.get<any>(`/templates/${t.id}/json`);
+                              const title = sessionJson?.aiOutputs?.title || 'Untitled';
+                              const blocks = sopToTiptapContent(title, sessionJson?.steps || [], sessionJson?.assets || {});
+                              const doc = await docsApi.create({ title, blocks });
+                              setPendingDocId(doc.id);
+                              navigate('docs');
                             } catch (err: any) {
                               showToast(err.message || 'Failed to open template', 'error');
                               setUsingOnboardingTemplate(null);
