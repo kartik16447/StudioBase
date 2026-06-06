@@ -164,4 +164,20 @@ assets.get('/:key{.+}', authMiddleware(), async (c) => {
   });
 });
 
+// 7. Simple Image Upload for Docs editor
+assets.post('/image', authMiddleware(), async (c) => {
+  const user = c.get('user');
+  const formData = await c.req.formData();
+  const file = formData.get('file') as File | null;
+  if (!file) throw new HTTPException(400, { message: 'No file provided' });
+  const contentType = file.type || 'image/jpeg';
+  if (!contentType.startsWith('image/')) throw new HTTPException(400, { message: 'File must be an image' });
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const key = `doc-images/${user.id}/${crypto.randomUUID()}.${ext}`;
+  const service = new AssetService(c.env);
+  await service.put(key, await file.arrayBuffer(), contentType);
+  const origin = new URL(c.req.url).origin;
+  return c.json({ url: `${origin}/v1/assets/${key}` });
+});
+
 export default assets;

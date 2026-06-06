@@ -128,6 +128,14 @@ class ApiClient {
     return this.handleResponse<T>(res, path);
   }
 
+  async postForm<T>(path: string, body: FormData, options: RequestInit = {}): Promise<T> {
+    const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+    const headers = { ...this.getHeaders() } as Record<string, string>;
+    delete headers['Content-Type']; // let browser set multipart boundary
+    const res = await fetch(url, { ...options, method: 'POST', headers: { ...headers, ...options.headers as any }, body });
+    return this.handleResponse<T>(res, path);
+  }
+
   // Helper for R2 uploads (bypass JSON and versioning if needed)
   async upload(url: string, body: ArrayBuffer | Blob, contentType: string) {
     const res = await fetch(url, {

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { I } from '../../../components/icons';
 import type { ActiveFormats } from '../types';
+import { apiClient } from '../../../lib/apiClient';
 
 type BlockType = 'p' | 'h1' | 'h2' | 'h3' | 'bullet' | 'numbered' | 'check' | 'quote' | 'toggle' | 'code';
 
@@ -245,12 +246,15 @@ interface ImageInsertPopoverProps {
 }
 
 export const ImageInsertPopover: React.FC<ImageInsertPopoverProps> = ({ position, onSubmit, onClose }) => {
+  const [tab, setTab] = useState<'url' | 'upload'>('url');
   const [url, setUrl] = useState('https://');
+  const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 10);
-  }, []);
+    if (tab === 'url') setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 10);
+  }, [tab]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -260,7 +264,7 @@ export const ImageInsertPopover: React.FC<ImageInsertPopoverProps> = ({ position
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose]);
 
-  const handleSubmit = () => {
+  const handleUrlSubmit = () => {
     const trimmed = url.trim();
     if (trimmed && trimmed !== 'https://') {
       onSubmit(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
@@ -269,26 +273,73 @@ export const ImageInsertPopover: React.FC<ImageInsertPopoverProps> = ({ position
     }
   };
 
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const { url: imageUrl } = await apiClient.postForm<{ url: string }>('/assets/image', fd);
+      onSubmit(imageUrl);
+    } catch {
+      setUploading(false);
+    }
+  };
+
   return (
     <div
       className="doc-image-insert"
-      style={{ left: position.x, top: position.y }}
+      style={{ left: position.x, top: position.y, flexDirection: 'column', alignItems: 'stretch', gap: 6, minWidth: 240 }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <I.Image size={13} style={{ color: 'var(--doc-text-3)', flexShrink: 0 }} />
-      <input
-        ref={inputRef}
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        placeholder="Paste image URL…"
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') { e.preventDefault(); handleSubmit(); }
-          if (e.key === 'Escape') { e.preventDefault(); onClose(); }
-        }}
-      />
-      <button className="doc-tb-btn" title="Insert image" onMouseDown={(e) => { e.preventDefault(); handleSubmit(); }}>
-        <I.Check size={13} />
-      </button>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button
+          className="doc-tb-btn"
+          style={{ flex: 1, opacity: tab === 'url' ? 1 : 0.45, fontSize: 11 }}
+          onMouseDown={(e) => { e.preventDefault(); setTab('url'); }}
+        >URL</button>
+        <button
+          className="doc-tb-btn"
+          style={{ flex: 1, opacity: tab === 'upload' ? 1 : 0.45, fontSize: 11 }}
+          onMouseDown={(e) => { e.preventDefault(); setTab('upload'); }}
+        >Upload</button>
+      </div>
+      {tab === 'url' ? (
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <I.Image size={13} style={{ color: 'var(--doc-text-3)', flexShrink: 0 }} />
+          <input
+            ref={inputRef}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="Paste image URL…"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); handleUrlSubmit(); }
+              if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+            }}
+          />
+          <button className="doc-tb-btn" title="Insert image" onMouseDown={(e) => { e.preventDefault(); handleUrlSubmit(); }}>
+            <I.Check size={13} />
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
+          />
+          <button
+            className="doc-tb-btn"
+            style={{ flex: 1, fontSize: 11, opacity: uploading ? 0.5 : 1 }}
+            onMouseDown={(e) => { e.preventDefault(); if (!uploading) fileRef.current?.click(); }}
+          >
+            {uploading ? 'Uploading…' : 'Choose image…'}
+          </button>
+        </div>
+      )}
     </div>
   );
 };
