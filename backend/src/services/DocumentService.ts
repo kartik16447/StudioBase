@@ -207,7 +207,7 @@ export class DocumentService {
     const result = await this.db
       .prepare(
         `SELECT d.id, d.title, d.emoji,
-                snippet(documents_fts, 3, '<mark>', '</mark>', '…', 20) AS snippet,
+                snippet(documents_fts, 2, '<mark>', '</mark>', '…', 20) AS snippet,
                 bm25(documents_fts) AS rank
          FROM documents_fts
          JOIN documents d ON d.id = documents_fts.id
