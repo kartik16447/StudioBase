@@ -92,7 +92,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
             />
           )}
         </div>
-        <button className="doc-btn doc-btn-ghost sm" onClick={onShare} title="Share (⌘S)">
+        <button className="doc-btn doc-btn-ghost sm" onClick={() => onOpenShareSheet?.()} title="Share (⌘S)">
           <I.Share2 size={14} /> Share
           <span className="doc-shortcut-hint">⌘S</span>
         </button>

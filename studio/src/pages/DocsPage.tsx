@@ -527,16 +527,16 @@ const DocsPageInner: React.FC = () => {
   }
 
   const handleExportMarkdown = useCallback(() => {
-    const blocks = editorInstanceRef.current?.getJSON()?.content ?? [];
+    const blocks = (editorInstanceRef.current?.getJSON() ?? content).content ?? [];
     const md = blocksToMarkdown(blocks, title);
     triggerDownload(md, `${title || 'Untitled'}.md`, 'text/markdown');
-  }, [title]);
+  }, [content, title]);
 
   const handleExportPlainText = useCallback(() => {
-    const blocks = editorInstanceRef.current?.getJSON()?.content ?? [];
+    const blocks = (editorInstanceRef.current?.getJSON() ?? content).content ?? [];
     const txt = blocksToPlainText(blocks);
     triggerDownload(txt, `${title || 'Untitled'}.txt`, 'text/plain');
-  }, [title]);
+  }, [content, title]);
 
   const handleExportPDF = useCallback(() => {
     window.print();
@@ -581,10 +581,10 @@ const DocsPageInner: React.FC = () => {
   }, [openShareSheet, triggerPdfExport]);
 
   const handleCopyMarkdown = useCallback(() => {
-    const blocks = editorInstanceRef.current?.getJSON()?.content ?? [];
+    const blocks = (editorInstanceRef.current?.getJSON() ?? content).content ?? [];
     const md = blocksToMarkdown(blocks, title);
     navigator.clipboard.writeText(md).catch(() => {});
-  }, [title]);
+  }, [content, title]);
 
   // ---------------------------------------------------------------------------
   // Render

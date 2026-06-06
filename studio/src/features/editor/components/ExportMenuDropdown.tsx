@@ -26,7 +26,7 @@ export const ExportMenuDropdown: React.FC<ExportMenuDropdownProps> = ({
   return (
     <div
       className="doc-menu doc-export-menu"
-      style={{ right: 0, top: 'calc(100% + 6px)' }}
+      style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)' }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="doc-menu-item" onClick={handle(onMarkdown)}>
