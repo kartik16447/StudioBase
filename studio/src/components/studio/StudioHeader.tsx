@@ -500,7 +500,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
                 ) : (
                   <I.FileText size={14} />
                 )}
-                <span className="hidden lg:inline">{isOpeningInDocs ? 'Creating…' : 'Open in Docs'}</span>
+                <span className="hidden xl:inline">{isOpeningInDocs ? 'Creating…' : 'Open in Docs'}</span>
               </button>
             )}
 
@@ -517,7 +517,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
                 title="Open share preview in new tab"
               >
                 <I.Eye size={14} />
-                <span className="hidden lg:inline">Preview</span>
+                <span className="hidden xl:inline">Preview</span>
               </button>
             )}
 

@@ -129,6 +129,9 @@ export const ScriptPanel: React.FC = () => {
                 saveStep(step.id, { textOverride: text }).catch(err =>
                   console.warn('[ScriptPanel] saveStep failed:', err),
                 );
+                // Clear stale audio whenever the script text changes
+                updateStep(step.id, { voiceoverKey: null, voiceoverDurationMs: null } as any);
+                saveStep(step.id, { voiceoverKey: null, voiceoverDurationMs: null } as any).catch(() => {});
               }}
               innerRef={el => { if (el) stepRefs.current.set(step.id, el); else stepRefs.current.delete(step.id); }}
             />
@@ -326,8 +329,11 @@ const ScriptStepRow: React.FC<{
             <span className="text-[11px] text-text-2 font-mono truncate max-w-[140px] opacity-70">
               · {step.data?.context === 'desktop' ? '◎ Desktop Activity' : (step.elementText || 'Browser Tab')}
             </span>
-            {step.textOverride && (
-              <div className="w-1 h-1 rounded-full bg-primary ml-auto" title="Manually edited" />
+            {step.textOverride && step.voiceoverKey && (
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-auto shrink-0" title="Text edited — audio needs regeneration" />
+            )}
+            {step.textOverride && !step.voiceoverKey && (
+              <div className="w-1 h-1 rounded-full bg-primary ml-auto shrink-0" title="Manually edited" />
             )}
           </header>
           

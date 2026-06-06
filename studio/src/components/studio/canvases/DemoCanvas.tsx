@@ -594,7 +594,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
                   onMouseDown={(e) => onOverlayMouseDown(e, ov.id)}
                   style={{ position: 'absolute', left: `${ov.pctX}%`, top: `${ov.pctY}%`, transform: 'translate(-50%,-50%)', zIndex: selected ? 30 : 22, cursor: 'pointer' }}>
                   {ov.type === 'hotspot' && !ov.invisible && (
-                    <Hotspot style={hotspotStyle} brand={brand} size={20} handles={selected} />
+                    <Hotspot style={hotspotStyle} brand={brand} size={20} handles={false} />
                   )}
                 </div>
               );
@@ -823,7 +823,7 @@ function ContentPanel({ step, stepIndex, brand, onSave }: {
   const nonTextCards = cards.filter((c) => c.type !== 'text');
 
   return (
-    <div className="dm-scroll" style={{ width: 340, flex: 'none', borderLeft: `1px solid ${zn.border}`, background: zn.bg, padding: 14, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 11, position: 'relative' }}>
+    <div className="dm-scroll" style={{ width: 340, flex: 'none', borderLeft: `1px solid ${zn.border}`, background: zn.bg, padding: '20px 14px 14px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 11, position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ fontSize: 13.5, fontWeight: 700, color: zn.ink }}>Step content</span>
         <span style={{ fontSize: 11, color: zn.dim }}>Step {stepIndex + 1}</span>
