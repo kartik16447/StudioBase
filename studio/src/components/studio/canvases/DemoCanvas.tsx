@@ -477,7 +477,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
   const calloutCards = cards.filter((c) => c.type === 'callout' && c.rect);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: zn.bg, position: 'relative' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: '#0d0d14', position: 'relative' }}>
       <DotGrid className="!fixed" glowRadius={RenderConstants.GLOW_RADIUS} />
       {/* Floating hint chip when a tool is active */}
       {activeTool && (
