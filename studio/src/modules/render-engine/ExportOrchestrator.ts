@@ -34,15 +34,18 @@ export async function handleSOPVideoExport(config: {
   const steps = session?.steps || [];
 
   // ── Health checks ─────────────────────────────────────────────────────────
+  const isHybrid = renderMode === 'hybrid';
   try {
     const videoKey = (session as any)?.videoKey || 'screen-recording';
     const videoUrl = session?.assets?.[videoKey] || session?.assets?.['video'] || '';
-    console.log('[Export] Performing health checks. Video URL:', videoUrl);
-    if (!videoUrl) throw new Error('Video asset URL missing. Cannot export.');
-    const check = await fetch(videoUrl, { method: 'HEAD' });
-    if (!check.ok) throw new Error(`Video asset unavailable (${check.status})`);
-    if (!(window as any).VideoDecoder)
-      throw new Error('WebCodecs (VideoDecoder) not supported in this browser.');
+    console.log('[Export] Performing health checks. Video URL:', videoUrl, 'hybrid:', isHybrid);
+    if (isHybrid) {
+      if (!videoUrl) throw new Error('Video asset URL missing. Cannot export in hybrid mode.');
+      const check = await fetch(videoUrl, { method: 'HEAD' });
+      if (!check.ok) throw new Error(`Video asset unavailable (${check.status})`);
+      if (!(window as any).VideoDecoder)
+        throw new Error('WebCodecs (VideoDecoder) not supported in this browser.');
+    }
     console.log('[Export] Health checks passed successfully.');
   } catch (err: any) {
     console.error('[Export] Health check failed:', err);
@@ -143,9 +146,11 @@ export async function handleSOPVideoExport(config: {
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
     recorder.start(500);
 
-    console.log('[Export] Initializing WorkerExtractor...');
-    extractor = new WorkerExtractor();
-    await extractor.init(videoUrl);
+    if (isHybrid) {
+      console.log('[Export] Initializing WorkerExtractor...');
+      extractor = new WorkerExtractor();
+      await extractor.init(videoUrl);
+    }
 
     const renderer = new CanvasRenderer();
     const fps      = RenderConstants.EXPORT_FPS;
@@ -155,7 +160,7 @@ export async function handleSOPVideoExport(config: {
       : session?.capturedAt          ? new Date(session.capturedAt).getTime()
       : (steps[0]?.timestamp || 0);
 
-    const maxDuration = extractor.getDuration();
+    const maxDuration = extractor?.getDuration() ?? 0;
     console.log('[Export] WorkerExtractor initialized. Video duration:', maxDuration, 'ms. sessionStartTime:', sessionStartTime);
 
     const getFrameSafe = async (targetMs: number, retries = 2) => {
@@ -191,10 +196,23 @@ export async function handleSOPVideoExport(config: {
     let velX = 0, velY = 0, velScale = 0;
 
     let absLastLoggedMs = -1;
-    let masterFrame: ImageBitmap | null = null;
+    let masterFrame: ImageBitmap | HTMLImageElement | null = null;
+
+    // ── Preload screenshots for slideshow mode ─────────────────────────────
+    const screenshotImgCache = new Map<string, HTMLImageElement>();
+    const loadImg = (url: string): Promise<HTMLImageElement> => {
+      if (screenshotImgCache.has(url)) return Promise.resolve(screenshotImgCache.get(url)!);
+      return new Promise((res) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => { screenshotImgCache.set(url, img); res(img); };
+        img.onerror = () => res(img);
+        img.src = url;
+      });
+    };
 
     // ── Build Timeline (Compiler) ──────────────────────────────────────────
-    const hasVideo = renderMode === 'hybrid' && !!videoUrl;
+    const hasVideo = isHybrid && !!extractor;
     console.log('[Export] Building timeline with hasVideo:', hasVideo);
     const timeline = buildTimeline(steps, hasVideo, sessionStartTime);
     console.log('[Export] Compiled Timeline:', {
@@ -333,6 +351,15 @@ export async function handleSOPVideoExport(config: {
       springY = sy.value; velY = sy.velocity;
       springScale = ss.value; velScale = ss.velocity;
 
+      // ── Slideshow screenshot (no source video) ─────────────────────────
+      if (!hasVideo && step) {
+        const ssKey = step.screenshotKey;
+        const ssUrl = ssKey ? (session?.assets?.[ssKey] ?? '') : '';
+        if (ssUrl && (!masterFrame || (masterFrame as HTMLImageElement).src !== ssUrl)) {
+          masterFrame = await loadImg(ssUrl);
+        }
+      }
+
       // ── Frame Extraction (Timeline Sync) ───────────────────────────────
       if (hasVideo && extractor && timeline.videoTrack) {
         const clips = timeline.videoTrack.clips;
@@ -353,7 +380,7 @@ export async function handleSOPVideoExport(config: {
           if (!masterFrame || (safeMs - absLastLoggedMs) >= 30) {
             const newFrame = await getFrameSafe(targetSourceMs);
             if (newFrame) {
-              masterFrame?.close();
+              (masterFrame as ImageBitmap | null)?.close?.();
               masterFrame = newFrame;
               absLastLoggedMs = safeMs;
             }
@@ -400,7 +427,7 @@ export async function handleSOPVideoExport(config: {
         overlay.innerText = `🎬 Exporting… ${pct}%`;
       }
     }
-    masterFrame?.close();
+    (masterFrame as ImageBitmap | null)?.close?.();
 
     // ── Outro slide (3 s) ──────────────────────────────────────────────────
     if (brand.showOutro) {
