@@ -173,7 +173,7 @@ export const StudioPage: React.FC = () => {
         search.set('fromSop', 'true');
         window.history.replaceState({}, '', '?' + search.toString());
       }
-      setActiveTab('docs');
+      navigate('docs');
     } catch (err) {
       console.error('Failed to export SOP to Docs:', err);
       showToast('error', 'Failed to create doc. Please try again.');

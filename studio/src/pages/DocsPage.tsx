@@ -673,11 +673,16 @@ const DocsPageInner: React.FC = () => {
       )}
 
       {!activeId && !loading && (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'var(--doc-text-3)' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, color: 'var(--doc-text-3)' }}>
           <p style={{ fontSize: 14 }}>No document selected</p>
-          <button className="doc-btn doc-btn-subtle sm" onClick={() => handleNewDoc()}>
-            + New Doc
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="doc-btn doc-btn-subtle sm" onClick={() => handleNewDoc()}>
+              + New Doc
+            </button>
+            <button className="doc-btn doc-btn-subtle sm" onClick={() => setTemplateOpen(true)}>
+              Browse templates
+            </button>
+          </div>
         </div>
       )}
 
