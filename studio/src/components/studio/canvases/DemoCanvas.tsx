@@ -342,7 +342,7 @@ function CalloutCard({
 
 const HS_SIZES = [{ label: 'S', v: 14 }, { label: 'M', v: 20 }, { label: 'L', v: 28 }];
 
-function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, activeTool, onPlaceOverlay, onClearTool, selectedOverlayId, onSelectOverlay, onUpdateOverlay }: {
+function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, activeTool, onPlaceOverlay, onClearTool, selectedOverlayId, onSelectOverlay, onUpdateOverlay, showChrome }: {
   step: any; session: any; brand: string; hotspotStyle: HotspotStyle;
   onUpdateHotspot: (pctX: number, pctY: number, hotspotSize?: number, zoomScale?: number) => void;
   activeTool: OverlayTool | null;
@@ -351,6 +351,8 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
   selectedOverlayId: string | null;
   onSelectOverlay: (id: string | null) => void;
   onUpdateOverlay?: (patch: Partial<Overlay>, overlayId?: string) => void;
+  showChrome: boolean;
+  focusBodyRef?: React.MutableRefObject<(() => void) | null>;
 }) {
   const coords  = step?.coordinates;
   const rawX    = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : 50;
@@ -496,14 +498,16 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
       <div style={{ flex: 1, display: 'grid', placeItems: 'center', padding: '34px 40px', minHeight: 0, position: 'relative', zIndex: 10 }}>
         <div style={{ width: '100%', maxWidth: 760, borderRadius: 12, overflow: 'hidden', boxShadow: '0 30px 70px -24px rgba(0,0,0,0.8)', border: `1px solid ${zn.border2}` }}>
           {/* Browser chrome */}
-          <div style={{ height: 34, background: zn.panel2, display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', borderBottom: `1px solid ${zn.border}` }}>
-            <span style={{ display: 'flex', gap: 6 }}>
-              {['#ff5f57', '#febc2e', '#28c840'].map((c) => <span key={c} style={{ width: 11, height: 11, borderRadius: '50%', background: c }} />)}
-            </span>
-            <div style={{ marginLeft: 10, flex: 1, maxWidth: 320, height: 20, borderRadius: 6, background: zn.panel, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, color: zn.dim }}>
-              <I.Link size={11} /> {step?.url?.replace(/^https?:\/\//, '').substring(0, 40) || 'app.example.com'}
+          {showChrome && (
+            <div style={{ height: 34, background: zn.panel2, display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', borderBottom: `1px solid ${zn.border}` }}>
+              <span style={{ display: 'flex', gap: 6 }}>
+                {['#ff5f57', '#febc2e', '#28c840'].map((c) => <span key={c} style={{ width: 11, height: 11, borderRadius: '50%', background: c }} />)}
+              </span>
+              <div style={{ marginLeft: 10, flex: 1, maxWidth: 320, height: 20, borderRadius: 6, background: zn.panel, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, color: zn.dim }}>
+                <I.Link size={11} /> {step?.url?.replace(/^https?:\/\//, '').substring(0, 40) || 'app.example.com'}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Screenshot + overlays */}
           <div
@@ -522,15 +526,8 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
             }}
             onDoubleClick={(e) => {
               if (activeTool) return;
-              if (!screenshotRef.current) return;
               e.stopPropagation();
-              const rect = screenshotRef.current.getBoundingClientRect();
-              const x = ((e.clientX - rect.left) / rect.width) * 100;
-              const y = ((e.clientY - rect.top) / rect.height) * 100;
-              useStudioStore.getState().setActiveTool('hotspot');
-              setTimeout(() => {
-                onPlaceOverlay(x, y);
-              }, 0);
+              focusBodyRef?.current?.();
             }}
             style={{ position: 'relative', aspectRatio: '16/9', background: '#fff', userSelect: 'none', cursor: activeTool ? 'crosshair' : 'default' }}
           >
@@ -765,13 +762,18 @@ function SortableCardBlock({ card, brand, onChange, onDelete }: {
 
 // ─── Content panel ────────────────────────────────────────────────────────────
 
-function ContentPanel({ step, stepIndex, brand, onSave }: {
+function ContentPanel({ step, stepIndex, brand, onSave, focusBodyRef }: {
   step: any; stepIndex: number; brand: string;
   onSave: (updates: { stepTitle?: string | null; textOverride?: string | null; cards?: DemoCard[] }) => void;
+  focusBodyRef?: React.MutableRefObject<(() => void) | null>;
 }) {
   const [picker, setPicker]   = useState(false);
   const [title,  setTitle]    = useState(step?.stepTitle || '');
   const [body,   setBody]     = useState(displayText(step?.textOverride || step?.generatedText) || '');
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
+  React.useEffect(() => {
+    if (focusBodyRef) focusBodyRef.current = () => bodyRef.current?.focus();
+  });
   const [cards,  setCards]    = useState<DemoCard[]>(step?.cards ?? []);
 
   // Sync local state when step changes
@@ -849,7 +851,7 @@ function ContentPanel({ step, stepIndex, brand, onSave }: {
           </span>
         </div>
         <div style={{ padding: 11 }}>
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} onBlur={() => saveAll()} rows={3} placeholder="Describe what's happening…" style={{ ...inputStyle, lineHeight: 1.5 }} />
+          <textarea ref={bodyRef} value={body} onChange={(e) => setBody(e.target.value)} onBlur={() => saveAll()} rows={3} placeholder="Describe what's happening…" style={{ ...inputStyle, lineHeight: 1.5 }} />
         </div>
       </div>
 
@@ -916,10 +918,11 @@ function EndScreenEditor({ brand }: { brand: string }) {
   );
 }
 
-function BottomBar({ current, total, brand, onPrev, onNext, onStylePicker, transitionStyle, onTransitionChange }: {
+function BottomBar({ current, total, brand, onPrev, onNext, onStylePicker, transitionStyle, onTransitionChange, showChrome, onToggleChrome }: {
   current: number; total: number; brand: string;
   onPrev: () => void; onNext: () => void; onStylePicker: () => void;
   transitionStyle: 'cut' | 'crossfade'; onTransitionChange: (s: 'cut' | 'crossfade') => void;
+  showChrome: boolean; onToggleChrome: () => void;
 }) {
   return (
     <div style={{ height: 46, flex: 'none', borderTop: `1px solid ${zn.border}`, background: zn.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '0 16px', position: 'relative' }}>
@@ -927,6 +930,10 @@ function BottomBar({ current, total, brand, onPrev, onNext, onStylePicker, trans
         <button onClick={onStylePicker} title="Hotspot style"
           style={{ height: 28, padding: '0 10px', borderRadius: 7, border: `1px solid ${zn.border}`, background: 'transparent', color: zn.mute, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
           <I.Cursor size={13} /> Hotspot style
+        </button>
+        <button onClick={onToggleChrome} title={showChrome ? 'Hide browser chrome' : 'Show browser chrome'}
+          style={{ height: 28, padding: '0 10px', borderRadius: 7, border: `1px solid ${zn.border}`, background: showChrome ? zn.chip : 'transparent', color: zn.mute, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <I.Globe size={13} /> Chrome
         </button>
         {/* Transition style picker */}
         <div style={{ display: 'flex', alignItems: 'center', background: zn.panel2, borderRadius: 7, border: `1px solid ${zn.border}`, padding: 2, gap: 2 }}>
@@ -976,6 +983,8 @@ export const DemoCanvas: React.FC = () => {
   const [current,            setCurrent]           = useState(0);
   const [hotspotStyle,       setHotspotStyle]      = useState<HotspotStyle>('pulse');
   const [showHsPicker,       setShowHsPicker]      = useState(false);
+  const [showChrome,         setShowChrome]        = useState(true);
+  const focusBodyRef = React.useRef<(() => void) | null>(null);
 
   const activeToolState = useStudioStore((s) => s.activeTool);
   const setActiveToolState = useStudioStore((s) => s.setActiveTool);
@@ -1004,6 +1013,23 @@ export const DemoCanvas: React.FC = () => {
     return () => clearInterval(t);
   }, [savedAutoplay, total, autoplayInterval]);
 
+  // Arrow key step navigation (skip when typing in an input/textarea)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement as HTMLElement)?.isContentEditable) return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCurrent((c) => Math.min(total - 1, c + 1));
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCurrent((c) => Math.max(0, c - 1));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [total]);
+
   if (!session) return (
     <div style={{ flex: 1, display: 'grid', placeItems: 'center', background: zn.bg, color: zn.dim, fontSize: 13 }}>
       No steps yet
@@ -1024,7 +1050,7 @@ export const DemoCanvas: React.FC = () => {
         </div>
         <EndScreenEditor brand={brand} />
       </div>
-      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(steps.length, c + 1))} onStylePicker={() => setShowHsPicker(true)} transitionStyle={transitionStyle} onTransitionChange={saveTransitionStyle} />
+      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(steps.length, c + 1))} onStylePicker={() => setShowHsPicker(true)} transitionStyle={transitionStyle} onTransitionChange={saveTransitionStyle} showChrome={showChrome} onToggleChrome={() => setShowChrome((v) => !v)} />
     </div>
   );
 
@@ -1087,7 +1113,7 @@ export const DemoCanvas: React.FC = () => {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }} onClick={() => setSelectedOverlayId(null)}>
           <StepRail current={current} setCurrent={setCurrent} brand={brand} session={session} selectedChapterId={selectedChapterId} onSelectChapter={setSelectedChapterId} />
-          <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} onClearTool={() => setActiveTool(null)} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} onUpdateOverlay={handleOverlayUpdate} />
+          <BrowserMock step={step} session={session} brand={brand} hotspotStyle={hotspotStyle} onUpdateHotspot={handleUpdateHotspot} activeTool={activeTool} onPlaceOverlay={handlePlaceOverlay} onClearTool={() => setActiveTool(null)} selectedOverlayId={selectedOverlayId} onSelectOverlay={setSelectedOverlayId} onUpdateOverlay={handleOverlayUpdate} showChrome={showChrome} focusBodyRef={focusBodyRef} />
           <AnimatePresence mode="wait">
             {selectedChapterId ? (
               <motion.div key={`chapter-${selectedChapterId}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -1115,7 +1141,7 @@ export const DemoCanvas: React.FC = () => {
                 transition={{ duration: 0.15 }}
                 style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
               >
-                <ContentPanel step={step} stepIndex={current} brand={brand} onSave={handleSave} />
+                <ContentPanel step={step} stepIndex={current} brand={brand} onSave={handleSave} focusBodyRef={focusBodyRef} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -1133,7 +1159,7 @@ export const DemoCanvas: React.FC = () => {
           )}
         </div>
       </div>
-      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(total - 1, c + 1))} onStylePicker={() => setShowHsPicker(true)} transitionStyle={transitionStyle} onTransitionChange={saveTransitionStyle} />
+      <BottomBar current={current} total={total} brand={brand} onPrev={() => setCurrent((c) => Math.max(0, c - 1))} onNext={() => setCurrent((c) => Math.min(total - 1, c + 1))} onStylePicker={() => setShowHsPicker(true)} transitionStyle={transitionStyle} onTransitionChange={saveTransitionStyle} showChrome={showChrome} onToggleChrome={() => setShowChrome((v) => !v)} />
 
       {/* Preview modal */}
       {showPreview && (
