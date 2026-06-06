@@ -165,7 +165,7 @@ function startDrag(e: MouseEvent): void {
     toolbarContainer.style.top  = (dragOriginTop  + dy) + 'px';
   };
 
-  dragUpHandler = () => {
+  dragUpHandler = (me: MouseEvent) => {
     dragActive = false;
     document.body.style.userSelect = '';
     document.removeEventListener('mousemove', dragMoveHandler!, true);
@@ -173,11 +173,22 @@ function startDrag(e: MouseEvent): void {
     dragMoveHandler = null;
     dragUpHandler   = null;
 
-    // Snap to nearest edge
     if (!toolbarContainer) return;
-    const r  = toolbarContainer.getBoundingClientRect();
-    const cx = r.left + r.width  / 2;
-    const cy = r.top  + r.height / 2;
+
+    // Ignore accidental clicks on the drag handle — require at least 8px of movement
+    const movedX = Math.abs(me.clientX - dragStartX);
+    const movedY = Math.abs(me.clientY - dragStartY);
+    if (movedX < 8 && movedY < 8) {
+      // Restore original position — no snap
+      applyContainerPosition();
+      renderPill();
+      return;
+    }
+
+    // Snap to nearest edge using cursor release position (not pill center).
+    // This is more intuitive: drop near top → snaps top, regardless of pill width.
+    const cx = me.clientX;
+    const cy = me.clientY;
     const W  = window.innerWidth;
     const H  = window.innerHeight;
 

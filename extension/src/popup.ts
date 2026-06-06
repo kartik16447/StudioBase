@@ -486,7 +486,7 @@ btnNewRecording.addEventListener("click", () => {
     chrome.tabs.query({ active: true, windowId: win.id }, (tabs) => {
       const tab = tabs[0];
       sbLog("RECORD_TAB", { tabId: tab?.id, tabTitle: tab?.title, tabUrl: tab?.url });
-      startCountdown({ tabId: tab?.id, tabTitle: tab?.title || tab?.url || "" });
+      startCountdown({ tabId: tab?.id, tabTitle: tab?.title || "", tabUrl: tab?.url || "" });
     });
   });
 });

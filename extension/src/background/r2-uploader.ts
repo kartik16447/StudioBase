@@ -43,6 +43,7 @@ export async function initSession(session: Session): Promise<{ activeSessionId: 
       workspaceId: auth.resolvedWorkspaceId,
       tabUrl: session.tabUrl,
       title: session.title || session.tabUrl || undefined,
+      capturedTitle: session.title || undefined,
       capturedUrl: session.tabUrl || undefined,
       startedAt: session.startedAt,
       endedAt: session.endedAt,
