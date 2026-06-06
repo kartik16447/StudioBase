@@ -34,7 +34,6 @@ function queueEvent(task: () => Promise<void>, dedupeKey?: string) {
   if (dedupeKey) {
     const now = Date.now();
     if (lastEventLog[dedupeKey] && now - lastEventLog[dedupeKey] < 500) {
-      console.log(`🚫 [ServiceWorker] Deduplicated rapid-fire event: ${dedupeKey}`);
       return eventQueue;
     }
     lastEventLog[dedupeKey] = now;
@@ -110,15 +109,11 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
   
   // If windowId is -1, it means focus is completely outside of Chrome
   const isChromeFocused = windowId !== chrome.windows.WINDOW_ID_NONE;
-  
-  console.log(`🧭 [ServiceWorker] Focus changed. Chrome focused: ${isChromeFocused}`);
-  
+
   if (!isChromeFocused) {
     // Snap-on-Exit: Grab the frame immediately and save an explicit anchor
     queueEvent(async () => {
       if (state.status !== "recording" || !state.sessionId) return;
-      
-      console.log("🧭 [ServiceWorker] Focus lost. Triggering explicit Desktop Anchor...");
       // Trigger the offscreen buffer
       await chrome.runtime.sendMessage({ type: 'CAPTURE_CURRENT_FRAME_NOW' }).catch(() => {});
       
@@ -138,12 +133,11 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
           type: 'desktop_anchor',
           timestamp: Date.now(),
           selector: "",
-          data: { 
+          data: {
             screenshotKey: `screenshots/${state.sessionId}/${stepIndex}.jpg`,
             context: 'desktop'
           },
         });
-        console.log("✅ [ServiceWorker] Explicitly saved Desktop Anchor:", stepIndex);
       }
     }, 'focus_lost');
   }
@@ -180,7 +174,6 @@ chrome.runtime.onMessage.addListener(
     }
 
     if (msg.type === 'OFFSCREEN_READY') {
-      console.log("🚀 [ServiceWorker] Offscreen is ready for frame capture.");
       isOffscreenReady = true;
       return false;
     }
@@ -195,11 +188,6 @@ chrome.runtime.onMessage.addListener(
 
         queueEvent(async () => {
           if (!state.sessionId) return;
-          console.log("📥 [SW Audit] Received Desktop Event from Offscreen:", {
-            eventType,
-            hasBlob: !!blob,
-            blobSize: blob?.size
-          });
 
           const handleCapture = async () => {
             if (blob && state.sessionId) {
@@ -290,9 +278,8 @@ chrome.runtime.onMessage.addListener(
       case 'SAVE_CHUNK':
         if (msg.sessionId && msg.base64data) {
           fetch(msg.base64data).then(res => res.blob()).then(blob => {
-            console.log(`💾 [ServiceWorker] Chunk received: ${blob.size} bytes`);
             saveChunk(msg.sessionId, msg.index, blob).catch(err => {
-              console.error("💾 [ServiceWorker] Failed to save video chunk:", err);
+              console.error("[StudioBase] Failed to save video chunk:", err);
             });
           });
         }
@@ -310,7 +297,6 @@ async function captureCurrentStep(sessionId: string, stepIndex: number) {
 
   if (ENABLE_OFFSCREEN_CAPTURE && isOffscreenReady) {
     try {
-      console.log(`📸 [ServiceWorker] Requesting frame from offscreen for step ${stepIndex}`);
       // Timeout the message just in case offscreen is frozen
       const responsePromise = chrome.runtime.sendMessage({ type: 'GET_FRAME' });
       const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject('timeout'), 2000));
@@ -321,8 +307,6 @@ async function captureCurrentStep(sessionId: string, stepIndex: number) {
         const res = await fetch(response.base64data);
         blob = await res.blob();
         captureSource = 'offscreen';
-      } else {
-        console.log("📸 [ServiceWorker] Offscreen capture returned no base64data, falling back...");
       }
     } catch (err) {
       console.error("📸 [ServiceWorker] Offscreen capture failed:", err);
@@ -332,7 +316,6 @@ async function captureCurrentStep(sessionId: string, stepIndex: number) {
   // Fallback to captureVisibleTab if offscreen fails or is disabled
   if (!blob) {
     try {
-      console.log(`⚠️ [ServiceWorker] Using fallback captureVisibleTab for step ${stepIndex}`);
       const dataUrl = await chrome.tabs.captureVisibleTab({ format: 'jpeg', quality: 80 });
       const res = await fetch(dataUrl);
       blob = await res.blob();
@@ -342,8 +325,6 @@ async function captureCurrentStep(sessionId: string, stepIndex: number) {
       return;
     }
   }
-
-  console.log(`✅ [ServiceWorker] Step ${stepIndex} captured via ${captureSource} (${blob?.size} bytes)`);
 
   if (blob) {
     await saveScreenshot(sessionId, stepIndex, blob);

@@ -133,7 +133,6 @@ export async function uploadSessionAssets(
   if (includeVideo) {
     try {
       videoKey = `videos/${activeSessionId}/screen-recording.webm`;
-      console.log("📤 [Uploader] Starting multipart video upload for:", videoKey);
 
       const initRes = await fetch(`${BACKEND_URL}/v1/assets/upload/multipart/init`, {
         method: "POST",
@@ -177,8 +176,6 @@ export async function uploadSessionAssets(
           if (!putRes.ok) throw new Error(`Upload failed for part ${partNumber}`);
 
           const responseData = await putRes.json() as any;
-          console.log(`🔍 [Uploader] Part ${partNumber} Worker Response:`, responseData);
-
           let etag = responseData.etag;
           if (!etag) throw new Error("FATAL: ETag is missing from the Worker's JSON response.");
           etag = etag.replace(/"/g, "");
@@ -191,7 +188,6 @@ export async function uploadSessionAssets(
           body: JSON.stringify({ key: videoKey, uploadId, parts }),
         });
         if (!completeRes.ok) throw new Error("Multipart completion failed");
-        console.log("📤 [Uploader] Multipart upload finalized successfully.");
       }
     } catch (err) {
       console.error("📤 [Uploader] Multipart video upload failed:", err);

@@ -111,6 +111,7 @@ const errorMessage      = document.getElementById("error-message")!;
 const countdownOverlay  = document.getElementById("countdown-overlay") as HTMLElement;
 const countdownNumber   = document.getElementById("countdown-number") as HTMLElement;
 const toast             = document.getElementById("toast") as HTMLElement;
+const signinError       = document.getElementById("signin-error") as HTMLElement;
 
 let countdownInterval: ReturnType<typeof setInterval> | null = null;
 let pendingCountdownTarget: AppState["target"] | null = null;
@@ -300,6 +301,7 @@ async function detectMicPermissionState() {
 // ── Sign-in handlers ──────────────────────────────────────────────────────
 
 async function handleSignIn() {
+  signinError.style.display = "none";
   try {
     const token = await new Promise<string>((resolve, reject) => {
       chrome.identity.getAuthToken({ interactive: true }, (res) => {
@@ -333,7 +335,8 @@ async function handleSignIn() {
     showScreen(screenIdle);
   } catch (err: any) {
     console.error("Sign in failed:", err);
-    alert("Sign in failed. Please try again.\n\n" + err.message);
+    signinError.textContent = "Sign in failed — " + (err.message || "please try again.");
+    signinError.style.display = "block";
   }
 }
 
