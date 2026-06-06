@@ -155,7 +155,12 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ initialContent, onCh
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        // Disable StarterKit's built-in v3 copies — we configure these ourselves below
+        link: false,
+        underline: false,
+      }),
       TaskList,
       TaskItem.configure({ nested: true }),
       Link.configure({ openOnClick: false, autolink: true }),
