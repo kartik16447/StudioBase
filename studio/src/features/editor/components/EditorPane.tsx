@@ -19,7 +19,6 @@ interface EditorPaneProps {
   initialContent: JSONContent;
   onContentChange: (json: JSONContent) => void;
   onEditorReady: (editor: Editor) => void;
-  onShare: () => void;
   onMore: () => void;
   onExportMarkdown: () => void;
   onExportPlainText: () => void;
@@ -33,7 +32,7 @@ export const EditorPane: React.FC<EditorPaneProps> = ({
   docId, path, title, onTitleChange, emoji, onPickEmoji, dirty, saving,
   exportOpen, onOpenExport, onCloseExport,
   initialContent, onContentChange, onEditorReady,
-  onShare, onMore,
+  onMore,
   onExportMarkdown, onExportPlainText, onExportPDF, onCopyMarkdown,
   onOpenShareSheet, onTriggerPdfExport,
 }) => (

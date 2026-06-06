@@ -342,7 +342,7 @@ function CalloutCard({
 
 const HS_SIZES = [{ label: 'S', v: 14 }, { label: 'M', v: 20 }, { label: 'L', v: 28 }];
 
-function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, activeTool, onPlaceOverlay, onClearTool, selectedOverlayId, onSelectOverlay, onUpdateOverlay, showChrome }: {
+function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, activeTool, onPlaceOverlay, onClearTool, selectedOverlayId, onSelectOverlay, onUpdateOverlay, showChrome, focusBodyRef }: {
   step: any; session: any; brand: string; hotspotStyle: HotspotStyle;
   onUpdateHotspot: (pctX: number, pctY: number, hotspotSize?: number, zoomScale?: number) => void;
   activeTool: OverlayTool | null;
