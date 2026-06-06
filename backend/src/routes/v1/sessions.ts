@@ -116,6 +116,18 @@ sessions.patch('/:id', requirePermission('sop:edit'), zValidator('json', UpdateS
 });
 
 // 5. Delete Session
+// GET /v1/sessions/:id/debug — returns debug.json from R2 for dev sessions
+// Claude reads this when you share a session link to get full error context.
+sessions.get('/:id/debug', async (c) => {
+  const ws = c.get('workspace');
+  const id = c.req.param('id');
+  const key = `sessions/${id}/debug.json`;
+  const obj = await c.env.R2.get(key);
+  if (!obj) return c.json({ error: 'No debug data for this session' }, 404);
+  const data = await obj.json();
+  return c.json(data);
+});
+
 sessions.delete('/:id', requirePermission('workspace:admin'), async (c) => {
   const user = c.get('user');
   const ws = c.get('workspace');

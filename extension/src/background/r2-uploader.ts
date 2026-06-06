@@ -256,6 +256,38 @@ export async function uploadSessionAssets(
 
   if (onProgress) onProgress(100);
   sbLog("UPLOAD_COMPLETE", { sessionId: activeSessionId });
+
+  // ── Dev logs upload (local builds only) ──────────────────────────────────
+  // If dev mode was active during this session, upload captured logs to R2
+  // so Claude can read them via GET /v1/sessions/:id/debug.
+  if (import.meta.env.DEV) {
+    try {
+      const { sb_dev_mode, sb_dev_logs } = await chrome.storage.local.get(["sb_dev_mode"]).then(r => r).catch(() => ({})) as any;
+      const sessionData = await chrome.storage.session.get("sb_dev_logs").catch(() => ({})) as any;
+      const logs = sessionData?.sb_dev_logs;
+      if (sb_dev_mode && logs?.length) {
+        const debugKey = `sessions/${activeSessionId}/debug.json`;
+        const presignRes = await fetch(`${BACKEND_URL}/v1/assets/upload/presign`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "x-workspace-id": resolvedWorkspaceId, "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: activeSessionId, files: [{ key: debugKey, contentType: "application/json" }] }),
+        });
+        if (presignRes.ok) {
+          const { files } = await presignRes.json();
+          const uploadUrl = files?.[0]?.uploadUrl;
+          if (uploadUrl) {
+            await fetch(uploadUrl, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sessionId: activeSessionId, capturedAt: Date.now(), entries: logs }),
+            });
+            // Clear logs from session storage after upload
+            await chrome.storage.session.remove("sb_dev_logs").catch(() => {});
+          }
+        }
+      }
+    } catch { /* dev upload failure is non-fatal */ }
+  }
 }
 
 /**

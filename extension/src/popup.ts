@@ -101,6 +101,7 @@ const btnRecordAgain    = document.getElementById("btn-record-again")!;
 const btnTryAgain       = document.getElementById("btn-try-again")!;
 const btnToggleMic      = document.getElementById("btn-toggle-mic") as HTMLButtonElement;
 const btnToggleVideo    = document.getElementById("btn-toggle-video") as HTMLButtonElement;
+const btnToggleDev      = document.getElementById("btn-toggle-dev") as HTMLButtonElement | null;
 const btnSkipCountdown  = document.getElementById("btn-skip-countdown") as HTMLButtonElement;
 const recTimer          = document.getElementById("rec-timer")!;
 const recTargetLabel    = document.getElementById("rec-target-label")!;
@@ -118,6 +119,7 @@ let pendingCountdownTarget: AppState["target"] | null = null;
 let hasMicPermission = false;
 let isMicEnabled = false;
 let isVideoEnabled = true;
+let isDevMode = false;
 
 // ── Auto-login: probe open Studio tabs ───────────────────────────────────
 
@@ -507,6 +509,22 @@ btnToggleVideo.addEventListener("click", () => {
   isVideoEnabled = !isVideoEnabled;
   renderVideoToggleState();
 });
+
+// Dev mode toggle — only shown in local builds (import.meta.env.DEV)
+if (btnToggleDev && import.meta.env.DEV) {
+  btnToggleDev.style.display = "";
+  // Restore saved state
+  chrome.storage.local.get("sb_dev_mode").then(({ sb_dev_mode }) => {
+    isDevMode = !!sb_dev_mode;
+    btnToggleDev!.classList.toggle("active", isDevMode);
+  });
+  btnToggleDev.addEventListener("click", () => {
+    isDevMode = !isDevMode;
+    chrome.storage.local.set({ sb_dev_mode: isDevMode });
+    btnToggleDev!.classList.toggle("active", isDevMode);
+    btnToggleDev!.title = isDevMode ? "Dev logs ON — capturing console + network" : "Dev logs OFF";
+  });
+}
 
 btnSkipCountdown.addEventListener("click", () => {
   if (countdownInterval) clearInterval(countdownInterval);
