@@ -75,16 +75,16 @@ Deepgram Aura interprets punctuation as natural pacing. Use deliberately:
 "then" / "from here" / "next" / "once there" / "going back" / "let's check" / "--and here," / "at this point" / "now" / "--now,"
 
 **WORD BUDGET -- THIS IS A HARD LIMIT. CHECK BEFORE SUBMITTING:**
-Deepgram Aura speaks at ~2.3 words/second. Hard maximum = visualDurationSeconds x 1.8 words.
+Deepgram Aura speaks at ~2.3 words/second. Hard maximum = visualDurationSeconds x 2.3 words.
 
   visualDurationSeconds | max words | example
-  1.5s                  | 2 words   | "Click Support..."
-  2.5s                  | 4 words   | "then select the deployment..."
-  3.0s                  | 5 words   | "from here, open the Logs tab..."
-  4.0s                  | 7 words   | "now click Runtime Logs -- it opens instantly..."
-  5.0s                  | 9 words   | "--and here, the deployment overview shows build status and aliases..."
-  6.0s                  | 10 words  | "from here, select any deployment -- this opens the full build log..."
-  8.0s                  | 14 words  | use \\n\\n to split into two sentences
+  1.5s                  | 3 words   | "Click Support..."
+  2.5s                  | 6 words   | "then select the deployment option..."
+  3.0s                  | 7 words   | "from here, open the Logs tab..."
+  4.0s                  | 9 words   | "now click Runtime Logs -- it opens instantly..."
+  5.0s                  | 11 words  | "--and here, the deployment overview shows build status and aliases..."
+  6.0s                  | 14 words  | "from here, select any deployment -- this opens the full build log..."
+  8.0s                  | 18 words  | use \\n\\n to split into two sentences
 
 If you write more words than the budget allows, audio will OVERRUN the video and the tutorial will break. Count your words. Cut ruthlessly.
 
@@ -184,7 +184,7 @@ function enrichElementText(s: Step): string | null {
 function trimToBudget(text: string, visualDurationSeconds: number): string {
   if (!text || text === '[SILENCE]') return text;
 
-  const maxWords = Math.ceil(visualDurationSeconds * 1.8);
+  const maxWords = Math.ceil(visualDurationSeconds * 2.3);
   const words = text.split(/\s+/);
   if (words.length <= maxWords) return text;
 
