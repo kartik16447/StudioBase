@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "StudioBase",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Record your screen, auto-generate step-by-step SOPs, interactive demos, and cinematic videos — powered by AI.",
   "homepage_url": "https://studiobase.app",
   "permissions": [
