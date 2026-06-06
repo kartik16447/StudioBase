@@ -13,6 +13,7 @@ const shared = {
   jsx: 'automatic',
   minify: true,
   treeShaking: true,
+  ...(isProd ? { drop: ['console'] } : {}),
   define: {
     'process.env.NODE_ENV': '"production"',
     'import.meta.env.DEV': isProd ? 'false' : 'true',
