@@ -646,16 +646,6 @@ const DocsPageInner: React.FC = () => {
           initialContent={content}
           onContentChange={handleContentChange}
           onEditorReady={(e) => { editorInstanceRef.current = e; }}
-          onShare={async () => {
-            if (!activeId) return;
-            try {
-              const { shareUrl } = await docsApi.shareDoc(activeId);
-              await navigator.clipboard.writeText(shareUrl);
-              showToast('info', 'Share link copied to clipboard');
-            } catch {
-              showToast('error', 'Failed to generate share link');
-            }
-          }}
           onMore={() => {}}
           onExportMarkdown={handleExportMarkdown}
           onExportPlainText={handleExportPlainText}
