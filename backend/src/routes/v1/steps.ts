@@ -94,17 +94,17 @@ steps.post('/:sessionId/steps/:stepId/generate-script',
 
 
 
-    const budgetSeconds = Math.max(visualDurationSeconds, 3.0);
+    const budgetSeconds = Math.max(visualDurationSeconds, 5.0);
     console.log(`[generate-script] Step action details: action=${stepData.action}, pageTitle=${stepData.pageTitle}. Adjusted budget: ${budgetSeconds}s (visual duration was ${visualDurationSeconds}s)`);
 
     const SYSTEM_PROMPT = `
 You are an expert technical writer crafting a voiceover script for a software tutorial video.
 
 **THE CONSTRAINTS:**
-You are given a UI action and a strict time budget (\`visualDurationSeconds\`).
+You are given a UI action and a time budget (\`visualDurationSeconds\`). Minimum budget is 5.0s (≈12 words).
 Average speaking rate is 2.5 words per second.
 - You MUST NEVER exceed \`visualDurationSeconds * 2.5\` words.
-- If the budget is 2.0s, your absolute maximum length is 5 words.
+- Minimum 10 words — every step deserves a complete, natural sentence.
 
 **THE RULES OF NARRATION:**
 1. **Use Exact Context:** ALWAYS use the \`elementText\`, \`pageTitle\`, or \`inputValue\` provided in the payload to describe what is being interacted with. NEVER invent button names (e.g. do not say "Click Save" unless the element text actually says "Save").

@@ -78,13 +78,10 @@ Deepgram Aura interprets punctuation as natural pacing. Use deliberately:
 
 **WORD BUDGET -- THIS IS A HARD LIMIT. CHECK BEFORE SUBMITTING:**
 Deepgram Aura speaks at ~2.3 words/second. Hard maximum = visualDurationSeconds x 2.3 words.
+Minimum budget is always 5.0s (≈11 words) — narrators speak over transitions, not in sync with them.
 
   visualDurationSeconds | max words | example
-  1.5s                  | 3 words   | "Click Support..."
-  2.5s                  | 6 words   | "then select the deployment option..."
-  3.0s                  | 7 words   | "from here, open the Logs tab..."
-  4.0s                  | 9 words   | "now click Runtime Logs -- it opens instantly..."
-  5.0s                  | 11 words  | "--and here, the deployment overview shows build status and aliases..."
+  5.0s                  | 11 words  | "from here, click Add Lead in the top-right corner..."
   6.0s                  | 14 words  | "from here, select any deployment -- this opens the full build log..."
   8.0s                  | 18 words  | use \\n\\n to split into two sentences
 
@@ -241,12 +238,11 @@ function buildStepPayload(steps: Step[]): { payload: StepPayloadItem[]; budgetMa
       }
     }
 
-    // Tiered budget -- fast actions get tighter word budgets
-    let budgetSeconds: number;
-    if (durationSeconds < 0.5)      budgetSeconds = 1.5;
-    else if (durationSeconds < 2.0) budgetSeconds = 2.5;
-    else if (durationSeconds < 6.0) budgetSeconds = durationSeconds;
-    else                            budgetSeconds = Math.min(durationSeconds, 8.0);
+    // Audio narrators speak over transitions — they don't lip-sync.
+    // Minimum 5s budget (≈11 words) so every step gets a complete sentence.
+    // Only cap the top end for very long clips.
+    const rawBudget = durationSeconds < 6.0 ? durationSeconds : Math.min(durationSeconds, 8.0);
+    const budgetSeconds = Math.max(rawBudget, 5.0);
 
     budgetMap.set(s.id, budgetSeconds);
 
