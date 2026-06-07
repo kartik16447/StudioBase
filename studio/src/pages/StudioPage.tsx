@@ -27,6 +27,7 @@ import { EmbedSOPView } from '../components/studio/canvases/EmbedSOPView';
 import { EmbedCinematicView } from '../components/studio/canvases/EmbedCinematicView';
 import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
 import { EmbedSlidesView } from '../components/studio/canvases/EmbedSlidesView';
+import { EmbedRawVideoView } from '../components/studio/canvases/EmbedRawVideoView';
 const STUDIO_TABS = [
   { id: 'script',   label: 'Script',   icon: I.FileText, component: ScriptPanel },
   { id: 'brand',    label: 'Brand',    icon: I.Palette,  component: BrandPanel },
@@ -100,6 +101,7 @@ export const StudioPage: React.FC = () => {
     if (mode === 'video') return <EmbedCinematicView />;
     if (mode === 'demo') return <EmbedDemoView />;
     if (mode === 'slides') return <EmbedSlidesView />;
+    if (mode === 'rawvideo') return <EmbedRawVideoView />;
     return <EmbedSOPView />;
   }
 

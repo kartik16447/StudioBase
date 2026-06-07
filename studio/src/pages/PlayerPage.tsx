@@ -7,6 +7,7 @@ import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
 import { EmbedSOPView } from '../components/studio/canvases/EmbedSOPView';
 import { EmbedCinematicView } from '../components/studio/canvases/EmbedCinematicView';
 import { EmbedSlidesView } from '../components/studio/canvases/EmbedSlidesView';
+import { EmbedRawVideoView } from '../components/studio/canvases/EmbedRawVideoView';
 import { useIsEmbed } from '../hooks/useIsEmbed';
 import { useStudioStore } from '../store/useStudioStore';
 import { resolveDisplayText } from '../lib/textUtils';
@@ -339,10 +340,11 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   // Embed mode — wrap in fixed inset-0 so h-full in child views resolves to viewport height
   if (isEmbed) {
     let embedView: React.ReactNode;
-    if (mode === 'video')        embedView = <EmbedCinematicView />;
-    else if (mode === 'demo')    embedView = <EmbedDemoView sessionOverride={session} />;
-    else if (mode === 'slides')  embedView = <EmbedSlidesView />;
-    else                         embedView = <EmbedSOPView />;
+    if (mode === 'video')          embedView = <EmbedCinematicView />;
+    else if (mode === 'demo')      embedView = <EmbedDemoView sessionOverride={session} />;
+    else if (mode === 'slides')    embedView = <EmbedSlidesView />;
+    else if (mode === 'rawvideo')  embedView = <EmbedRawVideoView />;
+    else                           embedView = <EmbedSOPView />;
     return <div style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>{embedView}</div>;
   }
 

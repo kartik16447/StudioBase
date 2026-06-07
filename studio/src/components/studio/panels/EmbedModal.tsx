@@ -4,13 +4,14 @@ import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../icons';
 import { cn } from '../../ui';
 
-type EmbedTab = 'sop' | 'video' | 'demo' | 'slides';
+type EmbedTab = 'sop' | 'video' | 'demo' | 'slides' | 'rawvideo';
 
 const TAB_META: { id: EmbedTab; label: string; icon: React.FC<any>; desc: string }[] = [
-  { id: 'sop',    label: 'SOP',    icon: I.FileText,       desc: 'Step-by-step guide with arrows' },
-  { id: 'slides', label: 'Slides', icon: I.Presentation,      desc: 'Presentation mode with thumbnail strip' },
-  { id: 'video',  label: 'Video',  icon: I.Play,           desc: 'Auto-playing slideshow' },
-  { id: 'demo',   label: 'Demo',   icon: I.Cursor,         desc: 'Interactive click-through' },
+  { id: 'sop',      label: 'SOP',       icon: I.FileText,     desc: 'Step-by-step guide with arrows' },
+  { id: 'slides',   label: 'Slides',    icon: I.Presentation, desc: 'Presentation mode with thumbnail strip' },
+  { id: 'video',    label: 'Cinematic', icon: I.Play,         desc: 'Auto-playing narrated walkthrough with voiceover' },
+  { id: 'demo',     label: 'Demo',      icon: I.Cursor,       desc: 'Interactive click-through' },
+  { id: 'rawvideo', label: 'Raw Video', icon: I.Video,        desc: 'Original unedited screen recording' },
 ];
 
 function buildEmbedUrl(mode: EmbedTab, shareToken: string | null) {
