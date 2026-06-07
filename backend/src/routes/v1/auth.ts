@@ -44,13 +44,15 @@ auth.post('/google', zValidator('json', GoogleAuthSchema), async (c) => {
 // 2. Get current user profile + workspace credit balance
 auth.get('/me', authMiddleware(), async (c) => {
   const user = c.get('user');
+  // Prefer workspaceId from JWT; fall back to header (handles stale tokens issued before workspace was linked)
+  const resolvedWorkspaceId = user.workspaceId || c.req.header('x-workspace-id');
   const [record, wsCredits] = await Promise.all([
     c.env.DB.prepare('SELECT id, email, name, avatarUrl FROM users WHERE id = ?')
       .bind(user.id).first() as Promise<any>,
-    user.workspaceId
+    resolvedWorkspaceId
       ? c.env.DB.prepare(
           'SELECT balanceCredits, monthlyAllocation FROM workspace_credits WHERE workspaceId = ?'
-        ).bind(user.workspaceId).first() as Promise<any>
+        ).bind(resolvedWorkspaceId).first() as Promise<any>
       : Promise.resolve(null),
   ]);
 
