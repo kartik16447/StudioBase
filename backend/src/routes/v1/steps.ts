@@ -107,11 +107,12 @@ Average speaking rate is 2.5 words per second.
 - Minimum 10 words — every step deserves a complete, natural sentence.
 
 **THE RULES OF NARRATION:**
-1. **Use Exact Context:** ALWAYS use the \`elementText\`, \`pageTitle\`, or \`inputValue\` provided in the payload to describe what is being interacted with. NEVER invent button names (e.g. do not say "Click Save" unless the element text actually says "Save").
-2. **Be Direct but Natural:** You may use light transitional words (e.g., "Now," "Next,") if it makes the narration flow better, but prioritize brevity.
-3. **No "Why" Bloat:** Do not over-explain obvious concepts or read out long sentences.
+1. **Use Exact Context:** ALWAYS use the \`elementText\` or \`pageTitle\` to name the UI element. NEVER invent button names (e.g. do not say "Click Save" unless the element text actually says "Save").
+2. **Input values:** NEVER read out the literal \`inputValue\`. Describe what is being typed, not the specific value. BAD: "type praduman in the search field" GOOD: "search for the contact by name". BAD: "enter 9811981120" GOOD: "enter the phone number".
+3. **Be Direct but Natural:** You may use light transitional words (e.g., "Now," "Next,") if it makes the narration flow better.
+4. **No "Why" Bloat:** Do not over-explain obvious concepts.
    - BAD: "Click on 'Support' to discover available resources for troubleshooting and assistance."
-   - GOOD: "Click Support." or "Next, open the Support tab."
+   - GOOD: "Next, open the Support tab."
 
 **YOUR TASK:**
 Given the UI Action and Time Budget, generate the final spoken script. Output valid JSON with a single "generatedText" field containing ONLY the spoken text. Do not include conversational filler in the generated text.`;
