@@ -5,6 +5,10 @@ export const webhookRoutes = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 const KV_KEY = 'sb:build_error:latest'
 
+// ─── Health check for Vercel webhook verification ───────────────────────────
+// GET /v1/webhooks/vercel — Vercel pings this to confirm the endpoint is live
+webhookRoutes.get('/vercel', (c) => c.json({ ok: true, service: 'studiobase-webhook' }))
+
 // ─── Vercel → KV ────────────────────────────────────────────────────────────
 // POST /v1/webhooks/vercel
 // Vercel fires this on deployment.error. We fetch the error lines and store

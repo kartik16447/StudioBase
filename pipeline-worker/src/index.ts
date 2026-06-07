@@ -156,6 +156,10 @@ function isBackNavigation(step: any, prevStep: any | null): boolean {
   }
 }
 
+// Matches short all-alpha strings that look like partial search filter terms
+// e.g. "webho" (user started typing "webhook" and stopped), "setti", "deplo"
+const PARTIAL_SEARCH_RE = /^[a-zA-Z]{2,8}$/;
+
 function isNoisyInput(step: any): boolean {
   const action = step.action || step.type;
   if (action !== 'input') return false;
@@ -166,6 +170,18 @@ function isNoisyInput(step: any): boolean {
     ? TEST_INPUT_PATTERNS.some(p => p.test(inputValue.trim()))
     : true;
   return hasNoCoords || isTestValue;
+}
+
+// If an input value looks like a partial search term, return a clean description
+// of what the user was searching for instead of the raw partial string.
+// Returns null if the value looks like a complete/meaningful input.
+function expandPartialInput(inputValue: string | null, enrichedText: string | null): string | null {
+  if (!inputValue) return null;
+  const v = inputValue.trim();
+  if (!PARTIAL_SEARCH_RE.test(v)) return null;
+  // Looks like a partial search filter — describe the intent from context
+  const context = enrichedText ?? 'the search field';
+  return `search for "${v}" in ${context}`;
 }
 
 function enrichElementText(s: any): string | null {
@@ -223,7 +239,16 @@ function trimToBudget(text: string, visualDurationSeconds: number): string {
   const words = text.split(/\s+/);
   if (words.length <= maxWords) return text;
   console.log(`[PIPELINE] trimToBudget: ${words.length} words -> ${maxWords} (${visualDurationSeconds}s)`);
-  const trimmed = words.slice(0, maxWords).join(' ');
+
+  // Slice to budget, then backtrack if the last word is a fragment (< 3 real chars,
+  // e.g. "lis" cut from "list" by a mid-token AI truncation).
+  let sliced = words.slice(0, maxWords);
+  const lastWord = sliced[sliced.length - 1].replace(/[.,!?;:\-\.]+$/, '');
+  if (lastWord.length < 3 && sliced.length > 1) {
+    sliced = sliced.slice(0, -1);
+  }
+
+  const trimmed = sliced.join(' ');
   const sentenceEnd = Math.max(
     trimmed.lastIndexOf('. '), trimmed.lastIndexOf('! '), trimmed.lastIndexOf('? '),
   );
@@ -234,7 +259,9 @@ function trimToBudget(text: string, visualDurationSeconds: number): string {
   if (clauseEnd > trimmed.length * 0.5) {
     return trimmed.slice(0, clauseEnd).trimEnd() + '...';
   }
-  return trimmed.trimEnd().replace(/[,;:\-]+$/, '').trimEnd() + '...';
+  // Strip trailing punctuation but preserve existing '...' from the AI
+  const base = trimmed.trimEnd().replace(/[,;:\-]+$/, '').trimEnd();
+  return base.endsWith('...') ? base : base + '...';
 }
 
 interface StepPayloadItem {
@@ -286,13 +313,17 @@ function buildStepPayload(
     const prevStep = i > 0 ? filtered[i - 1] : null;
     const backNav  = isBackNavigation(s, prevStep);
     const noisy    = isNoisyInput(s);
+    const enriched = enrichElementText(s);
+    const rawInput = noisy ? null : (s.inputValue || s.data?.inputValue || null);
+    // Replace short partial search strings (e.g. "webho") with a descriptive hint
+    const resolvedInput = rawInput && expandPartialInput(rawInput, enriched) || rawInput;
 
     return {
       id:                    s.id,
       action:                s.action || s.type || 'click',
-      enrichedElementText:   enrichElementText(s),
+      enrichedElementText:   enriched,
       elementRole:           s.elementRole || s.data?.elementRole || null,
-      inputValue:            noisy ? null : (s.inputValue || s.data?.inputValue || null),
+      inputValue:            resolvedInput,
       pageTitle:             s.pageTitle || s.data?.pageTitle || null,
       url:                   s.url || s.data?.url || s.data?.frameUrl || null,
       viewportZone:          viewportZone(s),
@@ -424,7 +455,29 @@ export default {
               rawStr = rawStr.slice(firstBrace, lastBrace + 1);
             }
 
-            generated = JSON.parse(rawStr) as typeof generated;
+            // Sanitize raw control chars inside JSON string values before parsing
+            let sanitized = rawStr;
+            try {
+              generated = JSON.parse(rawStr) as typeof generated;
+            } catch {
+              // Walk char-by-char, escaping control chars only when inside a quoted string
+              let inStr = false, esc = false, out = '';
+              for (const ch of rawStr) {
+                if (esc)         { esc = false; out += ch; continue; }
+                if (ch === '\\') { esc = true;  out += ch; continue; }
+                if (ch === '"')  { inStr = !inStr; out += ch; continue; }
+                if (inStr) {
+                  if (ch === '\n') { out += '\\n'; continue; }
+                  if (ch === '\r') { out += '\\r'; continue; }
+                  if (ch === '\t') { out += '\\t'; continue; }
+                  if (ch.charCodeAt(0) < 32) continue;
+                }
+                out += ch;
+              }
+              sanitized = out;
+              console.log(`[PIPELINE] Retrying parse after control-char sanitize (${rawStr.length} → ${sanitized.length} chars)`);
+              generated = JSON.parse(sanitized) as typeof generated;
+            }
             if (!generated?.steps || !Array.isArray(generated.steps)) {
               throw new Error('AI response missing steps array');
             }

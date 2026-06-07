@@ -4,6 +4,14 @@ const extractor = new WebMFrameExtractor();
 
 const ctx: Worker = self as any;
 
+// Resolves once INIT completes; GET_FRAME requests await this before running.
+let readyResolve: (() => void) | null = null;
+let readyReject: ((e: Error) => void) | null = null;
+const readyPromise: Promise<void> = new Promise((res, rej) => {
+  readyResolve = res;
+  readyReject = rej;
+});
+
 ctx.onmessage = async (e: MessageEvent) => {
   const { type, payload, requestId } = e.data;
 
@@ -15,6 +23,7 @@ ctx.onmessage = async (e: MessageEvent) => {
         const blob = await response.blob();
         await extractor.init(blob);
         const duration = extractor.getDuration();
+        readyResolve!();
         ctx.postMessage({ type: 'INIT_SUCCESS', payload: { duration }, requestId });
         break;
       }
@@ -27,17 +36,16 @@ ctx.onmessage = async (e: MessageEvent) => {
       }
 
       case 'GET_FRAME': {
+        await readyPromise;
         const { timestampMs } = payload;
         const frame = await extractor.getFrame(timestampMs);
-        
+
         if (frame) {
-          // Convert VideoFrame to ImageBitmap for transferability
           const bitmap = await createImageBitmap(frame);
-          frame.close(); // Close the VideoFrame immediately in the worker
-          
+          frame.close();
           ctx.postMessage(
             { type: 'FRAME_SUCCESS', payload: { bitmap, timestampMs }, requestId },
-            [bitmap] // Transfer the ImageBitmap
+            [bitmap]
           );
         } else {
           ctx.postMessage({ type: 'FRAME_ERROR', payload: { error: 'No frame found' }, requestId });
@@ -55,11 +63,11 @@ ctx.onmessage = async (e: MessageEvent) => {
         console.warn(`[ExtractorWorker] Unknown message type: ${type}`);
     }
   } catch (error: any) {
-    ctx.postMessage({ 
-      type: 'ERROR', 
-      payload: { error: error.message || 'Unknown worker error' }, 
-      requestId 
+    if (type === 'INIT') readyReject!(new Error(error.message || 'Init failed'));
+    ctx.postMessage({
+      type: 'ERROR',
+      payload: { error: error.message || 'Unknown worker error' },
+      requestId,
     });
   }
 };
-
