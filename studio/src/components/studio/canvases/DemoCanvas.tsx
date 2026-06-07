@@ -20,7 +20,7 @@ import type { HotspotStyle } from '../../../components/demo/Hotspot';
 import { HotspotStylePicker } from '../../../components/demo/HotspotStylePicker';
 import { CardTypePicker } from '../../../components/demo/CardTypePicker';
 import { withAlpha } from '../../../components/demo/helpers';
-import { displayText } from '../../../lib/textUtils';
+import { resolveDisplayText } from '../../../lib/textUtils';
 import type { DemoCard, Overlay } from '../../../../../shared/types/step';
 import type { OverlayTool } from '../../../components/demo/OverlayToolbar';
 
@@ -95,7 +95,7 @@ function StepRail({ current, setCurrent, brand, session, selectedChapterId, onSe
                 <span style={{ position: 'absolute', right: 3, top: 3, width: 7, height: 7, borderRadius: '50%', background: brand, border: '1.5px solid #fff' }} />
               </div>
               <div style={{ fontSize: 10.5, color: active ? zn.ink : zn.mute, fontWeight: active ? 600 : 450, marginTop: 4, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {step.stepTitle || displayText(step.textOverride || step.generatedText) || `Step ${i + 1}`}
+                {step.stepTitle || resolveDisplayText(step) || `Step ${i + 1}`}
               </div>
             </div>
           </div>
@@ -769,7 +769,7 @@ function ContentPanel({ step, stepIndex, brand, onSave, focusBodyRef }: {
 }) {
   const [picker, setPicker]   = useState(false);
   const [title,  setTitle]    = useState(step?.stepTitle || '');
-  const [body,   setBody]     = useState(displayText(step?.textOverride || step?.generatedText) || '');
+  const [body,   setBody]     = useState(resolveDisplayText(step ?? {}) || '');
   const bodyRef = React.useRef<HTMLTextAreaElement>(null);
   React.useEffect(() => {
     if (focusBodyRef) focusBodyRef.current = () => bodyRef.current?.focus();
@@ -779,7 +779,7 @@ function ContentPanel({ step, stepIndex, brand, onSave, focusBodyRef }: {
   // Sync local state when step changes
   useEffect(() => {
     setTitle(step?.stepTitle || '');
-    setBody(displayText(step?.textOverride || step?.generatedText) || '');
+    setBody(resolveDisplayText(step ?? {}) || '');
     setCards(step?.cards ?? []);
   }, [step?.id]);
 

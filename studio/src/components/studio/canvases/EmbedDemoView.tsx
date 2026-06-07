@@ -5,7 +5,7 @@ import { ScreenshotPlaceholder } from '../../ui';
 import { Hotspot } from '../../demo/Hotspot';
 import type { HotspotStyle } from '../../demo/Hotspot';
 import { withAlpha, brandGradient } from '../../demo/helpers';
-import { displayText } from '../../../lib/textUtils';
+import { resolveDisplayText } from '../../../lib/textUtils';
 import type { Step, DemoCard, Overlay } from '../../../../../shared/types/step';
 import { SpotlightMask } from '../../demo/SpotlightMask';
 import type { ChapterBreak } from '../../../../../shared/types/session';
@@ -236,7 +236,7 @@ function InfoPanel({ step, stepIndex, totalSteps, brand, onPrev, onNext, atStart
   onPrev: () => void; onNext: () => void; atStart: boolean;
 }) {
   const title = step.stepTitle;
-  const body  = displayText(step.textOverride || step.generatedText);
+  const body  = resolveDisplayText(step);
   const cards: DemoCard[] = (step as any).cards ?? [];
 
   const ctaCard   = cards.find((c) => c.type === 'cta');

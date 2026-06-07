@@ -6,7 +6,7 @@ import { Badge, AIShimmer, AIButton, DotGrid, Button, cn } from '../../../compon
 import { SummaryCallout, StepCard, ChapterBreak } from '../../../components/studio';
 import { RenderConstants } from '../../../modules/render-engine/RenderConstants';
 import type { Step, ChapterBreak as IChapterBreak } from '../../../../../shared/types/session';
-import { displayText } from '../../../lib/textUtils';
+import { resolveDisplayText } from '../../../lib/textUtils';
 import { showToast } from '../../GlobalToast';
 import { CommentPanel } from '../panels/CommentPanel';
 import { EmbedModal } from '../panels/EmbedModal';
@@ -448,7 +448,7 @@ export const SOPCanvas: React.FC = () => {
                   ${steps[0] ? (() => {
                     const s = steps[0];
                     const st = s.stepTitle || s.elementText || 'Step 1';
-                    const tx = displayText(s.textOverride || s.generatedText) || s.elementText || '';
+                    const tx = resolveDisplayText(s) || s.elementText || '';
                     return `<div class="first-step" style="margin-top:32px"><h2>Step 1: ${st}</h2><p>${tx}</p></div>`;
                   })() : ''}
                 </div>
@@ -456,7 +456,7 @@ export const SOPCanvas: React.FC = () => {
                   const screenshotUrl = step.screenshotKey && session.assets?.[step.screenshotKey]
                     ? session.assets[step.screenshotKey] : null;
                   const st = step.stepTitle || step.elementText || `Step ${i + 2}`;
-                  const tx = displayText(step.textOverride || step.generatedText) || step.elementText || '';
+                  const tx = resolveDisplayText(step) || step.elementText || '';
                   return `<div class="step-page">${screenshotUrl ? `<div class="screenshot-wrap"><img src="${screenshotUrl}" /></div>` : ''}<h2>Step ${i + 2}: ${st}</h2><p>${tx}</p></div>`;
                 }).join('')}
                 </body></html>`;

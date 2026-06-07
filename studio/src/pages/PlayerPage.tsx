@@ -4,7 +4,7 @@ import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
 import { CinematicPlayer, type CinematicPlayerHandle } from '../components/player/CinematicPlayer';
 import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
-import { displayText } from '../lib/textUtils';
+import { resolveDisplayText } from '../lib/textUtils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ const TranscriptPanel: React.FC<{
           const isActive = i === currentIndex;
           const thumb    = step.screenshotKey ? assets[step.screenshotKey] : null;
           const title    = step.stepTitle || step.elementText || `Step ${i + 1}`;
-          const text     = displayText(step.textOverride || step.generatedText);
+          const text     = resolveDisplayText(step);
           const chapterTitle = chapterMap.get(step.id);
           if (chapterTitle) chapterIdx++;
           return (
@@ -330,7 +330,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   const videoUrl     = (session as any).videoKey ? assets[(session as any).videoKey] ?? null : null;
   const currentStep  = steps[displayIndex];
   const currentTitle = currentStep?.stepTitle || currentStep?.elementText || `Step ${displayIndex + 1}`;
-  const currentText  = displayText(currentStep?.textOverride || currentStep?.generatedText);
+  const currentText  = resolveDisplayText(currentStep ?? {});
   const siteDomain   = getDomain(session.capturedUrl);
 
   let currentChapter = '';

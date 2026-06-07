@@ -98,6 +98,7 @@ export const StepSchema = z.object({
   screenshotKey: z.string().nullable(),
   stepTitle: z.string().nullable().optional(),
   generatedText: z.string().nullable(),
+  displayText: z.string().nullable().optional(),
   textOverride: z.string().nullable(),
   voiceoverKey: z.string().nullable(),
   voiceoverDurationMs: z.number().nullable(),

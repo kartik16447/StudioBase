@@ -4,7 +4,7 @@ import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
 import { CinematicPlayer } from '../components/player/CinematicPlayer';
 import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
-import { displayText } from '../lib/textUtils';
+import { resolveDisplayText } from '../lib/textUtils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ const PublicStepCard: React.FC<{ step: PublicStep; index: number; assets?: Recor
   const [imgFailed, setImgFailed] = useState(false);
   const screenshotUrl = step.screenshotKey && assets?.[step.screenshotKey] ? assets[step.screenshotKey] : null;
   const title = step.stepTitle || step.elementText || `Step ${index + 1}`;
-  const text = displayText(step.textOverride || step.generatedText) || step.elementText || '';
+  const text = resolveDisplayText(step) || step.elementText || '';
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">

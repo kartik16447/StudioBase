@@ -401,6 +401,7 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           action: s.action || s.type || 'click',
           coordinates: s.coordinates || s.data?.coordinates || null,
           generatedText: s.generatedText || s.data?.generatedText || null,
+          displayText: s.displayText || s.data?.displayText || null,
           animationTarget: s.animationTarget || s.data?.animationTarget || null,
           screenshotKey: s.screenshotKey || s.data?.screenshotKey || null,
           annotations: s.annotations || [],

@@ -3,7 +3,7 @@ import { useStudioStore } from '../../../store/useStudioStore';
 import { apiClient } from '../../../lib/apiClient';
 import { I } from '../../icons';
 import { cn, Button, AIShimmer } from '../../ui';
-import { displayText } from '../../../lib/textUtils';
+import { stripAudioMarkers } from '../../../lib/textUtils';
 
 // Credit cost for bulk narration (1 per step)
 const NARRATION_CREDIT_PER_STEP = 1;
@@ -48,7 +48,7 @@ const StepAudioRow: React.FC<{
   const [swapError, setSwapError] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement>(null);
-  const text = displayText(step.textOverride || step.generatedText) || step.elementText || '';
+  const text = stripAudioMarkers(step.textOverride || step.generatedText) || step.elementText || '';
   
   const done = status?.voiceoverSource === 'tts' || status?.voiceoverSource === 'original' || status?.voiceoverSource === 'swap';
   const generating = status?.voiceoverSource === 'generating' || isPolling || isSwapping;
@@ -322,10 +322,10 @@ export const AudioPanel: React.FC = () => {
 
   // ── Helpers ──
   const steps = session?.steps ?? [];
-  // Use displayText() so [SILENCE] and trailing-... steps are excluded from
+  // Use stripAudioMarkers() so [SILENCE] and trailing-... steps are excluded from
   // the narration count — the backend skips them anyway, so the UI should too.
   const stepsWithText = steps.filter(s => {
-    const raw = displayText(s.textOverride || s.generatedText) || (s as any).elementText || '';
+    const raw = stripAudioMarkers(s.textOverride || s.generatedText) || (s as any).elementText || '';
     return raw.trim().length > 0;
   });
 

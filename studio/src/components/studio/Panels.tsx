@@ -7,7 +7,7 @@ import {
 } from '../ui';
 import type { Step } from '../../../../shared/types/session';
 import { apiClient } from '../../lib/apiClient';
-import { displayText } from '../../lib/textUtils';
+import { stripAudioMarkers } from '../../lib/textUtils';
 import { showToast } from '../GlobalToast';
 
 
@@ -373,7 +373,7 @@ const ScriptStepRow: React.FC<{
                 }
               }}
             >
-              {displayText(text) || 'Click to add a voiceover script for this step...'}
+              {stripAudioMarkers(text) || 'Click to add a voiceover script for this step...'}
             </p>
           )}
         </div>

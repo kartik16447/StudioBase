@@ -31,8 +31,9 @@ const SOP_JSON_SCHEMA = {
           id: { type: 'string' },
           stepTitle: { type: 'string' },
           generatedText: { type: 'string' },
+          displayText: { type: 'string' },
         },
-        required: ['id', 'stepTitle', 'generatedText'],
+        required: ['id', 'stepTitle', 'generatedText', 'displayText'],
       },
     },
     chapterBreaks: {
@@ -58,7 +59,8 @@ Output fields:
 - tags: 2-5 lowercase keywords.
 - steps: For each input step produce:
     - stepTitle: A short noun phrase naming the goal of this step.
-    - generatedText: The narration script. See all rules below.
+    - generatedText: The narration script for text-to-speech. See all rules below.
+    - displayText: A clean, standalone instruction sentence for display in the UI (step cards, SOP, player). Rules: (1) Complete sentence ending with a period. (2) No leading connectors ("then", "from here", "next"). (3) No trailing "...". (4) Imperative voice: "Click X to open Y." or "Select X from the sidebar." (5) If generatedText is [SILENCE], displayText must be empty string "". (6) Max 2 sentences — keep it concise but complete.
 - chapterBreaks: Group steps into logical workflow phases using afterStepId. STRICT RULES: (1) Never place a chapter break after step 1 or step 2. (2) Require at least 4 steps between chapter breaks. (3) Only break when the workflow phase genuinely changes (e.g. setup → configuration → launch). Fewer chapters is always better — if in doubt, omit the break. For sessions under 8 steps, 0–1 chapter breaks is appropriate.
 
 **PUNCTUATION AS SPEECH RHYTHM:**
@@ -337,7 +339,7 @@ export class PipelineProcessor {
           title: string;
           summary: string;
           tags: string[];
-          steps: { id: string; stepTitle: string; generatedText: string }[];
+          steps: { id: string; stepTitle: string; generatedText: string; displayText: string }[];
           chapterBreaks: { afterStepId: string; chapterTitle: string }[];
         };
         let generated: GeneratedSOP;
@@ -385,13 +387,17 @@ export class PipelineProcessor {
             text = trimToBudget(text, budget);
           }
 
-          return [s.id, { ...s, generatedText: text }];
+          // displayText: empty for silence steps, otherwise use AI value
+          const display = text === '[SILENCE]' ? '' : (s.displayText?.trim() || '');
+
+          return [s.id, { ...s, generatedText: text, displayText: display }];
         }));
 
         envelope.steps = envelope.steps.map(step => ({
           ...step,
           stepTitle:     aiStepMap.get(step.id)?.stepTitle     ?? step.stepTitle     ?? null,
           generatedText: aiStepMap.get(step.id)?.generatedText ?? step.generatedText,
+          displayText:   aiStepMap.get(step.id)?.displayText   ?? (step as any).displayText ?? null,
         }));
 
         envelope.aiOutputs = {

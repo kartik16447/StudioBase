@@ -4,7 +4,7 @@ import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../icons';
 import { cn } from '../../ui';
 import { NavArrow, Watermark } from './EmbedSOPView';
-import { displayText } from '../../../lib/textUtils';
+import { resolveDisplayText } from '../../../lib/textUtils';
 
 const STEP_DURATION_MS = 3000; // ms per step in autoplay
 const SPRING = { type: 'spring' as const, stiffness: 280, damping: 30 };
@@ -117,10 +117,10 @@ export const EmbedVideoView: React.FC = () => {
               )}
 
               {/* Step text */}
-              {displayText(step?.textOverride || step?.generatedText) && (
+              {resolveDisplayText(step) && (
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-6 pb-5 pt-12">
                   <p className="text-white text-[14px] leading-relaxed font-medium drop-shadow">
-                    {displayText(step.textOverride || step.generatedText)}
+                    {resolveDisplayText(step)}
                   </p>
                 </div>
               )}

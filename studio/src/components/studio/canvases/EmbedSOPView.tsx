@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../icons';
 import { cn } from '../../ui';
-import { displayText } from '../../../lib/textUtils';
+import { resolveDisplayText } from '../../../lib/textUtils';
 
 const SPRING = { type: 'spring' as const, stiffness: 320, damping: 34 };
 
@@ -98,10 +98,10 @@ export const EmbedSOPView: React.FC = () => {
               )}
 
               {/* Step text overlay */}
-              {displayText(step?.textOverride || step?.generatedText) && (
+              {resolveDisplayText(step) && (
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-6 pb-5 pt-12">
                   <p className="text-white text-[14px] leading-relaxed font-medium drop-shadow">
-                    {displayText(step.textOverride || step.generatedText)}
+                    {resolveDisplayText(step)}
                   </p>
                 </div>
               )}
