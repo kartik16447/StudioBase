@@ -247,7 +247,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
     
     const searchStr = search.toString();
-    const newUrl = window.location.pathname + (searchStr ? '?' + searchStr : '');
+    // Always use a canonical pathname for the studio route so the URL never
+    // inherits an arbitrary path (e.g. /YOUR_EXTENSION_URL) from wherever
+    // the user happened to be when the session was opened.
+    const canonicalPath = name === 'studio' && params.sessionId
+      ? `/sessions/${params.sessionId}`
+      : window.location.pathname;
+    const newUrl = canonicalPath + (searchStr ? '?' + searchStr : '');
     
     // Only push if different from current state to avoid loops
     if (state.route.name !== name || state.route.params.sessionId !== params.sessionId) {
