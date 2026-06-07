@@ -634,6 +634,7 @@ export const StepCard: React.FC<{
                   href={rawUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  title={rawUrl}
                   className="inline-flex items-center gap-1 rounded-pill font-semibold tracking-wide uppercase whitespace-nowrap text-text-2 text-[10px] h-5 px-2 hover:text-primary transition-colors"
                 >
                   <FaviconImg src={faviconSrc} domain={domain} />

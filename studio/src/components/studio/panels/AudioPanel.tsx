@@ -34,7 +34,7 @@ const ELEVENLABS_VOICES = [
 
 // ─── Mini audio player per step ───────────────────────────────────────────────
 const StepAudioRow: React.FC<{
-  step: { id: string; sequence: number; textOverride?: string; generatedText?: string; elementText?: string };
+  step: { id: string; sequence: number; textOverride?: string; generatedText?: string; elementText?: string; url?: string; pageTitle?: string };
   status: StepAudioStatus | undefined;
   audioUrl: string | null;
   isPolling: boolean;
@@ -48,7 +48,7 @@ const StepAudioRow: React.FC<{
   const [selectedVoice, setSelectedVoice] = useState(ELEVENLABS_VOICES[0].id);
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapError, setSwapError] = useState<string | null>(null);
-  const [localScript, setLocalScript] = useState(step.generatedText || '');
+  const [localScript, setLocalScript] = useState(() => stripAudioMarkers(step.generatedText || ''));
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isGeneratingStepAudio, setIsGeneratingStepAudio] = useState(false);
   const [scriptError, setScriptError] = useState<string | null>(null);
@@ -61,7 +61,7 @@ const StepAudioRow: React.FC<{
   useEffect(() => {
     if (step.generatedText !== prevGeneratedText.current) {
       prevGeneratedText.current = step.generatedText;
-      setLocalScript(step.generatedText || '');
+      setLocalScript(stripAudioMarkers(step.generatedText || ''));
     }
   }, [step.generatedText]);
 
@@ -299,6 +299,32 @@ const StepAudioRow: React.FC<{
               {wordCount} word{wordCount !== 1 ? 's' : ''} · ~{approxSecs}s
             </span>
           </div>
+
+          {step.url && (() => {
+            let host = '';
+            try { host = new URL(step.url).hostname.replace(/^www\./, ''); } catch { host = step.url; }
+            return (
+              <a
+                href={step.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 min-w-0 px-2 py-1 rounded-md bg-surface-3 border border-border hover:border-primary/40 transition-colors group"
+                title={step.url}
+              >
+                <img
+                  src={`https://www.google.com/s2/favicons?domain=${host}&sz=16`}
+                  alt=""
+                  width={12}
+                  height={12}
+                  className="rounded-sm shrink-0"
+                />
+                <span className="text-[10px] text-text-2 truncate group-hover:text-primary transition-colors">
+                  {step.pageTitle || host}
+                </span>
+                <I.ExternalLink size={9} className="text-text-3 shrink-0 ml-auto group-hover:text-primary transition-colors" />
+              </a>
+            );
+          })()}
 
           <textarea
             value={localScript}
