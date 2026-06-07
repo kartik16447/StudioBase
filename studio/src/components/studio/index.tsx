@@ -630,10 +630,15 @@ export const StepCard: React.FC<{
             const faviconSrc = `https://www.google.com/s2/favicons?domain=${domain}&sz=16`;
             return (
               <div className="flex items-center bg-surface-2 rounded-pill pr-1">
-                <div className="inline-flex items-center gap-1 rounded-pill font-semibold tracking-wide uppercase whitespace-nowrap text-text-2 text-[10px] h-5 px-2">
+                <a
+                  href={rawUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded-pill font-semibold tracking-wide uppercase whitespace-nowrap text-text-2 text-[10px] h-5 px-2 hover:text-primary transition-colors"
+                >
                   <FaviconImg src={faviconSrc} domain={domain} />
                   {domain}
-                </div>
+                </a>
                 <CopyLinkButton url={rawUrl} />
               </div>
             );
