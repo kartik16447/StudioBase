@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Creating a New Lead — Foyr Sales Playbook</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f0f;
+      --sidebar-bg: #161616;
+      --card-bg: #1a1a1a;
+      --card-border: #2a2a2a;
+      --accent: #6366f1;
+      --accent-dim: rgba(99, 102, 241, 0.12);
+      --text-primary: #f0f0f0;
+      --text-secondary: #888;
+      --text-muted: #555;
+      --divider: #222;
+      --sidebar-width: 248px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text-primary);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── Layout ────────────────────────────────────── */
+    .shell {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ─── Sidebar ───────────────────────────────────── */
+    .sidebar {
+      width: var(--sidebar-width);
+      min-width: var(--sidebar-width);
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--divider);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-track { background: transparent; }
+    .sidebar::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+    .sidebar-header {
+      padding: 18px 16px 14px;
+      border-bottom: 1px solid var(--divider);
+    }
+
+    .sidebar-wordmark {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sidebar-wordmark .logo-mark {
+      width: 26px;
+      height: 26px;
+      background: var(--accent);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .sidebar-wordmark .logo-mark svg {
+      width: 14px;
+      height: 14px;
+      fill: #fff;
+    }
+
+    .sidebar-wordmark .logo-text {
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+
+    .sidebar-wordmark .logo-sub {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      font-weight: 400;
+      margin-top: 1px;
+    }
+
+    .sidebar-search {
+      margin: 12px 10px 4px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: #111;
+      border: 1px solid var(--divider);
+      border-radius: 7px;
+      padding: 6px 10px;
+      color: var(--text-muted);
+      font-size: 12.5px;
+      cursor: text;
+    }
+
+    .sidebar-search svg {
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      padding: 8px 0 16px;
+    }
+
+    .nav-section {
+      margin-top: 4px;
+    }
+
+    .nav-section-label {
+      padding: 10px 16px 4px;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      margin: 1px 6px;
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+      text-decoration: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .nav-item:hover {
+      background: #1f1f1f;
+      color: var(--text-primary);
+    }
+
+    .nav-item.active {
+      background: var(--accent-dim);
+      color: #a5b4fc;
+      font-weight: 500;
+    }
+
+    .nav-item .nav-icon {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+      opacity: 0.65;
+    }
+
+    .nav-item.active .nav-icon {
+      opacity: 1;
+    }
+
+    .nav-item .nav-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      flex-shrink: 0;
+      margin-left: 2px;
+    }
+
+    .nav-item.active .nav-dot {
+      background: var(--accent);
+    }
+
+    .sidebar-footer {
+      padding: 10px 10px 12px;
+      border-top: 1px solid var(--divider);
+    }
+
+    .user-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 8px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+
+    .user-row:hover { background: #1f1f1f; }
+
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #6366f1, #818cf8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    .user-info { overflow: hidden; }
+
+    .user-name {
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .user-role {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ─── Main content ──────────────────────────────── */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    .main::-webkit-scrollbar { width: 6px; }
+    .main::-webkit-scrollbar-track { background: transparent; }
+    .main::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(15, 15, 15, 0.88);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--divider);
+      padding: 0 40px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12.5px;
+      color: var(--text-muted);
+    }
+
+    .breadcrumb .crumb { cursor: pointer; transition: color 0.1s; }
+    .breadcrumb .crumb:hover { color: var(--text-secondary); }
+    .breadcrumb .sep { color: #333; }
+    .breadcrumb .crumb.current { color: var(--text-secondary); }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-ghost {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      background: transparent;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+
+    .btn-ghost:hover {
+      background: #1f1f1f;
+      border-color: var(--divider);
+      color: var(--text-primary);
+    }
+
+    .btn-ghost svg { width: 13px; height: 13px; }
+
+    .btn-primary {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: #fff;
+      background: var(--accent);
+      border: none;
+      cursor: pointer;
+      transition: opacity 0.12s;
+    }
+
+    .btn-primary:hover { opacity: 0.85; }
+
+    .article {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 44px 40px 80px;
+    }
+
+    /* ─── Page header ───────────────────────────────── */
+    .page-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .tag-blue { background: rgba(99,102,241,.15); color: #a5b4fc; }
+    .tag-green { background: rgba(52,211,153,.12); color: #6ee7b7; }
+
+    .page-title {
+      font-size: 30px;
+      font-weight: 600;
+      letter-spacing: -0.025em;
+      color: var(--text-primary);
+      line-height: 1.2;
+      margin-bottom: 6px;
+    }
+
+    .page-subtitle {
+      font-size: 15.5px;
+      color: var(--text-secondary);
+      font-weight: 400;
+      margin-bottom: 20px;
+    }
+
+    .page-info-row {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 12px 0;
+      border-top: 1px solid var(--divider);
+      border-bottom: 1px solid var(--divider);
+      margin-bottom: 28px;
+    }
+
+    .info-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .info-item svg { width: 12px; height: 12px; }
+    .info-item strong { color: var(--text-secondary); font-weight: 500; }
+
+    .intro-text {
+      font-size: 14.5px;
+      line-height: 1.75;
+      color: #bbb;
+      margin-bottom: 36px;
+      padding: 16px 20px;
+      background: rgba(99,102,241,.06);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 6px 6px 0;
+    }
+
+    /* ─── Embed cards ───────────────────────────────── */
+    .embeds {
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .embed-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .embed-card-header {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .embed-label-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .embed-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .embed-icon svg { width: 16px; height: 16px; }
+
+    .icon-demo { background: rgba(99,102,241,.18); color: #a5b4fc; }
+    .icon-video { background: rgba(249,115,22,.15); color: #fb923c; }
+    .icon-sop { background: rgba(52,211,153,.12); color: #6ee7b7; }
+    .icon-raw { background: rgba(148,163,184,.1); color: #94a3b8; }
+
+    .embed-label {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+      line-height: 1.3;
+    }
+
+    .embed-desc {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .embed-badge {
+      font-size: 10.5px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .badge-interactive { background: rgba(99,102,241,.15); color: #a5b4fc; }
+    .badge-video { background: rgba(249,115,22,.12); color: #fb923c; }
+    .badge-doc { background: rgba(52,211,153,.1); color: #6ee7b7; }
+    .badge-raw { background: rgba(148,163,184,.08); color: #94a3b8; }
+
+    .embed-frame-wrap {
+      position: relative;
+      background: #111;
+    }
+
+    .embed-frame-wrap iframe {
+      display: block;
+      width: 100%;
+      border: none;
+      border-radius: 0 0 9px 9px;
+    }
+
+    /* ─── Bottom CTA strip ──────────────────────────── */
+    .cta-strip {
+      margin-top: 40px;
+      padding: 20px 24px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .cta-text { font-size: 13.5px; color: var(--text-secondary); }
+    .cta-text strong { color: var(--text-primary); font-weight: 500; }
+
+    .cta-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+    /* ─── Scrollbar ─────────────────────────────────── */
+    * { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent; }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ═══ SIDEBAR ═══ -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-wordmark">
+        <div class="logo-mark">
+          <!-- Foyr-style F mark -->
+          <svg viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="10" height="2.2" rx="0.8"/>
+            <rect x="2" y="5.9" width="6.5" height="2" rx="0.8"/>
+            <rect x="2" y="9.8" width="4" height="2.2" rx="0.8"/>
+          </svg>
+        </div>
+        <div>
+          <div class="logo-text">Foyr Wiki</div>
+          <div class="logo-sub">Sales &amp; Onboarding</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-search">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6">
+        <circle cx="6.5" cy="6.5" r="4.5"/>
+        <path d="M10.5 10.5 14 14" stroke-linecap="round"/>
+      </svg>
+      Search pages…
+    </div>
+
+    <nav class="sidebar-nav">
+
+      <div class="nav-section">
+        <div class="nav-section-label">Sales Playbook</div>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Playbook Overview
+        </a>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Sales Stages &amp; Definitions
+        </a>
+        <a class="nav-item active" href="#">
+          <div class="nav-dot"></div> Creating a New Lead
+        </a>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Qualifying a Lead
+        </a>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Moving to Opportunity
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Lead Management</div>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Pipeline Overview
+        </a>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Lead Scoring Rules
+        </a>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Follow-up Cadence
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Onboarding</div>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> New Rep Checklist
+        </a>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Tool Access &amp; Setup
+        </a>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> First 30 Days Plan
+        </a>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-label">Team Resources</div>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Battle Cards
+        </a>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Pricing &amp; Packaging
+        </a>
+        <a class="nav-item" href="#">
+          <div class="nav-dot"></div> Objection Handling
+        </a>
+      </div>
+
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-row">
+        <div class="avatar">KU</div>
+        <div class="user-info">
+          <div class="user-name">Kartik Upadhyay</div>
+          <div class="user-role">Sales Ops</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══ MAIN ═══ -->
+  <main class="main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="breadcrumb">
+        <span class="crumb">Sales Playbook</span>
+        <span class="sep">›</span>
+        <span class="crumb current">Creating a New Lead</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn-ghost">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 2v12M2 8h12" stroke-linecap="round"/>
+          </svg>
+          Share
+        </button>
+        <button class="btn-ghost">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="8" cy="8" r="1.2" fill="currentColor"/>
+            <circle cx="3.5" cy="8" r="1.2" fill="currentColor"/>
+            <circle cx="12.5" cy="8" r="1.2" fill="currentColor"/>
+          </svg>
+        </button>
+        <button class="btn-primary">
+          Edit
+        </button>
+      </div>
+    </div>
+
+    <!-- Article -->
+    <article class="article">
+
+      <div class="page-meta">
+        <span class="tag tag-blue">Sales Playbook</span>
+        <span class="tag tag-green">Live</span>
+      </div>
+
+      <h1 class="page-title">Creating a New Lead</h1>
+      <p class="page-subtitle">Step-by-step guide for the Foyr Manage pipeline</p>
+
+      <div class="page-info-row">
+        <div class="info-item">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="2" y="3" width="12" height="10" rx="1.5"/>
+            <path d="M5 1v4M11 1v4M2 7h12" stroke-linecap="round"/>
+          </svg>
+          Updated <strong>Jun 7, 2026</strong>
+        </div>
+        <div class="info-item">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="8" cy="5" r="2.5"/>
+            <path d="M2.5 13c0-3 2.5-4.5 5.5-4.5s5.5 1.5 5.5 4.5" stroke-linecap="round"/>
+          </svg>
+          <strong>Kartik Upadhyay</strong>
+        </div>
+        <div class="info-item">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2z"/>
+            <path d="M8 5v3.5l2.5 1.5" stroke-linecap="round"/>
+          </svg>
+          ~4 min read
+        </div>
+        <div class="info-item">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M2 12 6 8l3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          4 formats
+        </div>
+      </div>
+
+      <p class="intro-text">
+        Use this guide when onboarding new sales reps or as a refresher for the lead creation flow in Foyr Manage. All three formats below are kept in sync automatically via StudioBase — the interactive demo, narrated video, and written SOP are all generated from the same recording and will update together whenever the flow changes.
+      </p>
+
+      <!-- Embeds -->
+      <div class="embeds">
+
+        <!-- 1. Interactive Demo -->
+        <div class="embed-card">
+          <div class="embed-card-header">
+            <div class="embed-label-row">
+              <div class="embed-icon icon-demo">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <polygon points="4,2 14,8 4,14" fill="currentColor" stroke="none"/>
+                </svg>
+              </div>
+              <div>
+                <div class="embed-label">Walk Through It Yourself</div>
+                <div class="embed-desc">Click through each step at your own pace.</div>
+              </div>
+            </div>
+            <span class="embed-badge badge-interactive">Interactive Demo</span>
+          </div>
+          <div class="embed-frame-wrap">
+            <iframe
+              src="https://studiobase-umber.vercel.app/s/47940bda-62d2-46bb-874a-ad5a7b9850ae?embed=1&mode=demo"
+              height="520"
+              allowfullscreen
+              title="Interactive Demo — Creating a New Lead"
+            ></iframe>
+          </div>
+        </div>
+
+        <!-- 2. Cinematic Video -->
+        <div class="embed-card">
+          <div class="embed-card-header">
+            <div class="embed-label-row">
+              <div class="embed-icon icon-video">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="1" y="3.5" width="10" height="9" rx="1.5"/>
+                  <path d="M11 6.5l4-2.5v8l-4-2.5" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div>
+                <div class="embed-label">Watch the Full Walkthrough</div>
+                <div class="embed-desc">Narrated video with step-by-step zoom and voiceover.</div>
+              </div>
+            </div>
+            <span class="embed-badge badge-video">Cinematic Video</span>
+          </div>
+          <div class="embed-frame-wrap">
+            <iframe
+              src="https://studiobase-umber.vercel.app/s/47940bda-62d2-46bb-874a-ad5a7b9850ae?embed=1&mode=video"
+              height="520"
+              allowfullscreen
+              title="Cinematic Video — Creating a New Lead"
+            ></iframe>
+          </div>
+        </div>
+
+        <!-- 3. SOP Guide -->
+        <div class="embed-card">
+          <div class="embed-card-header">
+            <div class="embed-label-row">
+              <div class="embed-icon icon-sop">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M3 2h8l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/>
+                  <path d="M11 2v4h3M5 8h6M5 11h4" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div>
+                <div class="embed-label">Read the Documentation</div>
+                <div class="embed-desc">Full written guide with annotated screenshots.</div>
+              </div>
+            </div>
+            <span class="embed-badge badge-doc">SOP Guide</span>
+          </div>
+          <div class="embed-frame-wrap">
+            <iframe
+              src="https://studiobase-umber.vercel.app/s/47940bda-62d2-46bb-874a-ad5a7b9850ae?embed=1&mode=sop"
+              height="640"
+              allowfullscreen
+              title="SOP Guide — Creating a New Lead"
+            ></iframe>
+          </div>
+        </div>
+
+        <!-- 4. Slides -->
+        <div class="embed-card">
+          <div class="embed-card-header">
+            <div class="embed-label-row">
+              <div class="embed-icon icon-demo">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/>
+                  <path d="M5.5 11.5 8 14l2.5-2.5M8 14v-2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M4 6h8M4 8.5h5" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div>
+                <div class="embed-label">View as Slides</div>
+                <div class="embed-desc">Step-by-step slideshow format, shareable with one link.</div>
+              </div>
+            </div>
+            <span class="embed-badge badge-interactive">Slides</span>
+          </div>
+          <div class="embed-frame-wrap">
+            <iframe
+              src="https://studiobase-umber.vercel.app/s/47940bda-62d2-46bb-874a-ad5a7b9850ae?embed=1&mode=slides"
+              height="520"
+              allowfullscreen
+              title="Slides — Creating a New Lead"
+            ></iframe>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- CTA Strip -->
+      <div class="cta-strip">
+        <p class="cta-text">
+          Something out of date? <strong>Submit a correction</strong> or tag <strong>@kartik</strong> in #sales-ops on Slack.
+        </p>
+        <div class="cta-actions">
+          <button class="btn-ghost">Request Update</button>
+          <button class="btn-ghost">Copy Link</button>
+        </div>
+      </div>
+
+    </article>
+  </main>
+
+</div>
+</body>
+</html>

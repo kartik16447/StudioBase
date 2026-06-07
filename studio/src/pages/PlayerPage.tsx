@@ -336,12 +336,14 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     </div>
   );
 
-  // Embed mode — session is already injected into the store via useEffect above
+  // Embed mode — wrap in fixed inset-0 so h-full in child views resolves to viewport height
   if (isEmbed) {
-    if (mode === 'video')  return <EmbedVideoView />;
-    if (mode === 'demo')   return <EmbedDemoView sessionOverride={session} />;
-    if (mode === 'slides') return <EmbedSlidesView />;
-    return <EmbedSOPView />;
+    let embedView: React.ReactNode;
+    if (mode === 'video')        embedView = <EmbedVideoView />;
+    else if (mode === 'demo')    embedView = <EmbedDemoView sessionOverride={session} />;
+    else if (mode === 'slides')  embedView = <EmbedSlidesView />;
+    else                         embedView = <EmbedSOPView />;
+    return <div style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>{embedView}</div>;
   }
 
   const title        = session.aiOutputs?.title || 'Walkthrough';
