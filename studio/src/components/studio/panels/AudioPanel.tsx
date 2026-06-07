@@ -39,20 +39,77 @@ const StepAudioRow: React.FC<{
   audioUrl: string | null;
   isPolling: boolean;
   sessionId: string;
+  creditsBalance: number;
   onRefresh: () => void;
-}> = ({ step, status, audioUrl, isPolling, sessionId, onRefresh }) => {
+}> = ({ step, status, audioUrl, isPolling, sessionId, creditsBalance, onRefresh }) => {
   const [playing, setPlaying] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isScriptOpen, setIsScriptOpen] = useState(false);
   const [selectedVoice, setSelectedVoice] = useState(ELEVENLABS_VOICES[0].id);
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapError, setSwapError] = useState<string | null>(null);
+  const [localScript, setLocalScript] = useState(step.generatedText || '');
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [isGeneratingStepAudio, setIsGeneratingStepAudio] = useState(false);
+  const [scriptError, setScriptError] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const text = stripAudioMarkers(step.textOverride || step.generatedText) || step.elementText || '';
+
+  // Sync localScript when generatedText changes externally (e.g. AI regen from another panel)
+  const prevGeneratedText = useRef(step.generatedText);
+  useEffect(() => {
+    if (step.generatedText !== prevGeneratedText.current) {
+      prevGeneratedText.current = step.generatedText;
+      setLocalScript(step.generatedText || '');
+    }
+  }, [step.generatedText]);
+
+  const wordCount = localScript.trim() ? localScript.trim().split(/\s+/).length : 0;
+  const approxSecs = Math.round((wordCount / 2.5) * 10) / 10;
   
   const done = status?.voiceoverSource === 'tts' || status?.voiceoverSource === 'original' || status?.voiceoverSource === 'swap';
   const generating = status?.voiceoverSource === 'generating' || isPolling || isSwapping;
   const isSwapped = !!status?.originalVoiceoverKey;
+
+  async function handleRegenerateScript() {
+    setIsGeneratingScript(true);
+    setScriptError(null);
+    try {
+      const res = await apiClient.post<{ generatedText: string; budgetSeconds: number }>(
+        `/sessions/${sessionId}/steps/${step.id}/generate-script`,
+        { visualDurationSeconds: Math.max(wordCount / 2.5, 5) }
+      );
+      setLocalScript(res.generatedText);
+      useStudioStore.getState().updateStep(step.id, { generatedText: res.generatedText } as any);
+    } catch (e: any) {
+      setScriptError(e.message || 'Failed to regenerate script');
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  }
+
+  async function handleGenerateStepAudio() {
+    if (!localScript.trim()) return;
+    setIsGeneratingStepAudio(true);
+    setScriptError(null);
+    try {
+      await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/generate-audio`, {
+        text: localScript,
+      });
+      useStudioStore.getState().updateStep(step.id, {
+        voiceoverSource: 'generating',
+        voiceoverKey: null,
+        voiceoverDurationMs: null,
+      } as any);
+      useStudioStore.getState().startAudioPolling(sessionId);
+      onRefresh();
+    } catch (e: any) {
+      setScriptError(e.message || 'Failed to generate audio');
+    } finally {
+      setIsGeneratingStepAudio(false);
+    }
+  }
 
   function togglePlay() {
     const el = audioRef.current;
@@ -168,6 +225,18 @@ const StepAudioRow: React.FC<{
           {text || <span className="text-text-3 italic">No script</span>}
         </p>
 
+        {/* Edit script button — always visible */}
+        <button
+          onClick={() => { setIsScriptOpen(!isScriptOpen); setIsExpanded(false); }}
+          className={cn(
+            "w-6 h-6 rounded-full flex items-center justify-center transition-colors shrink-0 text-text-3 hover:text-text-1 border border-transparent",
+            isScriptOpen ? "bg-primary/20 text-primary border-primary/30" : "hover:bg-surface-3"
+          )}
+          title="Edit voiceover script"
+        >
+          <I.Pencil size={10} />
+        </button>
+
         {/* State indicator */}
         {generating ? (
           <I.Loader size={13} className="text-primary animate-spin shrink-0" />
@@ -179,7 +248,7 @@ const StepAudioRow: React.FC<{
               onEnded={() => setPlaying(false)}
               className="hidden"
             />
-            
+
             {/* Swapped indicator */}
             {status?.voiceoverSource === 'swap' && (
               <span className="text-[9px] bg-primary/10 text-primary border border-primary/25 px-1.5 py-0.5 rounded-full font-medium tracking-wide scale-90 select-none">
@@ -205,7 +274,7 @@ const StepAudioRow: React.FC<{
 
             {/* Voice Swapping settings toggler */}
             <button
-              onClick={() => setIsExpanded(!isExpanded)}
+              onClick={() => { setIsExpanded(!isExpanded); setIsScriptOpen(false); }}
               className={cn(
                 "w-6 h-6 rounded-full flex items-center justify-center transition-colors shrink-0 text-text-3 hover:text-text-1 border border-transparent",
                 isExpanded ? "bg-primary/20 text-primary border-primary/30" : "hover:bg-surface-3"
@@ -219,6 +288,66 @@ const StepAudioRow: React.FC<{
           <I.Circle size={8} className="text-text-3 shrink-0" />
         )}
       </div>
+
+      {/* Script editor drawer */}
+      {isScriptOpen && (
+        <div className="mx-2 p-3 bg-surface-2 border border-border rounded-lg flex flex-col gap-2.5 animate-in slide-in-from-top-1 duration-150">
+          <div className="flex items-center gap-1.5">
+            <I.Pencil size={12} className="text-primary" />
+            <span className="text-[11px] font-semibold text-text-1">Voiceover Script</span>
+            <span className="ml-auto text-[10px] text-text-3 tabular-nums">
+              {wordCount} word{wordCount !== 1 ? 's' : ''} · ~{approxSecs}s
+            </span>
+          </div>
+
+          <textarea
+            value={localScript}
+            onChange={e => setLocalScript(e.target.value)}
+            rows={3}
+            className="w-full bg-surface-3 border border-border rounded-md px-2.5 py-2 text-[11px] text-text leading-relaxed resize-none focus:outline-none focus:border-primary transition-colors placeholder:text-text-3"
+            placeholder="Enter voiceover script…"
+            disabled={isGeneratingScript || isGeneratingStepAudio}
+          />
+
+          {scriptError && (
+            <p className="text-[9px] text-danger font-medium flex items-center gap-1">
+              <I.AlertCircle size={10} />
+              {scriptError}
+            </p>
+          )}
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={isGeneratingScript ? I.Loader : I.Sparkles}
+              onClick={handleRegenerateScript}
+              disabled={isGeneratingScript || isGeneratingStepAudio}
+              className={cn(isGeneratingScript && '[&_svg]:animate-spin')}
+            >
+              {isGeneratingScript ? 'Regenerating…' : 'Regenerate Script'}
+            </Button>
+
+            <Button
+              variant="primary"
+              size="sm"
+              icon={isGeneratingStepAudio ? I.Loader : I.Mic}
+              onClick={handleGenerateStepAudio}
+              disabled={isGeneratingScript || isGeneratingStepAudio || generating || !localScript.trim() || creditsBalance < 1}
+              className={cn('ml-auto', isGeneratingStepAudio && '[&_svg]:animate-spin')}
+              title={creditsBalance < 1 ? 'Not enough credits' : 'Generate audio for this step · 1 credit'}
+            >
+              {isGeneratingStepAudio ? 'Queuing…' : 'Generate Audio'}
+            </Button>
+          </div>
+
+          {!isGeneratingScript && !isGeneratingStepAudio && creditsBalance < 1 && (
+            <p className="text-[9px] text-text-3 text-center">
+              Not enough credits to generate audio
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Expanded drawer for Voice Swap */}
       {done && isExpanded && !generating && (
@@ -452,6 +581,7 @@ export const AudioPanel: React.FC = () => {
                 audioUrl={url}
                 isPolling={audioPollingStepIds.includes(step.id)}
                 sessionId={sessionId}
+                creditsBalance={creditsBalance}
                 onRefresh={() => fetchNarrationStatus(sessionId)}
               />
             );
