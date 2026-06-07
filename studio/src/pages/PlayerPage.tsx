@@ -5,7 +5,7 @@ import { BACKEND_URL } from '../../../shared/constants';
 import { CinematicPlayer, type CinematicPlayerHandle } from '../components/player/CinematicPlayer';
 import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
 import { EmbedSOPView } from '../components/studio/canvases/EmbedSOPView';
-import { EmbedVideoView } from '../components/studio/canvases/EmbedVideoView';
+import { EmbedCinematicView } from '../components/studio/canvases/EmbedCinematicView';
 import { EmbedSlidesView } from '../components/studio/canvases/EmbedSlidesView';
 import { useIsEmbed } from '../hooks/useIsEmbed';
 import { useStudioStore } from '../store/useStudioStore';
@@ -339,7 +339,7 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   // Embed mode — wrap in fixed inset-0 so h-full in child views resolves to viewport height
   if (isEmbed) {
     let embedView: React.ReactNode;
-    if (mode === 'video')        embedView = <EmbedVideoView />;
+    if (mode === 'video')        embedView = <EmbedCinematicView />;
     else if (mode === 'demo')    embedView = <EmbedDemoView sessionOverride={session} />;
     else if (mode === 'slides')  embedView = <EmbedSlidesView />;
     else                         embedView = <EmbedSOPView />;

@@ -24,7 +24,7 @@ import { useSessionManager } from '../hooks/useSessionManager';
 import { useIsEmbed } from '../hooks/useIsEmbed';
 import { apiClient } from '../lib/apiClient';
 import { EmbedSOPView } from '../components/studio/canvases/EmbedSOPView';
-import { EmbedVideoView } from '../components/studio/canvases/EmbedVideoView';
+import { EmbedCinematicView } from '../components/studio/canvases/EmbedCinematicView';
 import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
 import { EmbedSlidesView } from '../components/studio/canvases/EmbedSlidesView';
 const STUDIO_TABS = [
@@ -97,7 +97,7 @@ export const StudioPage: React.FC = () => {
 
   // Embed mode: skip the full studio chrome and render the appropriate embed view
   if (isEmbed) {
-    if (mode === 'video') return <EmbedVideoView />;
+    if (mode === 'video') return <EmbedCinematicView />;
     if (mode === 'demo') return <EmbedDemoView />;
     if (mode === 'slides') return <EmbedSlidesView />;
     return <EmbedSOPView />;
