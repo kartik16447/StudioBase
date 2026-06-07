@@ -4,6 +4,11 @@ import { cn } from '../components/ui';
 import { BACKEND_URL } from '../../../shared/constants';
 import { CinematicPlayer, type CinematicPlayerHandle } from '../components/player/CinematicPlayer';
 import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
+import { EmbedSOPView } from '../components/studio/canvases/EmbedSOPView';
+import { EmbedVideoView } from '../components/studio/canvases/EmbedVideoView';
+import { EmbedSlidesView } from '../components/studio/canvases/EmbedSlidesView';
+import { useIsEmbed } from '../hooks/useIsEmbed';
+import { useStudioStore } from '../store/useStudioStore';
 import { resolveDisplayText } from '../lib/textUtils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -225,6 +230,7 @@ const ViewToggle: React.FC<{ tabs: ViewTab[]; mode: ViewMode; onChange: (m: View
 // ─── PlayerPage ───────────────────────────────────────────────────────────────
 
 export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => {
+  const { isEmbed, mode } = useIsEmbed();
   const [session,    setSession]    = useState<PSession | null>(null);
   const [ownerName,  setOwnerName]  = useState('');
   const [loading,    setLoading]    = useState(true);
@@ -283,6 +289,13 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     return () => clearInterval(id);
   }, [fetchSessionData]);
 
+  // When in embed mode, keep the Zustand store in sync so embed views can read the session
+  useEffect(() => {
+    if (isEmbed && session) {
+      useStudioStore.getState().setSession(session as any);
+    }
+  }, [isEmbed, session]);
+
   // Sort by timestamp to guarantee recording order regardless of how the extension uploaded them.
   // Screenshot keys and voiceover keys are already attached per-step by the backend.
   const steps = useMemo(() => {
@@ -322,6 +335,14 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
       </a>
     </div>
   );
+
+  // Embed mode — session is already injected into the store via useEffect above
+  if (isEmbed) {
+    if (mode === 'video')  return <EmbedVideoView />;
+    if (mode === 'demo')   return <EmbedDemoView sessionOverride={session} />;
+    if (mode === 'slides') return <EmbedSlidesView />;
+    return <EmbedSOPView />;
+  }
 
   const title        = session.aiOutputs?.title || 'Walkthrough';
   const summary      = session.aiOutputs?.summary;
