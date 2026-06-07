@@ -86,13 +86,22 @@ steps.post('/:sessionId/steps/:stepId/generate-script',
       throw new HTTPException(500, { message: 'Invalid session data' });
     }
 
-    const stepData = envelope.steps?.find((s: any) => s.id === stepId);
-    if (!stepData) {
+    const rawStep = envelope.steps?.find((s: any) => s.id === stepId);
+    if (!rawStep) {
       console.warn(`[generate-script] Step not found in session JSON: stepId=${stepId}`);
       throw new HTTPException(404, { message: 'Step not found' });
     }
 
-
+    // Resolve: extension stores data inside step.data when root fields are empty
+    const d = (rawStep.data as any) || {};
+    const stepData = {
+      action:      rawStep.action      || d.action      || null,
+      elementText: rawStep.elementText || d.elementText || null,
+      elementRole: rawStep.elementRole || d.elementRole || null,
+      inputValue:  rawStep.inputValue  || d.inputValue  || null,
+      pageTitle:   rawStep.pageTitle   || d.pageTitle   || '',
+      url:         rawStep.url         || d.frameUrl    || d.url || '',
+    };
 
     const budgetSeconds = Math.max(visualDurationSeconds, 5.0);
     console.log(`[generate-script] Step action details: action=${stepData.action}, pageTitle=${stepData.pageTitle}. Adjusted budget: ${budgetSeconds}s (visual duration was ${visualDurationSeconds}s)`);
@@ -109,8 +118,9 @@ Average speaking rate is 2.5 words per second.
 **THE RULES OF NARRATION:**
 1. **Use Exact Context:** ALWAYS use the \`elementText\` or \`pageTitle\` to name the UI element. NEVER invent button names (e.g. do not say "Click Save" unless the element text actually says "Save").
 2. **Input values:** NEVER read out the literal \`inputValue\`. Describe what is being typed, not the specific value. BAD: "type praduman in the search field" GOOD: "search for the contact by name". BAD: "enter 9811981120" GOOD: "enter the phone number".
-3. **Be Direct but Natural:** You may use light transitional words (e.g., "Now," "Next,") if it makes the narration flow better.
-4. **No "Why" Bloat:** Do not over-explain obvious concepts.
+3. **Voice:** Speak directly to the viewer — imperative or first-person plural. NEVER say "The user" or "the user". BAD: "The user clicks Save." GOOD: "Click Save."
+4. **Be Direct but Natural:** You may use light transitional words (e.g., "Now," "Next,") if it makes the narration flow better.
+5. **No "Why" Bloat:** Do not over-explain obvious concepts.
    - BAD: "Click on 'Support' to discover available resources for troubleshooting and assistance."
    - GOOD: "Next, open the Support tab."
 
@@ -200,7 +210,7 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
     }
 
     // Update the step in the R2 session JSON envelope
-    stepData.generatedText = generatedText;
+    rawStep.generatedText = generatedText;
     
     console.log(`[generate-script] Updating R2 session.json record for stepId=${stepId}`);
     await c.env.R2.put(assetKey, JSON.stringify(envelope), {
