@@ -181,17 +181,29 @@ export const SharePage: React.FC = () => {
   const isPreview = new URLSearchParams(window.location.search).get('preview') === '1';
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // When ShareModal toggles a format flag, reflect it immediately without reload
+  // When ShareModal toggles a format flag, reflect it immediately without reload.
+  // Handles both same-tab (CustomEvent) and cross-tab (BroadcastChannel) updates.
   useEffect(() => {
-    const handler = (e: Event) => {
-      const { sopEnabled: s, rawEnabled: r, cinematicEnabled: c, demoEnabled: d } = (e as CustomEvent).detail ?? {};
+    const applyFormats = (detail: any) => {
+      const { sopEnabled: s, rawEnabled: r, cinematicEnabled: c, demoEnabled: d } = detail ?? {};
       if (typeof s === 'boolean') setSopEnabled(s);
       if (typeof r === 'boolean') setRawEnabled(r);
       if (typeof c === 'boolean') setCinematicEnabled(c);
       if (typeof d === 'boolean') setDemoEnabled(d);
     };
+    const handler = (e: Event) => applyFormats((e as CustomEvent).detail);
     window.addEventListener('sb_formats_updated', handler);
-    return () => window.removeEventListener('sb_formats_updated', handler);
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('sb_share_formats');
+      bc.onmessage = (e: MessageEvent) => applyFormats(e.data);
+    } catch { /* not supported */ }
+
+    return () => {
+      window.removeEventListener('sb_formats_updated', handler);
+      bc?.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -209,11 +221,29 @@ export const SharePage: React.FC = () => {
       return;
     }
 
-    const loadSession = async (jsonUrl: string) => {
+    const loadSession = async (jsonUrl: string): Promise<boolean> => {
       const data = await fetch(jsonUrl).then(r => r.json()) as PublicSession;
       setSession(data);
+      // If the AI pipeline hasn't written steps yet, keep preparing and poll
+      // the JSON URL directly every 3s until steps appear.
+      if (!data.steps || data.steps.length === 0) {
+        setPreparing(true);
+        setLoading(false);
+        pollRef.current = setInterval(async () => {
+          try {
+            const fresh = await fetch(jsonUrl).then(r => r.json()) as PublicSession;
+            if (fresh.steps && fresh.steps.length > 0) {
+              setSession(fresh);
+              setPreparing(false);
+              if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+            }
+          } catch { /* silent — keep polling */ }
+        }, 3000);
+        return false;
+      }
       setPreparing(false);
       setLoading(false);
+      return true;
     };
 
     const fetchMeta = async (): Promise<boolean> => {
@@ -234,8 +264,8 @@ export const SharePage: React.FC = () => {
         return false; // not ready yet
       }
 
-      await loadSession(meta.sessionJsonUrl);
-      return true;
+      const hasSteps = await loadSession(meta.sessionJsonUrl);
+      return hasSteps;
     };
 
     const load = async () => {

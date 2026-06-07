@@ -75,6 +75,7 @@ const CreditPill: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
   const balance = useStudioStore(s => s.creditsBalance);
   const monthly = useStudioStore(s => s.monthlyAllocation);
   const open = useStudioStore(s => s.setCreditsModalOpen);
+  const fetchCredits = useStudioStore(s => s.fetchCredits);
 
   const pct = monthly > 0 ? balance / monthly : 1;
   const isCritical = pct < 0.1;
@@ -104,13 +105,23 @@ const CreditPill: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
   }
 
   const pill = (
-    <button onClick={() => open(true)} className={cn(pillClass, 'w-full justify-between px-3 py-2 rounded-lg')}>
-      <span className="flex items-center gap-1.5">
-        <I.Zap size={12} strokeWidth={2.2} />
-        <span>{balance} credits</span>
-      </span>
-      <span className="text-[10px] opacity-60">{monthly}/mo</span>
-    </button>
+    <div className="flex items-center gap-1">
+      <button onClick={() => open(true)} className={cn(pillClass, 'flex-1 justify-between px-3 py-2 rounded-lg')}>
+        <span className="flex items-center gap-1.5">
+          <I.Zap size={12} strokeWidth={2.2} />
+          <span>{balance} credits</span>
+        </span>
+        <span className="text-[10px] opacity-60">{monthly}/mo</span>
+      </button>
+      <Tooltip content="Refresh balance" side="right">
+        <button
+          onClick={() => fetchCredits()}
+          className="w-6 h-6 flex items-center justify-center rounded text-white/30 hover:text-white/60 hover:bg-white/[0.06] transition-colors"
+        >
+          <I.RefreshCw size={11} strokeWidth={2} />
+        </button>
+      </Tooltip>
+    </div>
   );
 
   if (isCritical) {

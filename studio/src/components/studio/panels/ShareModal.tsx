@@ -213,10 +213,15 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
       await apiClient.patch(`/sessions/${sessionId}/share-formats`, { [field]: next });
       // Keep store in sync so re-opening the modal reads fresh values
       if (session) setSession({ ...session, [field]: next } as any);
-      // Notify any open SharePage preview so it can update its tab list
-      window.dispatchEvent(new CustomEvent('sb_formats_updated', {
-        detail: { ...formats, [field]: next },
-      }));
+      const updated = { ...formats, [field]: next };
+      // Notify same-tab SharePage preview
+      window.dispatchEvent(new CustomEvent('sb_formats_updated', { detail: updated }));
+      // Notify cross-tab public share page (BroadcastChannel works within same origin)
+      try {
+        const bc = new BroadcastChannel('sb_share_formats');
+        bc.postMessage(updated);
+        bc.close();
+      } catch { /* BroadcastChannel not supported — graceful degradation */ }
     } catch {
       setFormats(f => ({ ...f, [field]: !next }));
     } finally {

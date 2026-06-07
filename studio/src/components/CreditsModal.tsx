@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { I } from './icons';
 import { cn, Button } from './ui';
 import { useStudioStore } from '../store/useStudioStore';
@@ -15,7 +15,11 @@ export const CreditsModal: React.FC = () => {
   const balance = useStudioStore(s => s.creditsBalance);
   const monthlyAllocation = useStudioStore(s => s.monthlyAllocation);
   const close = useStudioStore(s => s.setCreditsModalOpen);
+  const fetchCredits = useStudioStore(s => s.fetchCredits);
   const [selected, setSelected] = useState<string>('growth');
+
+  // Refresh balance every time the modal opens (catches admin top-ups)
+  useEffect(() => { fetchCredits(); }, [fetchCredits]);
 
   return (
     <div

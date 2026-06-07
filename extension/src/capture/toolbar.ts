@@ -141,16 +141,22 @@ function startDrag(e: MouseEvent): void {
   e.stopPropagation();
 
   dragActive = true;
-  const rect  = toolbarContainer.getBoundingClientRect();
-  dragStartX  = e.clientX;
-  dragStartY  = e.clientY;
-  dragOriginLeft = rect.left;
-  dragOriginTop  = rect.top;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+
+  // For top/bottom positions the container spans full viewport width and is
+  // centered via flexbox — rect.left would be 0 and the pill would snap to the
+  // left edge on mousedown. Use the pill's own bounding rect instead so the
+  // free-drag origin matches where the pill actually sits on screen.
+  const pill     = toolbarContainer.firstElementChild as HTMLElement | null;
+  const pillRect = pill ? pill.getBoundingClientRect() : toolbarContainer.getBoundingClientRect();
+  dragOriginLeft = pillRect.left;
+  dragOriginTop  = pillRect.top;
 
   // Free-position mode during drag
   Object.assign(toolbarContainer.style, {
-    left: rect.left + 'px', right: 'auto',
-    top:  rect.top  + 'px', bottom: 'auto',
+    left: pillRect.left + 'px', right: 'auto',
+    top:  pillRect.top  + 'px', bottom: 'auto',
     width: '', height: '',
     justifyContent: 'flex-start',
     transform: 'none',
@@ -409,11 +415,20 @@ function buildExpandedPill(pill: HTMLDivElement): void {
   if (!isV) { pill.appendChild(makeSpacer(4)); pill.appendChild(makeDivider()); pill.appendChild(makeSpacer(4)); }
   else       { pill.appendChild(makeDividerH()); }
 
-  // Stop & Process
-  pill.appendChild(makePillBtn('stop', isV ? 'Stop' : 'Stop & Process', 'danger', () => {
-    showProcessingState();
-    chrome.runtime.sendMessage({ type: 'STOP_RECORDING' });
-  }));
+  // Stop & Process — icon-only in vertical mode to avoid overflowing the 48px pill
+  if (isV) {
+    const stopBtn = makeIconBtn('stop', 'Stop & Process', () => {
+      showProcessingState();
+      chrome.runtime.sendMessage({ type: 'STOP_RECORDING' });
+    });
+    stopBtn.innerHTML = makeSvgIcon('stop', TB.danger);
+    pill.appendChild(stopBtn);
+  } else {
+    pill.appendChild(makePillBtn('stop', 'Stop & Process', 'danger', () => {
+      showProcessingState();
+      chrome.runtime.sendMessage({ type: 'STOP_RECORDING' });
+    }));
+  }
 
   // Collapse button
   pill.appendChild(makeExpandCollapseBtn(true));
@@ -809,7 +824,9 @@ function applyCursorMode(mode: CursorMode): void {
   cursorEl.id = 'sb-cursor';
   Object.assign(cursorEl.style, {
     position: 'fixed', pointerEvents: 'none',
-    zIndex: '2147483647', left: '0', top: '0',
+    // Keep below the toolbar container (2147483647) so the drag handle
+    // is always reachable and the grab cursor isn't obscured by the SVG arrow.
+    zIndex: '2147483645', left: '0', top: '0',
   });
 
   const arrowSvg = (fill: string, stroke: string) =>
