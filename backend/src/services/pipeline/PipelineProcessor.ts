@@ -333,13 +333,40 @@ export class PipelineProcessor {
         }
 
         // Workers AI sometimes auto-parses the JSON when using json_schema response_format
-        const generated = (typeof rawAiResponse === 'object' ? rawAiResponse : JSON.parse(rawAiResponse as string)) as {
+        type GeneratedSOP = {
           title: string;
           summary: string;
           tags: string[];
           steps: { id: string; stepTitle: string; generatedText: string }[];
           chapterBreaks: { afterStepId: string; chapterTitle: string }[];
         };
+        let generated: GeneratedSOP;
+        if (typeof rawAiResponse === 'object') {
+          generated = rawAiResponse as GeneratedSOP;
+        } else {
+          const rawStr = rawAiResponse as string;
+          try {
+            generated = JSON.parse(rawStr);
+          } catch {
+            // AI sometimes emits raw newlines/control chars inside JSON string values.
+            // Walk char-by-char, escaping control chars only when inside a quoted string.
+            let inStr = false, esc = false, cleaned = '';
+            for (const ch of rawStr) {
+              if (esc)        { esc = false; cleaned += ch; continue; }
+              if (ch === '\\') { esc = true;  cleaned += ch; continue; }
+              if (ch === '"')  { inStr = !inStr; cleaned += ch; continue; }
+              if (inStr) {
+                if (ch === '\n') { cleaned += '\\n'; continue; }
+                if (ch === '\r') { cleaned += '\\r'; continue; }
+                if (ch === '\t') { cleaned += '\\t'; continue; }
+                if (ch.charCodeAt(0) < 32) continue; // drop other control chars
+              }
+              cleaned += ch;
+            }
+            console.log(`[PIPELINE] Retrying JSON.parse after sanitizing control chars (cleaned length: ${cleaned.length})`);
+            generated = JSON.parse(cleaned);
+          }
+        }
 
         // Post-process: enforce word budget and sanitize fallback phrases
         const FALLBACK_PHRASES = new Set(['completed action', 'other', 'find…', 'find...']);
