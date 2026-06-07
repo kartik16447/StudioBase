@@ -324,10 +324,16 @@ export class PipelineProcessor {
           }
         ) as { response: string };
 
-        console.log(`[PIPELINE] AI response received -- raw length:${aiResponse?.response?.length ?? 0}`);
-        console.log(`[PIPELINE] AI raw response:`, aiResponse?.response?.slice(0, 300));
+        const rawAiResponse = aiResponse?.response;
+        console.log(`[PIPELINE] AI response received -- type:${typeof rawAiResponse} raw length:${typeof rawAiResponse === 'string' ? rawAiResponse.length : 'object'}`);
+        console.log(`[PIPELINE] AI raw response:`, typeof rawAiResponse === 'string' ? rawAiResponse.slice(0, 300) : JSON.stringify(rawAiResponse).slice(0, 300));
 
-        const generated = JSON.parse(aiResponse.response) as {
+        if (!rawAiResponse) {
+          throw new Error(`AI_NULL_RESPONSE: model returned ${JSON.stringify(aiResponse)}`);
+        }
+
+        // Workers AI sometimes auto-parses the JSON when using json_schema response_format
+        const generated = (typeof rawAiResponse === 'object' ? rawAiResponse : JSON.parse(rawAiResponse as string)) as {
           title: string;
           summary: string;
           tags: string[];

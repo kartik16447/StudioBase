@@ -572,7 +572,9 @@ export const useStudioStore = create<StudioState>((set, get) => ({
             set({ isAiProcessing: false });
           }
           if (wasPolling && status === 'failed') {
-            showToast('error', 'AI generation failed — please try again');
+            const reason = (data as any).errorReason ? ` (${(data as any).errorReason})` : '';
+            console.error('[useStudioStore][polling] Pipeline failed. errorReason:', (data as any).errorReason);
+            showToast('error', `AI generation failed — please try again${reason}`);
           } else if (wasPolling && status === 'credit_exhausted') {
             showToast('error', 'Not enough credits to generate AI content');
           }
