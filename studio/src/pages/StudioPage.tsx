@@ -11,6 +11,7 @@ import {
 import {
   StudioHeader, SidebarControls
 } from '../components/studio';
+import { ProcessingRevealScreen } from '../components/studio/ProcessingRevealScreen';
 import { ShareModal } from '../components/studio/panels/ShareModal';
 import { SOPCanvas } from '../components/studio/canvases/SOPCanvas';
 import { VideoCanvas } from '../components/studio/canvases/VideoCanvas';
@@ -58,6 +59,26 @@ export const StudioPage: React.FC = () => {
   const [isOpeningInDocs, setIsOpeningInDocs] = useState(false);
   const [isSeededSession, setIsSeededSession] = useState(false);
   const [sopToDocPromptSeen, setSopToDocPromptSeen] = useState(true); // default true — only show when explicitly false
+  // Reveal screen: shown once per session (sessionStorage flag), or forced via ?reveal=1
+  const [showReveal, setShowReveal] = useState(() => {
+    const forceReveal = new URLSearchParams(window.location.search).get('reveal') === '1';
+    if (forceReveal) return true;
+    const sessionId = new URLSearchParams(window.location.search).get('session')
+      || window.location.pathname.split('/sessions/')[1]?.split('/')[0];
+    if (!sessionId) return false;
+    const key = `reveal_seen_${sessionId}`;
+    if (sessionStorage.getItem(key)) return false;
+    sessionStorage.setItem(key, '1');
+    return true;
+  });
+
+  const dismissReveal = (view: 'sop' | 'video' | 'docs' | 'embed') => {
+    setShowReveal(false);
+    if (view === 'sop') setActiveView('sop');
+    else if (view === 'video') setActiveView('video');
+    else if (view === 'docs') handleOpenInDocs(false);
+    else if (view === 'embed') setShareOpen(true);
+  };
 
   useSessionManager();
 
@@ -155,6 +176,18 @@ export const StudioPage: React.FC = () => {
           Back to Library
         </button>
       </div>
+    );
+  }
+
+  if (showReveal && session) {
+    return (
+      <ProcessingRevealScreen
+        session={session}
+        onViewSOP={() => dismissReveal('sop')}
+        onViewVideo={() => dismissReveal('video')}
+        onViewDocs={() => dismissReveal('docs')}
+        onViewEmbed={() => dismissReveal('embed')}
+      />
     );
   }
 
