@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '../ui';
 import { I } from '../icons';
-import type { SessionEnvelope } from '../../../shared/types/session';
+import type { SessionEnvelope } from '../../../../shared/types/session';
 
 interface ProcessingRevealScreenProps {
   session: SessionEnvelope;
