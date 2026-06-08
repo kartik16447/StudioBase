@@ -3,6 +3,7 @@ import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../icons';
 import { ScreenshotPlaceholder } from '../../ui';
 import { Hotspot } from '../../demo/Hotspot';
+import { useIndexStepEvents } from '../../../hooks/useIndexStepEvents';
 import type { HotspotStyle } from '../../demo/Hotspot';
 import { withAlpha, brandGradient } from '../../demo/helpers';
 import { resolveDisplayText } from '../../../lib/textUtils';
@@ -576,7 +577,7 @@ function getHotspotCoords(step: Step): { x: number; y: number } | null {
   return x !== null && y !== null ? { x, y } : null;
 }
 
-export const EmbedDemoView: React.FC<{ sessionOverride?: any; readOnly?: boolean }> = ({ sessionOverride }) => {
+export const EmbedDemoView: React.FC<{ sessionOverride?: any; readOnly?: boolean; shareToken?: string }> = ({ sessionOverride, shareToken = null }) => {
   const storeSession = useStudioStore((s) => s.session);
   const session  = sessionOverride ?? storeSession;
   const brand    = useStudioStore((s) => s.brand.primaryColor) || '#6366f1';
@@ -605,6 +606,11 @@ export const EmbedDemoView: React.FC<{ sessionOverride?: any; readOnly?: boolean
 
   const steps = session?.steps ?? [];
   const seq   = React.useMemo(() => buildSequence(steps, meta.chapterBreaks), [steps, meta.chapterBreaks]);
+
+  // Track current stepIndex: seq[idx].stepIndex for step frames, -1 for chapter/end frames
+  const frame = seq[idx];
+  const currentStepIndex = frame?.type === 'step' ? frame.stepIndex : -1;
+  useIndexStepEvents(shareToken, currentStepIndex >= 0 ? currentStepIndex : 0, steps.length);
 
   const go = useCallback((d: number) => setIdx((i) => Math.max(0, Math.min(seq.length - 1, i + d))), [seq.length]);
 
@@ -644,8 +650,6 @@ export const EmbedDemoView: React.FC<{ sessionOverride?: any; readOnly?: boolean
     const t = setInterval(() => go(1), autoplayCfg.intervalSeconds * 1000);
     return () => clearInterval(t);
   }, [autoplayCfg.enabled, autoplayCfg.intervalSeconds, go, unlocked]);
-
-  const frame = seq[idx];
 
   // Cursor tween
   useEffect(() => {

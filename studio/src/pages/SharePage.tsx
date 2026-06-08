@@ -5,6 +5,7 @@ import { BACKEND_URL } from '../../../shared/constants';
 import { CinematicPlayer } from '../components/player/CinematicPlayer';
 import { EmbedDemoView } from '../components/studio/canvases/EmbedDemoView';
 import { resolveDisplayText } from '../lib/textUtils';
+import { useScrollStepEvents } from '../hooks/useScrollStepEvents';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -332,6 +333,14 @@ export const SharePage: React.FC = () => {
     }
     setAccessRequestSent(true);
   };
+
+  // Step-level analytics for the guide tab — computed before early returns so the hook
+  // is always called unconditionally (React rules). IntersectionObserver only fires when
+  // the step DOM nodes are actually present (i.e. guide tab is active).
+  const _steps = [...(session?.steps || [])].sort(
+    (a: any, b: any) => ((a.timestamp ?? 0) - (b.timestamp ?? 0))
+  );
+  useScrollStepEvents(shareToken, _steps, _steps.length);
 
   // ── Loading ──
   if (loading) {

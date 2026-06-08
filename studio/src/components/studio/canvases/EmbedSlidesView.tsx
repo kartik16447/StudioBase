@@ -4,6 +4,7 @@ import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../icons';
 import { cn } from '../../ui';
 import { Watermark } from './EmbedSOPView';
+import { useIndexStepEvents } from '../../../hooks/useIndexStepEvents';
 
 const SPRING_CFG = { stiffness: 260, damping: 32, mass: 1 };
 
@@ -16,7 +17,7 @@ function getAutoplayMs(step: any, intervalOverride: number | null) {
   return step?.voiceoverDurationMs || 4000;
 }
 
-export const EmbedSlidesView: React.FC = () => {
+export const EmbedSlidesView: React.FC<{ shareToken?: string }> = ({ shareToken = null }) => {
   const session = useStudioStore(state => state.session);
   const focusedStepIndex = useStudioStore(state => state.focusedStepIndex);
   const setStepIndex = useStudioStore(state => state.setStepIndex);
@@ -29,6 +30,8 @@ export const EmbedSlidesView: React.FC = () => {
   const total = steps.length;
   const idx = total > 0 ? Math.max(0, Math.min(total - 1, focusedStepIndex)) : 0;
   const hue = 244 + (idx * 11) % 80;
+
+  useIndexStepEvents(shareToken, idx, total);
 
   const [imgLoaded, setImgLoaded] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);

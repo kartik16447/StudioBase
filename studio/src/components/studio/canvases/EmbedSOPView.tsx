@@ -4,6 +4,7 @@ import { useStudioStore } from '../../../store/useStudioStore';
 import { I } from '../../icons';
 import { cn } from '../../ui';
 import { resolveDisplayText } from '../../../lib/textUtils';
+import { useIndexStepEvents } from '../../../hooks/useIndexStepEvents';
 
 const SPRING = { type: 'spring' as const, stiffness: 320, damping: 34 };
 
@@ -12,7 +13,7 @@ function stepBg(hue: number) {
   return `radial-gradient(ellipse at 30% 30%, hsl(${hue} 65% 32%) 0%, hsl(${hue} 45% 18%) 60%, hsl(${hue} 35% 10%) 100%)`;
 }
 
-export const EmbedSOPView: React.FC = () => {
+export const EmbedSOPView: React.FC<{ shareToken?: string }> = ({ shareToken = null }) => {
   const session = useStudioStore(state => state.session);
   const focusedStepIndex = useStudioStore(state => state.focusedStepIndex);
   const setStepIndex = useStudioStore(state => state.setStepIndex);
@@ -23,6 +24,8 @@ export const EmbedSOPView: React.FC = () => {
   const total = steps.length;
   const idx = total > 0 ? Math.max(0, Math.min(total - 1, focusedStepIndex)) : 0;
   const hue = 244 + (idx * 11) % 80;
+
+  useIndexStepEvents(shareToken, idx, total);
 
   // Reset loaded state when step changes
   useEffect(() => { setImgLoaded(false); }, [idx]);

@@ -11,6 +11,7 @@ import { EmbedRawVideoView } from '../components/studio/canvases/EmbedRawVideoVi
 import { useIsEmbed } from '../hooks/useIsEmbed';
 import { useStudioStore } from '../store/useStudioStore';
 import { resolveDisplayText } from '../lib/textUtils';
+import { useScrollStepEvents } from '../hooks/useScrollStepEvents';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -310,6 +311,10 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     return s ? new Date(s).getTime() : ((steps[0] as any)?.timestamp || 0);
   }, [session, steps]);
 
+  // Step analytics for the non-embed guide tab (scroll-based).
+  // Hook called unconditionally; observer only fires when step DOM nodes exist.
+  useScrollStepEvents(shareToken, steps, steps.length);
+
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
@@ -340,11 +345,11 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
   // Embed mode — wrap in fixed inset-0 so h-full in child views resolves to viewport height
   if (isEmbed) {
     let embedView: React.ReactNode;
-    if (mode === 'video')          embedView = <EmbedCinematicView />;
-    else if (mode === 'demo')      embedView = <EmbedDemoView sessionOverride={session} />;
-    else if (mode === 'slides')    embedView = <EmbedSlidesView />;
-    else if (mode === 'rawvideo')  embedView = <EmbedRawVideoView />;
-    else                           embedView = <EmbedSOPView />;
+    if (mode === 'video')          embedView = <EmbedCinematicView shareToken={shareToken} />;
+    else if (mode === 'demo')      embedView = <EmbedDemoView sessionOverride={session} shareToken={shareToken} />;
+    else if (mode === 'slides')    embedView = <EmbedSlidesView shareToken={shareToken} />;
+    else if (mode === 'rawvideo')  embedView = <EmbedRawVideoView shareToken={shareToken} />;
+    else                           embedView = <EmbedSOPView shareToken={shareToken} />;
     return <div style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>{embedView}</div>;
   }
 

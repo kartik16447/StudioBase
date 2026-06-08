@@ -1,9 +1,13 @@
 import React, { useMemo } from 'react';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { Watermark } from './EmbedSOPView';
+import { useIndexStepEvents } from '../../../hooks/useIndexStepEvents';
 
-export const EmbedRawVideoView: React.FC = () => {
+export const EmbedRawVideoView: React.FC<{ shareToken?: string }> = ({ shareToken = null }) => {
   const session = useStudioStore(state => state.session);
+
+  // No step navigation — fire abandoned on beforeunload / tab hide only.
+  useIndexStepEvents(shareToken, 0, 0);
   const assets  = (session?.assets ?? {}) as Record<string, string>;
 
   const videoUrl = useMemo(() => {

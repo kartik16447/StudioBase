@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { Env, Variables } from '../../types/hono';
 import { DocumentService } from '../../services/DocumentService';
+import { AnalyticsService } from '../../services/AnalyticsService';
 
 export const publicRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -463,6 +464,71 @@ publicRoutes.get('/docs/:shareToken', async (c) => {
     emoji: doc.emoji,
     blocks: JSON.parse(doc.blocks),
   });
+});
+
+// POST /v1/public/analytics/events — unauthenticated step event ingest from share/embed pages
+// Rate-limited at 100 req/IP/hour. Each event must carry a shareToken that resolves
+// to a real public session; events with invalid tokens are silently dropped.
+publicRoutes.post('/analytics/events', async (c) => {
+  // Rate limit: 100 req per IP per hour via TOKEN_CACHE KV
+  const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
+  const rateKey = `rate:pubanalytics:${ip}`;
+  const cur = await c.env.TOKEN_CACHE.get(rateKey);
+  const n = cur ? parseInt(cur, 10) : 0;
+  if (n >= 100) return c.json({ ok: false }, 429);
+  c.executionCtx.waitUntil(
+    c.env.TOKEN_CACHE.put(rateKey, String(n + 1), { expirationTtl: 3600 })
+  );
+
+  const body = await c.req.json<{ events: any[] }>().catch(() => null);
+  const rawEvents = body?.events;
+  if (!Array.isArray(rawEvents) || rawEvents.length === 0) return c.json({ ok: true });
+
+  // Only process events that carry a shareToken
+  const withToken = rawEvents.filter(
+    (e) => typeof e.shareToken === 'string' && e.shareToken.length > 0
+  );
+  if (withToken.length === 0) return c.json({ ok: true });
+
+  // Resolve unique shareTokens → { sessionId, sopId, workspaceId }
+  const tokens = [...new Set(withToken.map((e) => e.shareToken as string))];
+  const sessionMap = new Map<string, { id: string; workspaceId: string; sopId: string | null }>();
+
+  await Promise.all(
+    tokens.map(async (token) => {
+      const row = await c.env.DB.prepare(
+        `SELECT s.id, s.workspaceId, sop.id AS sopId
+         FROM sessions s
+         LEFT JOIN sops sop ON sop.sessionId = s.id
+         WHERE s.shareToken = ? AND s.isPublic = 1`
+      ).bind(token).first<{ id: string; workspaceId: string; sopId: string | null }>();
+      if (row) sessionMap.set(token, row);
+    })
+  );
+
+  // Drop events whose shareToken doesn't resolve to a real public session
+  const valid = withToken.filter((e) => sessionMap.has(e.shareToken));
+  if (valid.length === 0) return c.json({ ok: true });
+
+  const service = new AnalyticsService(c.env);
+  const stamped = valid.map((e) => {
+    const sess = sessionMap.get(e.shareToken)!;
+    return {
+      id: (e.id as string) ?? crypto.randomUUID(),
+      sessionId: sess.id,
+      sopId: sess.sopId ?? null,
+      workspaceId: sess.workspaceId,
+      userId: null as null,
+      stepIndex: typeof e.stepIndex === 'number' ? e.stepIndex : null,
+      eventType: String(e.eventType),
+      durationMs: typeof e.durationMs === 'number' ? e.durationMs : null,
+      metadata: e.metadata ?? (e.lastStepIndex != null ? { lastStepIndex: e.lastStepIndex } : null),
+      timestamp: typeof e.timestamp === 'number' ? e.timestamp : Date.now(),
+    };
+  });
+
+  c.executionCtx.waitUntil(service.insertEvents(stamped).catch(console.error));
+  return c.json({ ok: true });
 });
 
 // POST /v1/public/:shareToken/request-access — no auth required

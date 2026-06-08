@@ -2,9 +2,14 @@ import React, { useMemo } from 'react';
 import { useStudioStore } from '../../../store/useStudioStore';
 import { CinematicPlayer } from '../../player/CinematicPlayer';
 import { Watermark } from './EmbedSOPView';
+import { useIndexStepEvents } from '../../../hooks/useIndexStepEvents';
 
-export const EmbedCinematicView: React.FC = () => {
+export const EmbedCinematicView: React.FC<{ shareToken?: string }> = ({ shareToken = null }) => {
   const session = useStudioStore(state => state.session);
+
+  // Fire sop_abandoned on beforeunload / tab hide. No per-step tracking —
+  // CinematicPlayer advances automatically and doesn't expose a current step index.
+  useIndexStepEvents(shareToken, 0, session?.steps?.length ?? 0);
 
   const steps = useMemo(() => {
     const raw = (session?.steps ?? []) as any[];
