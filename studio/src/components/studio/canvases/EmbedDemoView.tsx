@@ -382,14 +382,41 @@ function CursorTweenOverlay({ tween, brand }: { tween: CursorTween; brand: strin
   );
 }
 
-function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNavigate, cursorTween }: {
+function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNavigate, cursorTween, onImgNaturalSize }: {
   step: Step; session: any; brand: string; hotspotStyle: HotspotStyle; progress: number; onNavigate: (ov: any) => void;
-  cursorTween?: CursorTween | null;
+  cursorTween?: CursorTween | null; onImgNaturalSize?: (size: { w: number; h: number }) => void;
 }) {
   const coords    = step.coordinates;
   const noCoords  = hasNoMeaningfulCoords(step);
-  const rawX      = !noCoords && coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : null;
-  const rawY      = !noCoords && coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
+
+  // Track screenshot natural dimensions so we can account for browser chrome in the frame.
+  // getDisplayMedia captures the full window (including tabs/URL bar) but clientX/Y are
+  // page-content-relative, so we need to offset rawY by the chrome height.
+  const [imgNaturalSize, setImgNaturalSize] = useState<{ w: number; h: number } | null>(null);
+  const handleImgLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const size = { w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight };
+    setImgNaturalSize(size);
+    onImgNaturalSize?.(size);
+  };
+
+  const rawX = !noCoords && coords && coords.viewportWidth > 0
+    ? (coords.x / coords.viewportWidth) * 100
+    : null;
+
+  const rawY = (() => {
+    if (noCoords || !coords || coords.viewportHeight <= 0) return null;
+    if (!imgNaturalSize || !coords.viewportWidth) return (coords.y / coords.viewportHeight) * 100;
+    // Compute DPR from image width (assumes no horizontal chrome = full width is page content)
+    const dpr = imgNaturalSize.w / coords.viewportWidth;
+    const screenshotCssH = imgNaturalSize.h / dpr;
+    const chromeCssTop = screenshotCssH - coords.viewportHeight;
+    // Only apply adjustment if chrome is significant (>10px) to avoid floating-point noise
+    if (chromeCssTop > 10) {
+      return (coords.y + chromeCssTop) / screenshotCssH * 100;
+    }
+    return (coords.y / coords.viewportHeight) * 100;
+  })();
+
   // Prefer creator-repositioned value; fall back to raw recorded coordinate
   const hotspotX  = step.animationTarget?.pctX  ?? rawX;
   const hotspotY  = step.animationTarget?.pctY  ?? rawY;
@@ -421,7 +448,7 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNaviga
           position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain',
           transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)',
         };
-        return <img src={screenshotUrl} alt={`Step ${step.sequence}`} style={imgStyle} draggable={false} />;
+        return <img src={screenshotUrl} alt={`Step ${step.sequence}`} style={imgStyle} draggable={false} onLoad={handleImgLoad} />;
       })() : (
         <ScreenshotPlaceholder step={step} session={session} showChrome={false} aspect="16/9" rounded="" mode="stage" className="w-full h-full !shadow-none" />
       )}
@@ -458,7 +485,10 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNaviga
         }
         return null;
       })}
-      {hotspotX !== null && hotspotY !== null && !cursorTween && (
+      {/* Only show default nav hotspot when no creator overlay already handles navigation */}
+      {hotspotX !== null && hotspotY !== null && !cursorTween
+        && !overlays.some((ov) => ov.destination !== 'stay' && (ov.type === 'spotlight' || ov.type === 'hotspot' || ov.type === 'callout'))
+        && (
         <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={hotspotSz} onClick={() => onNavigate({ destination: 'next' })} title="Next" />
       )}
       {cursorTween && <CursorTweenOverlay tween={cursorTween} brand={brand} />}
@@ -578,11 +608,17 @@ function hasNoMeaningfulCoords(step: Step): boolean {
     && step.animationTarget?.pctY == null;
 }
 
-function getHotspotCoords(step: Step): { x: number; y: number } | null {
+function getHotspotCoords(step: Step, imgNaturalSize?: { w: number; h: number } | null): { x: number; y: number } | null {
   if (hasNoMeaningfulCoords(step)) return null;
   const coords = step.coordinates;
   const rawX = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : null;
-  const rawY = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
+  let rawY = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
+  if (rawY !== null && imgNaturalSize && coords?.viewportWidth && coords?.viewportHeight) {
+    const dpr = imgNaturalSize.w / coords.viewportWidth;
+    const screenshotCssH = imgNaturalSize.h / dpr;
+    const chromeCssTop = screenshotCssH - coords.viewportHeight;
+    if (chromeCssTop > 10) rawY = (coords.y + chromeCssTop) / screenshotCssH * 100;
+  }
   const x = step.animationTarget?.pctX ?? rawX;
   const y = step.animationTarget?.pctY ?? rawY;
   return x !== null && y !== null ? { x, y } : null;
@@ -614,6 +650,7 @@ export const EmbedDemoView: React.FC<{ sessionOverride?: any; readOnly?: boolean
   // Cursor tween tracking
   const prevHotspotRef = useRef<{ x: number; y: number } | null>(null);
   const [activeTween, setActiveTween] = useState<CursorTween | null>(null);
+  const imgNaturalSizeRef = useRef<{ w: number; h: number } | null>(null);
 
   const steps = session?.steps ?? [];
   const seq   = React.useMemo(() => buildSequence(steps, meta.chapterBreaks), [steps, meta.chapterBreaks]);
@@ -665,7 +702,7 @@ export const EmbedDemoView: React.FC<{ sessionOverride?: any; readOnly?: boolean
   // Cursor tween
   useEffect(() => {
     if (frame?.type !== 'step') { prevHotspotRef.current = null; return; }
-    const to = getHotspotCoords(frame.step);
+    const to = getHotspotCoords(frame.step, imgNaturalSizeRef.current);
     if (prevHotspotRef.current && to) {
       setActiveTween({ fromX: prevHotspotRef.current.x, fromY: prevHotspotRef.current.y, toX: to.x, toY: to.y });
       const t = setTimeout(() => { setActiveTween(null); prevHotspotRef.current = to; }, 450);
@@ -709,7 +746,7 @@ export const EmbedDemoView: React.FC<{ sessionOverride?: any; readOnly?: boolean
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '52px 24px 28px' }} onClick={(e) => e.stopPropagation()}>
           <div style={{ width: cardWidth, transition: 'width 0.3s ease', display: 'flex', flexDirection: 'column' }}>
             <div key={frame.stepIndex} className={transitionStyle === 'crossfade' ? 'dm-fade' : undefined} style={{ position: 'relative' }}>
-              <ScreenshotCard step={frame.step} session={session} brand={brand} hotspotStyle={hotspotStyle} progress={progress} onNavigate={handleOverlayClick} cursorTween={activeTween} />
+              <ScreenshotCard step={frame.step} session={session} brand={brand} hotspotStyle={hotspotStyle} progress={progress} onNavigate={handleOverlayClick} cursorTween={activeTween} onImgNaturalSize={(s) => { imgNaturalSizeRef.current = s; }} />
               {/* Countdown ring overlays the hotspot when autoplay is on */}
               {autoplayCfg.enabled && frame.stepIndex < steps.length - 1 && (
                 <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
