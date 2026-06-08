@@ -429,8 +429,12 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNaviga
   const cardCallouts = cards.filter((c) => c.type === 'callout' && c.rect);
   const screenshotUrl = step.screenshotKey && session?.assets?.[step.screenshotKey] ? session.assets[step.screenshotKey] : null;
 
+  const aspectStr = (coords && coords.viewportWidth && coords.viewportHeight) 
+    ? `${coords.viewportWidth} / ${coords.viewportHeight}` 
+    : '16 / 9';
+
   return (
-    <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', borderRadius: 14, overflow: 'hidden', background: '#111', boxShadow: '0 30px 80px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06)' }}>
+    <div style={{ position: 'relative', width: '100%', aspectRatio: aspectStr, borderRadius: 14, overflow: 'hidden', background: '#111', boxShadow: '0 30px 80px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06)' }}>
       {/* Progress bar */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.12)', zIndex: 30 }}>
         <div style={{ height: '100%', width: `${progress * 100}%`, background: brand, transition: 'width 0.5s cubic-bezier(0.22,1,0.36,1)', boxShadow: `0 0 10px ${withAlpha(brand, 0.7)}` }} />

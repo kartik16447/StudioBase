@@ -19,8 +19,8 @@ function buildEmbedUrl(mode: EmbedTab, shareToken: string | null) {
   return `${window.location.origin}/s/${shareToken}?embed=1&mode=${mode}`;
 }
 
-function iframeSnippet(url: string, title: string) {
-  return `<iframe\n  src="${url}"\n  width="100%"\n  height="560"\n  frameborder="0"\n  allowfullscreen\n  title="${title}"\n></iframe>`;
+function iframeSnippet(url: string, title: string, aspectStr: string) {
+  return `<iframe\n  src="${url}"\n  width="100%"\n  style="aspect-ratio: ${aspectStr}; border: none;"\n  allowfullscreen\n  title="${title}"\n></iframe>`;
 }
 
 export const EmbedModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
@@ -38,7 +38,13 @@ export const EmbedModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
   const title = session?.aiOutputs?.title ?? 'StudioBase Walkthrough';
   const shareToken = (session as any)?.shareToken ?? null;
   const embedUrl = buildEmbedUrl(activeTab, shareToken);
-  const snippet = embedUrl ? iframeSnippet(embedUrl, title) : '<!-- Share this session publicly first to get an embed URL -->';
+
+  const coords = session?.steps?.[0]?.coordinates;
+  const aspectStr = (coords && coords.viewportWidth && coords.viewportHeight) 
+    ? `${coords.viewportWidth} / ${coords.viewportHeight}` 
+    : '16 / 9';
+
+  const snippet = embedUrl ? iframeSnippet(embedUrl, title, aspectStr) : '<!-- Share this session publicly first to get an embed URL -->';
 
   const handleCopy = () => {
     if (!embedUrl) return;

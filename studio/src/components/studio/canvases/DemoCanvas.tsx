@@ -530,12 +530,12 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
               e.stopPropagation();
               focusBodyRef?.current?.();
             }}
-            style={{ position: 'relative', aspectRatio: '16/9', background: '#fff', userSelect: 'none', cursor: activeTool ? 'crosshair' : 'default' }}
+            style={{ position: 'relative', aspectRatio: (coords && coords.viewportWidth && coords.viewportHeight) ? `${coords.viewportWidth}/${coords.viewportHeight}` : '16/9', background: '#fff', userSelect: 'none', cursor: activeTool ? 'crosshair' : 'default' }}
           >
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.1)', zIndex: 30 }}>
               <div style={{ height: '100%', background: brand }} />
             </div>
-            <ScreenshotPlaceholder step={step} session={session} showChrome={false} aspect="16/9" rounded="" mode="stage" className="w-full h-full !shadow-none" />
+            <ScreenshotPlaceholder step={step} session={session} showChrome={false} aspect={(coords && coords.viewportWidth && coords.viewportHeight) ? `${coords.viewportWidth}/${coords.viewportHeight}` : '16/9'} rounded="" mode="stage" className="w-full h-full !shadow-none" />
 
             {/* Blur overlays */}
             {blurCards.map((card) => (
