@@ -48,17 +48,6 @@ interface CardSpec {
 
 const EASE_RISE = [0.22, 1, 0.36, 1] as const;
 
-// Skeleton stagger — parent controls timing, children inherit via variants
-const skeletonContainer = {
-  hidden: {},
-  show: {
-    transition: { staggerChildren: 0.15, delayChildren: 0.1 },
-  },
-};
-const skeletonItem = {
-  hidden: { y: 12, opacity: 0 },
-  show:   { y: 0,  opacity: 1, transition: { duration: 0.28, ease: 'easeOut' } },
-};
 
 export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
   session,
@@ -309,58 +298,9 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
           )}
         </div>
 
-        {/* Block 2 — Cards: skeleton while processing, real cards once ready */}
-        {/* No mode="wait" — concurrent so real cards start entering while skeleton fades */}
+        {/* Block 2 — Cards: nothing while processing, stagger in when ready */}
         <AnimatePresence>
-          {phase === 'skeleton' ? (
-
-            /* ── Skeleton cards — stagger in one by one via variants ─────── */
-            <motion.div
-              key="skeletons"
-              className="flex flex-col gap-3"
-              variants={reducedMotion ? undefined : skeletonContainer}
-              initial={reducedMotion ? undefined : 'hidden'}
-              animate={reducedMotion ? undefined : 'show'}
-              exit={{ opacity: 0, transition: { duration: 0.15 } }}
-            >
-              {[0, 1, 2, 3].map((i) => (
-                <motion.div
-                  key={i}
-                  variants={reducedMotion ? undefined : skeletonItem}
-                  className="flex items-center gap-2 rounded-card"
-                  style={{
-                    padding: '16px 20px',
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                  }}
-                >
-                  {/* Skeleton checkmark well */}
-                  <motion.div
-                    className="flex-shrink-0"
-                    animate={reducedMotion ? undefined : { opacity: [0.25, 0.55, 0.25] }}
-                    transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut', delay: i * 0.18 }}
-                    style={{ width: 38, height: 38, borderRadius: 8, background: 'rgba(255,255,255,0.07)', flexShrink: 0 }}
-                  />
-                  {/* Skeleton text lines */}
-                  <div className="flex flex-col gap-2">
-                    <motion.div
-                      animate={reducedMotion ? undefined : { opacity: [0.25, 0.55, 0.25] }}
-                      transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut', delay: i * 0.18 + 0.08 }}
-                      style={{ width: 100 + i * 18, height: 12, borderRadius: 4, background: 'rgba(255,255,255,0.09)' }}
-                    />
-                    <motion.div
-                      animate={reducedMotion ? undefined : { opacity: [0.15, 0.4, 0.15] }}
-                      transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut', delay: i * 0.18 + 0.18 }}
-                      style={{ width: 65 + i * 12, height: 10, borderRadius: 4, background: 'rgba(255,255,255,0.05)' }}
-                    />
-                  </div>
-                </motion.div>
-              ))}
-            </motion.div>
-
-          ) : (
-
-            /* ── Real cards with stagger ────────────────────────────────── */
+          {phase === 'revealing' && (
             <motion.div
               key="real"
               className="flex flex-col gap-3"
@@ -400,7 +340,6 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
                 </motion.div>
               ))}
             </motion.div>
-
           )}
         </AnimatePresence>
 
