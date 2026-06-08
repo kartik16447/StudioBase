@@ -413,12 +413,12 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNaviga
         const px   = hotspotX ?? 50;
         const py   = hotspotY ?? 50;
         const imgStyle: React.CSSProperties = zoom > 1 ? {
-          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain',
           transformOrigin: '0 0',
           transform: `translate(${50 - zoom * px}%, ${50 - zoom * py}%) scale(${zoom})`,
           transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)',
         } : {
-          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain',
           transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)',
         };
         return <img src={screenshotUrl} alt={`Step ${step.sequence}`} style={imgStyle} draggable={false} />;
