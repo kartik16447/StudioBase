@@ -125,7 +125,10 @@ Average speaking rate is 2.5 words per second.
    - GOOD: "Next, open the Support tab."
 
 **YOUR TASK:**
-Given the UI Action and Time Budget, generate the final spoken script. Output valid JSON with a single "generatedText" field containing ONLY the spoken text. Do not include conversational filler in the generated text.`;
+Given the UI Action and Time Budget, output valid JSON with three fields:
+- "generatedText": The spoken narration script for text-to-speech ONLY. Natural flow with light connectors. End with "..." so the voice trails off. Do not include conversational filler.
+- "stepTitle": A short noun phrase (3-6 words) naming the goal of this step. Used as a heading in the SOP document. Examples: "Opening the Support Tab", "Entering Contact Details", "Saving the Project".
+- "displayText": A clean standalone instruction sentence for the SOP document body. Rules: (1) Complete sentence ending with a period. (2) No leading connectors. (3) Imperative voice: "Click X to open Y." (4) NEVER echo raw inputValue — describe the field instead. (5) Max 2 sentences. (6) Use strong verbs: Click, Select, Enter, Open, Set, Choose.`;
 
     const userMessage = JSON.stringify({
       action: stepData.action,
@@ -145,12 +148,16 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userMessage },
         ],
-        response_format: { 
-          type: 'json_schema', 
+        response_format: {
+          type: 'json_schema',
           json_schema: {
             type: 'object',
-            properties: { generatedText: { type: 'string' } },
-            required: ['generatedText']
+            properties: {
+              generatedText: { type: 'string' },
+              stepTitle:     { type: 'string' },
+              displayText:   { type: 'string' },
+            },
+            required: ['generatedText', 'stepTitle', 'displayText']
           }
         },
       }
@@ -159,11 +166,16 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
     console.log(`[generate-script] LLM raw response length: ${aiResponse?.response?.length ?? 0}`);
 
     let generatedText = '';
+    let stepTitle = '';
+    let displayText = '';
     let rawResponse: any = '';
     try {
       // Sometimes Cloudflare AI auto-parses the JSON response when using json_schema
       if (aiResponse?.response && typeof aiResponse.response === 'object') {
-        generatedText = (aiResponse.response as any).generatedText;
+        const r = aiResponse.response as any;
+        generatedText = r.generatedText;
+        stepTitle     = r.stepTitle     || '';
+        displayText   = r.displayText   || '';
         if (!generatedText) {
           throw new Error('generatedText key missing from pre-parsed JSON response');
         }
@@ -177,32 +189,34 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
         } else {
           rawResponse = JSON.stringify(aiResponse);
         }
-        
-        // Ensure rawResponse is a string before calling string methods
+
         if (typeof rawResponse !== 'string') {
           rawResponse = JSON.stringify(rawResponse);
         }
-        
+
         const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
           throw new Error('No JSON object found in response string');
         }
-        
+
         const parsed = JSON.parse(jsonMatch[0]);
         generatedText = parsed.generatedText;
-        
+        stepTitle     = parsed.stepTitle     || '';
+        displayText   = parsed.displayText   || '';
+
         if (!generatedText && generatedText !== '') {
-           throw new Error('generatedText key missing from JSON');
+          throw new Error('generatedText key missing from JSON');
         }
       }
 
-      // If the model explicitly decided on silence, convert it to an empty string 
+      // If the model explicitly decided on silence, convert it to an empty string
       // so the UI correctly shows the empty state placeholder instead of literal text.
       if (generatedText.trim().toUpperCase() === '[SILENCE]') {
         generatedText = '';
+        displayText   = '';
       }
 
-      console.log(`[generate-script] Parsed generatedText: "${generatedText}"`);
+      console.log(`[generate-script] Parsed generatedText: "${generatedText}" stepTitle: "${stepTitle}"`);
     } catch (e: any) {
       const rawString = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
       console.error(`[generate-script] Failed to extract LLM response: "${rawString}"`, e);
@@ -211,14 +225,16 @@ Given the UI Action and Time Budget, generate the final spoken script. Output va
 
     // Update the step in the R2 session JSON envelope
     rawStep.generatedText = generatedText;
-    
+    if (stepTitle)   rawStep.stepTitle   = stepTitle;
+    if (displayText) rawStep.displayText = displayText;
+
     console.log(`[generate-script] Updating R2 session.json record for stepId=${stepId}`);
     await c.env.R2.put(assetKey, JSON.stringify(envelope), {
       httpMetadata: { contentType: 'application/json' },
     });
 
     console.log(`[generate-script] Successfully updated stepId=${stepId}. Returning text.`);
-    return c.json({ generatedText, budgetSeconds });
+    return c.json({ generatedText, stepTitle, displayText, budgetSeconds });
   }
 );
 

@@ -274,17 +274,21 @@ const ScriptStepRow: React.FC<{
     
     setIsGenerating(true);
     try {
-      const res = await apiClient.post<{ generatedText: string, budgetSeconds: number }>(
+      const res = await apiClient.post<{ generatedText: string; stepTitle?: string; displayText?: string; budgetSeconds: number }>(
         `/sessions/${session.sessionId}/steps/${step.id}/generate-script`,
         { visualDurationSeconds }
       );
-      
+
       console.log(`[Panels][AI Regenerate] Successfully received AI response! Data:`, res);
-      console.log(`[Panels][AI Regenerate] Will write text back to frontend store and clear textOverride.`);
-      
+
       if (res.generatedText) {
         setText(res.generatedText);
-        updateStep(step.id, { generatedText: res.generatedText, textOverride: undefined });
+        updateStep(step.id, {
+          generatedText: res.generatedText,
+          textOverride: undefined,
+          ...(res.stepTitle   ? { stepTitle:   res.stepTitle }   : {}),
+          ...(res.displayText ? { displayText: res.displayText } : {}),
+        } as any);
       } else {
         console.warn(`[Panels][AI Regenerate] API returned empty or missing generatedText (maybe parsing failed silently?):`, res);
       }
@@ -321,13 +325,13 @@ const ScriptStepRow: React.FC<{
         <div className="flex-1 min-w-0">
           <header className="flex items-center gap-2 mb-1.5 h-5">
             <span className={cn(
-              "text-[10px] font-black uppercase tracking-widest px-1.5 rounded-[4px] leading-relaxed",
+              "text-[10px] font-black uppercase tracking-widest px-1.5 rounded-[4px] leading-relaxed shrink-0",
               active ? "bg-primary text-white" : "bg-text-3/10 text-text-3"
             )}>
-              {step.data?.context === 'desktop' ? 'desktop' : step.action}
+              {step.sequence}
             </span>
-            <span className="text-[11px] text-text-2 font-mono truncate max-w-[140px] opacity-70">
-              · {step.data?.context === 'desktop' ? '◎ Desktop Activity' : (step.elementText || 'Browser Tab')}
+            <span className="text-[11px] text-text-1 font-medium truncate">
+              {(step as any).stepTitle || step.elementText || (step.data?.context === 'desktop' ? '◎ Desktop Activity' : 'Browser Tab')}
             </span>
             {step.textOverride && step.voiceoverKey && (
               <div className="w-1.5 h-1.5 rounded-full bg-amber-400 ml-auto shrink-0" title="Text edited — audio needs regeneration" />

@@ -34,7 +34,7 @@ const ELEVENLABS_VOICES = [
 
 // ─── Mini audio player per step ───────────────────────────────────────────────
 const StepAudioRow: React.FC<{
-  step: { id: string; sequence: number; textOverride?: string; generatedText?: string; elementText?: string; url?: string; pageTitle?: string };
+  step: { id: string; sequence: number; stepTitle?: string | null; textOverride?: string; generatedText?: string; elementText?: string; url?: string; pageTitle?: string };
   status: StepAudioStatus | undefined;
   audioUrl: string | null;
   isPolling: boolean;
@@ -76,12 +76,16 @@ const StepAudioRow: React.FC<{
     setIsGeneratingScript(true);
     setScriptError(null);
     try {
-      const res = await apiClient.post<{ generatedText: string; budgetSeconds: number }>(
+      const res = await apiClient.post<{ generatedText: string; stepTitle?: string; displayText?: string; budgetSeconds: number }>(
         `/sessions/${sessionId}/steps/${step.id}/generate-script`,
         { visualDurationSeconds: Math.max(wordCount / 2.5, 5) }
       );
       setLocalScript(res.generatedText);
-      useStudioStore.getState().updateStep(step.id, { generatedText: res.generatedText } as any);
+      useStudioStore.getState().updateStep(step.id, {
+        generatedText: res.generatedText,
+        ...(res.stepTitle   ? { stepTitle:   res.stepTitle }   : {}),
+        ...(res.displayText ? { displayText: res.displayText } : {}),
+      } as any);
     } catch (e: any) {
       setScriptError(e.message || 'Failed to regenerate script');
     } finally {
@@ -220,10 +224,17 @@ const StepAudioRow: React.FC<{
           {step.sequence}
         </div>
 
-        {/* Script snippet */}
-        <p className="flex-1 text-[11px] text-text-2 line-clamp-1 min-w-0">
-          {text || <span className="text-text-3 italic">No script</span>}
-        </p>
+        {/* Step label: title if available, else fall back to script snippet */}
+        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+          <p className="text-[11px] font-medium text-text-1 line-clamp-1">
+            {step.stepTitle || step.elementText || `Step ${step.sequence}`}
+          </p>
+          {text && (
+            <p className="text-[10px] text-text-3 line-clamp-1">
+              {text}
+            </p>
+          )}
+        </div>
 
         {/* Edit script button — always visible */}
         <button
