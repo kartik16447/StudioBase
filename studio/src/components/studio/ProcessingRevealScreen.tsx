@@ -77,8 +77,14 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
   );
 
   // ── Card reveal state ──────────────────────────────────────────────────
-  const [visibleCount, setVisibleCount] = useState(0);
-  const [ctaVisible, setCtaVisible] = useState(false);
+  // For already-ready sessions with skipStagger: start at 4 so there's no
+  // blank-on-first-render before the useEffect fires.
+  const [visibleCount, setVisibleCount] = useState(
+    !isProcessing && skipStagger ? 4 : 0
+  );
+  const [ctaVisible, setCtaVisible] = useState(
+    !isProcessing && skipStagger
+  );
   const [pulsing, setPulsing] = useState(false);
 
   // ── Analytics helpers ──────────────────────────────────────────────────
@@ -278,7 +284,7 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
                   <span className="text-[12px] font-semibold text-white/60 tabular-nums">{duration}</span>
                 </span>
               )}
-              {stepCount != null && (
+              {stepCount != null && stepCount > 0 && (
                 <span
                   className="inline-flex items-center gap-1.5 rounded-lg"
                   style={{ padding: '5px 10px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
@@ -292,21 +298,22 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
         </div>
 
         {/* Block 2 — Cards: skeleton while processing, real cards once ready */}
-        <AnimatePresence mode="wait">
+        {/* No mode="wait" — concurrent so real cards start entering while skeleton fades */}
+        <AnimatePresence>
           {phase === 'skeleton' ? (
 
-            /* ── Skeleton cards ─────────────────────────────────────────── */
+            /* ── Skeleton cards — stagger in one by one, then pulse-shimmer ─ */
             <motion.div
               key="skeletons"
               className="flex flex-col gap-3"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0, transition: { duration: 0.12 } }}
-              transition={{ duration: 0.35, delay: 0.1 }}
+              exit={{ opacity: 0, transition: { duration: 0.15 } }}
             >
               {[0, 1, 2, 3].map((i) => (
-                <div
+                <motion.div
                   key={i}
+                  initial={reducedMotion ? undefined : { y: 12, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.28, ease: 'easeOut', delay: 0.1 + i * 0.15 }}
                   className="flex items-center gap-2 rounded-card"
                   style={{
                     padding: '16px 20px',
@@ -334,7 +341,7 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
                       style={{ width: 65 + i * 12, height: 10, borderRadius: 4, background: 'rgba(255,255,255,0.05)' }}
                     />
                   </div>
-                </div>
+                </motion.div>
               ))}
             </motion.div>
 
