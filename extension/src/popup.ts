@@ -11,6 +11,9 @@ const STUDIO_DOMAINS = [
 
 let state: AppState;
 let localTimerInterval: ReturnType<typeof setInterval> | null = null;
+let lastSuggestion = "";
+let lastSuggestionHostname = "";
+let autoNameApplied = false;
 
 // DG1: port lets service-worker detect popup close while recording
 chrome.runtime.connect({ name: 'popup' });
@@ -191,6 +194,7 @@ async function applyAutoLoginCredentials(token: string, userData: any) {
 
   updateUserInfo(sb_user.email, sb_user.picture);
   showScreen(screenIdle);
+  applyAutoNaming();
 }
 
 // ── Startup: load state ───────────────────────────────────────────────────
@@ -381,6 +385,90 @@ async function handleAutoLogin() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
+const HOSTNAME_MAP: Record<string, string> = {
+  'salesforce.com':         'Salesforce',
+  'hubspot.com':            'HubSpot',
+  'notion.so':              'Notion',
+  'linear.app':             'Linear',
+  'jira.atlassian.com':     'Jira',
+  'confluence.atlassian.com': 'Confluence',
+  'slack.com':              'Slack',
+  'github.com':             'GitHub',
+  'figma.com':              'Figma',
+  'airtable.com':           'Airtable',
+  'clickup.com':            'ClickUp',
+  'asana.com':              'Asana',
+  'monday.com':             'Monday',
+  'intercom.com':           'Intercom',
+  'zendesk.com':            'Zendesk',
+  'stripe.com':             'Stripe',
+};
+
+const TITLE_SEPARATORS = [' | ', ' - ', ' — ', ' · ', ' – '];
+
+function generateSopName(title: string, url: string): string {
+  let hostname = '';
+  try {
+    hostname = new URL(url).hostname.replace(/^www\./, '');
+  } catch { /* invalid url */ }
+
+  // Resolve app name: exact match → domain.tld match → capitalize first segment
+  let appName = '';
+  if (hostname) {
+    if (HOSTNAME_MAP[hostname]) {
+      appName = HOSTNAME_MAP[hostname];
+    } else {
+      const parts = hostname.split('.');
+      const domainTld = parts.slice(-2).join('.');
+      if (HOSTNAME_MAP[domainTld]) {
+        appName = HOSTNAME_MAP[domainTld];
+      } else {
+        const bare = parts[0];
+        appName = bare.charAt(0).toUpperCase() + bare.slice(1);
+      }
+    }
+  }
+
+  // Strip noise suffixes from title
+  let cleanTitle = title;
+  for (const sep of TITLE_SEPARATORS) {
+    const idx = cleanTitle.indexOf(sep);
+    if (idx !== -1) cleanTitle = cleanTitle.slice(0, idx);
+  }
+  cleanTitle = cleanTitle.trim();
+  if (cleanTitle.length > 50) cleanTitle = cleanTitle.slice(0, 50);
+
+  if (!appName && !cleanTitle) return '';
+  if (!cleanTitle || cleanTitle === appName) return appName;
+  if (!appName) return cleanTitle;
+  return `${appName} — ${cleanTitle}`;
+}
+
+function applyAutoNaming(): void {
+  if (autoNameApplied) return;
+  autoNameApplied = true;
+  try {
+    chrome.windows.getLastFocused({ windowTypes: ['normal'] }, (win) => {
+      if (chrome.runtime.lastError || !win?.id) return;
+      chrome.tabs.query({ active: true, windowId: win.id }, (tabs) => {
+        const tab = tabs[0];
+        if (!tab) return;
+        try {
+          lastSuggestionHostname = tab.url
+            ? new URL(tab.url).hostname.replace(/^www\./, '')
+            : '';
+          const name = generateSopName(tab.title || '', tab.url || '');
+          lastSuggestion = name;
+          if (name) {
+            recTitleInput.value = name;
+            recTitleInput.focus();
+          }
+        } catch { /* silent */ }
+      });
+    });
+  } catch { /* silent — never block recording */ }
+}
+
 function formatDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
   const m = Math.floor(totalSec / 60);
@@ -453,6 +541,7 @@ function renderState(newState: AppState) {
   switch (state.status) {
     case "idle":
       showScreen(screenIdle);
+      applyAutoNaming();
       break;
     case "recording":
       showScreen(screenRecording);
@@ -519,6 +608,16 @@ btnSignin.addEventListener("click", handleSignIn);
 btnAutoLogin.addEventListener("click", handleAutoLogin);
 
 btnNewRecording.addEventListener("click", () => {
+  const finalValue = recTitleInput.value.trim();
+  sbLog("sop_name_suggestion", {
+    had_suggestion:      lastSuggestion !== "",
+    suggestion_accepted: lastSuggestion !== "" && finalValue === lastSuggestion,
+    suggestion_edited:   finalValue !== lastSuggestion && finalValue !== "",
+    suggestion_cleared:  finalValue === "",
+    suggestion_length:   lastSuggestion.length,
+    tab_hostname:        lastSuggestionHostname,
+  });
+
   chrome.windows.getLastFocused({ windowTypes: ["normal"] }, (win) => {
     if (chrome.runtime.lastError || !win?.id) {
       startCountdown({});
