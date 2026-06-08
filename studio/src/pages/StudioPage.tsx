@@ -64,6 +64,10 @@ export const StudioPage: React.FC = () => {
   // NOTE: the sessionStorage flag is set in dismissReveal — NOT here on page load.
   // Setting it here caused a bug where visiting a session while it was still processing
   // permanently suppressed the reveal on all future visits.
+  // TESTING: always show reveal card on every visit (ignore sessionStorage seen-flag).
+  // Revert to the block below when testing is done.
+  const [showReveal, setShowReveal] = useState(true);
+  /* PRODUCTION (restore when done testing):
   const [showReveal, setShowReveal] = useState(() => {
     const forceReveal = new URLSearchParams(window.location.search).get('reveal') === '1';
     if (forceReveal) return true;
@@ -73,6 +77,7 @@ export const StudioPage: React.FC = () => {
     const key = `reveal_seen_${sessionId}`;
     return !sessionStorage.getItem(key);
   });
+  */
 
   const dismissReveal = (view: 'sop' | 'video' | 'docs' | 'embed') => {
     // Mark as seen only when the reveal is actually dismissed — not on page load
