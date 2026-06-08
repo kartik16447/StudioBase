@@ -47,7 +47,7 @@ const TB = {
 // ─── Public API ────────────────────────────────────────────────────────────────
 export function getActiveCursorMode(): CursorMode { return activeCursorMode; }
 
-export function injectToolbar(): void {
+export function injectToolbar(startedAt?: number): void {
   if (document.getElementById('sb-toolbar-container')) return;
 
   injectStyles();
@@ -68,7 +68,10 @@ export function injectToolbar(): void {
 
   document.body.appendChild(toolbarContainer);
 
-  startTime     = Date.now();
+  // If startedAt is provided (re-inject after navigation), continue from the
+  // original recording start time so the timer doesn't reset to 0:00.
+  // Otherwise start fresh (first inject at recording start).
+  startTime     = startedAt ?? Date.now();
   pausedElapsed = 0;
   toolbarState  = 'recording';
   renderPill();

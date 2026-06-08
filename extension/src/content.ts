@@ -123,7 +123,8 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'START_CAPTURE') {
     currentStepIndex = 0;
     startCapture();
-    injectToolbar();
+    // Pass original startedAt so the toolbar timer doesn't reset to 0:00 on navigation
+    injectToolbar(msg.startedAt ?? undefined);
   }
   if (msg.type === 'STOP_CAPTURE') {
     stopCapture();
@@ -133,3 +134,9 @@ chrome.runtime.onMessage.addListener((msg) => {
     currentStepIndex = msg.stepIndex ?? currentStepIndex + 1;
   }
 });
+
+// Self-heal: announce to the service worker that this content script is ready.
+// If recording is in progress for this tab, the SW will send START_CAPTURE back.
+// This handles the case where page navigation causes the toolbar to disappear and
+// the onUpdated message was lost due to a SW suspension / timing race.
+chrome.runtime.sendMessage({ type: 'CONTENT_SCRIPT_READY' }).catch(() => {});

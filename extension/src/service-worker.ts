@@ -97,7 +97,9 @@ function stopRecordingTimer() {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (state.status === "recording" && state.target?.tabId === tabId) {
     if (changeInfo.status === "complete") {
-      chrome.tabs.sendMessage(tabId, { type: 'START_CAPTURE' }).catch(() => {});
+      // Pass startedAt so the toolbar timer continues from the original recording time
+      // instead of resetting to 0:00 after a page navigation.
+      chrome.tabs.sendMessage(tabId, { type: 'START_CAPTURE', startedAt: state.startedAt ?? null }).catch(() => {});
     }
   }
 });
@@ -275,6 +277,22 @@ chrome.runtime.onMessage.addListener(
             },
           });
         }, eventType);
+      });
+      return false;
+    }
+
+    // CONTENT_SCRIPT_READY — content script announces itself on every page load.
+    // This is the primary self-heal path for toolbar re-injection after navigation:
+    // more reliable than onUpdated alone because the content script pulls rather than
+    // the SW pushing, so there's no race between the SW waking up and the message arriving.
+    if (msg.type === "CONTENT_SCRIPT_READY") {
+      initPromise.then(() => {
+        if (state.status === "recording" && _sender.tab?.id === state.target?.tabId) {
+          chrome.tabs.sendMessage(_sender.tab.id, {
+            type: 'START_CAPTURE',
+            startedAt: state.startedAt ?? null,
+          }).catch(() => {});
+        }
       });
       return false;
     }
