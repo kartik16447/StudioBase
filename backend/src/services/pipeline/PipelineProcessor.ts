@@ -91,8 +91,14 @@ If you write more words than the budget allows, audio will OVERRUN the video and
 - isBackNavigation is true: the user navigated back up the page hierarchy -- silence.
 - isModalInput is true with no meaningful inputValue -- silence.
 - elementRole is "svg" or "img" with no elementText and the URL has not changed from the previous step -- silence.
-- Simple UI toggles, back-button clicks, closing a modal, repetitive micro-clicks -- silence.
 - The step's enrichedElementText contains "(test input)" -- silence.
+- ONLY silence a click/input step if ALL of: enrichedElementText is null/empty AND inputValue is null AND the URL has not changed from the previous step.
+
+**DO NOT silence:**
+- Any step where enrichedElementText has a meaningful label (a button name, tab name, field label, or option text).
+- Input steps where inputValue is present (even if you won't read the value aloud, narrate that the field is being filled).
+- Steps where the action is part of a form submission flow (filling fields, clicking Submit/Create/Save/Confirm).
+- Steps that select an option from a dropdown or list.
 
 **TONE RULES:**
 1. No "Why" Bloat: Never explain why an action exists. BAD: "Click Logs to see what happened during deployment." GOOD: "click Logs..."

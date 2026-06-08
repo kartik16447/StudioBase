@@ -324,13 +324,7 @@ const ScriptStepRow: React.FC<{
         
         <div className="flex-1 min-w-0">
           <header className="flex items-center gap-2 mb-1.5 h-5">
-            <span className={cn(
-              "text-[10px] font-black uppercase tracking-widest px-1.5 rounded-[4px] leading-relaxed shrink-0",
-              active ? "bg-primary text-white" : "bg-text-3/10 text-text-3"
-            )}>
-              {step.sequence}
-            </span>
-            <span className="text-[11px] text-text-1 font-medium truncate">
+            <span className="text-[11px] text-text-1 font-semibold truncate">
               {(step as any).stepTitle || step.elementText || (step.data?.context === 'desktop' ? '◎ Desktop Activity' : 'Browser Tab')}
             </span>
             {step.textOverride && step.voiceoverKey && (
