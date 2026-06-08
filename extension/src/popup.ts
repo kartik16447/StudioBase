@@ -11,6 +11,9 @@ const STUDIO_DOMAINS = [
 
 let state: AppState;
 let localTimerInterval: ReturnType<typeof setInterval> | null = null;
+
+// DG1: port lets service-worker detect popup close while recording
+chrome.runtime.connect({ name: 'popup' });
 let lastAutoCopiedUrl: string | null = null;
 let isPolling = false;
 let pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -96,9 +99,10 @@ const autoLoginHint     = document.getElementById("auto-login-hint")!;
 const btnNewRecording   = document.getElementById("btn-new-recording")!;
 const recTitleInput     = document.getElementById("rec-title-input") as HTMLInputElement;
 const btnStop           = document.getElementById("btn-stop")!;
-const btnGenerateSop    = document.getElementById("btn-generate-sop")!;
-const postStopStepsEl   = document.getElementById("post-stop-steps")!;
+const btnGenerateSop     = document.getElementById("btn-generate-sop")!;
+const postStopStepsEl    = document.getElementById("post-stop-steps")!;
 const postStopDurationEl = document.getElementById("post-stop-duration")!;
+const captureSurveyEl    = document.getElementById("capture-survey") as HTMLElement;
 const btnCopyLink       = document.getElementById("btn-copy-link")!;
 const btnOpenStudio     = document.getElementById("btn-open-studio")!;
 const btnRecordAgain    = document.getElementById("btn-record-again")!;
@@ -384,6 +388,25 @@ function formatDuration(ms: number): string {
   return `${m}:${s}`;
 }
 
+function maybeShowCaptureSurvey(stepCount: number) {
+  try {
+    if (localStorage.getItem("isomerflow_survey_shown")) return;
+    captureSurveyEl.style.display = "block";
+    captureSurveyEl.querySelectorAll(".survey-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const answer = (btn as HTMLElement).dataset.answer as string;
+        sbLog("capture_confidence_survey", {
+          answer,
+          step_count: stepCount,
+          is_first_recording: true,
+        });
+        localStorage.setItem("isomerflow_survey_shown", "true");
+        captureSurveyEl.style.display = "none";
+      }, { once: true });
+    });
+  } catch { /* never block upload */ }
+}
+
 // ── Recording flow ────────────────────────────────────────────────────────
 
 async function sendStartRecording(target: AppState["target"]) {
@@ -555,6 +578,7 @@ btnStop.addEventListener("click", () => {
         sbLog("post_stop_moment_skipped", { reason: "data_unavailable" });
         chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
         showScreen(screenUploading);
+        maybeShowCaptureSurvey(0);
         return;
       }
       postStopStepsEl.textContent = String(res.stepCount);
@@ -576,6 +600,7 @@ btnGenerateSop.addEventListener("click", () => {
   });
   chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
   showScreen(screenUploading);
+  maybeShowCaptureSurvey(stepCount);
 });
 
 btnCopyLink.addEventListener("click", async () => {

@@ -102,6 +102,54 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
+// ─── Abandonment tracking ─────────────────────────────────────
+
+async function fireAbandonmentEvent(reason: 'popup_closed' | 'tab_closed' | 'browser_closed') {
+  try {
+    const stored = await chrome.storage.session.get('sb_sessions') as any;
+    const session = stored?.sb_sessions;
+    const stepCount = session?.events?.length ?? 0;
+    const durationSeconds = state.startedAt
+      ? Math.floor((Date.now() - state.startedAt) / 1000)
+      : 0;
+    sbLog('recording_abandoned', {
+      step_count_at_abandon: stepCount,
+      duration_seconds_at_abandon: durationSeconds,
+      abandon_reason: reason,
+    });
+  } catch {
+    sbLog('recording_abandoned', {
+      step_count_at_abandon: 0,
+      duration_seconds_at_abandon: 0,
+      abandon_reason: reason,
+    });
+  }
+}
+
+// Popup close: track port; if popup disconnects while recording → abandoned
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'popup') return;
+  port.onDisconnect.addListener(() => {
+    if (state.status === 'recording') {
+      fireAbandonmentEvent('popup_closed');
+    }
+  });
+});
+
+// Tab close while recording → abandoned
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (state.status === 'recording' && state.target?.tabId === tabId) {
+    fireAbandonmentEvent('tab_closed');
+  }
+});
+
+// Browser close (SW suspend) while recording → abandoned
+chrome.runtime.onSuspend.addListener(() => {
+  if (state.status === 'recording') {
+    fireAbandonmentEvent('browser_closed');
+  }
+});
+
 // ─── Focus Sensor ────────────────────────────────────────────
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
@@ -510,6 +558,18 @@ async function stopRecording() {
     await updateState({ status: "ready", sessionId: activeSessionId, uploadProgress: 100 });
     stopRecordingTimer();
     sbLog("RECORDING_FINISHED", { sessionId: activeSessionId });
+
+    // ── DG3: sop_completed histogram ─────────────────────────
+    try {
+      const stepCount = session.events?.length ?? 0;
+      const durationSeconds = session.endedAt
+        ? Math.floor((new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime()) / 1000)
+        : 0;
+      const countStored = await chrome.storage.local.get('isomerflow_recording_count');
+      const recordingNumber = ((countStored.isomerflow_recording_count as number) ?? 0) + 1;
+      await chrome.storage.local.set({ isomerflow_recording_count: recordingNumber });
+      sbLog('sop_completed', { step_count: stepCount, duration_seconds: durationSeconds, recording_number: recordingNumber });
+    } catch { /* non-blocking */ }
 
     // ── Upload everything in the background ───────────────────────
     uploadSessionAssets(session, activeSessionId, auth, undefined, includeVideo)
