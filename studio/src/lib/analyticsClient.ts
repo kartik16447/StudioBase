@@ -6,7 +6,9 @@ export type AnalyticsEventType =
   | 'step_skipped'
   | 'sop_completed'
   | 'sop_abandoned'
-  | 'export_triggered';
+  | 'export_triggered'
+  | 'reveal_card_viewed'
+  | 'reveal_cta_click';
 
 export interface AnalyticsEvent {
   id: string;

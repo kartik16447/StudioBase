@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '../ui';
 import { I } from '../icons';
 import type { SessionEnvelope } from '../../../../shared/types/session';
+import { analyticsClient } from '../../lib/analyticsClient';
 
 interface ProcessingRevealScreenProps {
   session: SessionEnvelope;
@@ -20,37 +21,32 @@ function formatDuration(ms: number | null | undefined): string | null {
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-// Matches design's `.deliverable-text b` — rgba(255,255,255,0.82), weight 600
-const Bold: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <strong style={{ color: 'rgba(255,255,255,0.82)', fontWeight: 600 }}>{children}</strong>
-);
+function getPrefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false;
+}
 
-// Easing curves from the design file
-const EASE_RISE = [0.22, 1, 0.36, 1] as const;   // cubic-bezier for text blocks
-const EASE_POP  = [0.34, 1.56, 0.64, 1] as const; // spring-like for check circles
+const HABITUATION_KEY = 'isomerflow_reveal_count';
 
-// Stagger delays (ms → s), computed from design's sequential stagger logic
-const D = {
-  eyebrow:  0,
-  h1:       0.06,
-  pills:    0.15,
-  check:    [0.26, 0.355, 0.45, 0.545],
-  text:     [0.305, 0.40, 0.495, 0.59],
-  cta:      0.64,
-  nav:      0.68,
-};
+function getAndIncrementRecordingCount(): number {
+  try {
+    const current = parseInt(localStorage.getItem(HABITUATION_KEY) ?? '0', 10);
+    const next = isNaN(current) ? 1 : current + 1;
+    localStorage.setItem(HABITUATION_KEY, String(next));
+    return next;
+  } catch {
+    return 1;
+  }
+}
 
-const rise = (delay: number) => ({
-  initial:    { opacity: 0, y: 10 },
-  animate:    { opacity: 1, y: 0 },
-  transition: { duration: 0.62, ease: EASE_RISE, delay },
-});
+interface CardSpec {
+  primary: string;
+  secondary: string;
+}
 
-const pop = (delay: number) => ({
-  initial:    { opacity: 0, scale: 0.4 },
-  animate:    { opacity: 1, scale: 1 },
-  transition: { duration: 0.5, ease: EASE_POP, delay },
-});
+// Easing for header entrance — matches existing reveal screen design
+const EASE_RISE = [0.22, 1, 0.36, 1] as const;
 
 export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
   session,
@@ -62,22 +58,119 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
   const { durationMs, stepCount } = session.metadata;
   const duration = formatDuration(durationMs);
 
-  const deliverables: React.ReactNode[] = [
-    stepCount != null
-      ? <>A <Bold>{stepCount}-step SOP</Bold> with annotated screenshots</>
-      : <>A <Bold>step-by-step SOP</Bold> with annotated screenshots</>,
-    <>A cinematic walkthrough video</>,
-    <>A docs-ready export</>,
-    <>An embeddable player — ready to drop anywhere</>,
+  // ── Stable setup (computed once on mount) ──────────────────────────────
+  const reducedMotion = useRef(getPrefersReducedMotion()).current;
+  const recordingCount = useRef(getAndIncrementRecordingCount()).current;
+  // After 5 full-animation views, skip the stagger and show cards immediately
+  const skipStagger = reducedMotion || recordingCount > 5;
+  const mountTime = useRef(Date.now());
+  const revealFired = useRef(false);
+  const wasSkippedRef = useRef(false);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // ── Animation state ────────────────────────────────────────────────────
+  const [visibleCount, setVisibleCount] = useState(skipStagger ? 4 : 0);
+  const [ctaVisible, setCtaVisible] = useState(skipStagger);
+  const [pulsing, setPulsing] = useState(false);
+
+  // ── Analytics helpers ──────────────────────────────────────────────────
+  const fireRevealViewed = (skipped: boolean) => {
+    if (revealFired.current) return;
+    revealFired.current = true;
+    analyticsClient.track({
+      sessionId: session.sessionId,
+      workspaceId: session.workspaceId ?? '',
+      eventType: 'reveal_card_viewed',
+      metadata: {
+        step_count: stepCount ?? null,
+        duration_seconds: durationMs ? Math.round(durationMs / 1000) : null,
+        is_first_recording: recordingCount === 1,
+        recording_count: recordingCount,
+        was_skipped: skipped,
+      },
+    });
+  };
+
+  const handleCtaClick = (
+    output: 'sop' | 'video' | 'docs' | 'embed',
+    handler: () => void,
+  ) => {
+    analyticsClient.track({
+      sessionId: session.sessionId,
+      workspaceId: session.workspaceId ?? '',
+      eventType: 'reveal_cta_click',
+      metadata: {
+        output,
+        time_on_screen_ms: Date.now() - mountTime.current,
+        was_skipped: wasSkippedRef.current,
+        recording_count: recordingCount,
+      },
+    });
+    handler();
+  };
+
+  // ── Animation sequence ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (skipStagger) {
+      // Habituation: cards already visible; pulse at 200ms (skip if reduced motion)
+      if (!reducedMotion) {
+        const t = setTimeout(() => setPulsing(true), 200);
+        timersRef.current.push(t);
+      }
+      fireRevealViewed(false);
+      return () => timersRef.current.forEach(clearTimeout);
+    }
+
+    // Normal stagger sequence
+    const schedule: [number, () => void][] = [
+      [200,  () => setVisibleCount(1)],
+      [400,  () => setVisibleCount(2)],
+      [600,  () => setVisibleCount(3)],
+      [800,  () => setVisibleCount(4)],
+      [1000, () => setPulsing(true)],
+      [1100, () => { setCtaVisible(true); fireRevealViewed(false); }],
+    ];
+
+    schedule.forEach(([delay, fn]) => {
+      timersRef.current.push(setTimeout(fn, delay));
+    });
+
+    return () => timersRef.current.forEach(clearTimeout);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Skip: click anywhere → jump to final state ─────────────────────────
+  const handleSkip = () => {
+    if (visibleCount >= 4 && ctaVisible) return;
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    wasSkippedRef.current = true;
+    setVisibleCount(4);
+    setCtaVisible(true);
+    // Pulse does NOT fire on skip (per spec)
+    fireRevealViewed(true);
+  };
+
+  // ── Card definitions (Accent variant copy) ─────────────────────────────
+  const cards: CardSpec[] = [
+    {
+      primary: stepCount != null ? `${stepCount}-step SOP` : 'Your SOP',
+      secondary: 'Annotated screenshots',
+    },
+    { primary: 'Your original recording', secondary: 'Ready to view' },
+    { primary: 'Docs export',             secondary: 'Ready for Notion · Confluence' },
+    { primary: 'Embeddable player',       secondary: 'Drop it anywhere' },
   ];
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center bg-sidebar min-h-0 px-6 py-12 relative overflow-hidden">
-
-      {/* Ambient glow — fades in behind content */}
+    <div
+      className="flex-1 flex flex-col items-center justify-center bg-sidebar min-h-0 px-6 py-12 relative overflow-hidden"
+      onClick={handleSkip}
+    >
+      {/* Ambient glow */}
       <motion.div
         aria-hidden
-        initial={{ opacity: 0 }}
+        initial={reducedMotion ? undefined : { opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 1.2, ease: 'easeOut', delay: 0.1 }}
         style={{
@@ -90,19 +183,23 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
         }}
       />
 
-      <div className="relative w-full max-w-[480px] flex flex-col gap-10">
+      <div className="relative w-full max-w-[480px] flex flex-col gap-8">
 
         {/* Block 1 — Header */}
         <div className="flex flex-col gap-3">
           <motion.p
-            {...rise(D.eyebrow)}
+            initial={reducedMotion ? undefined : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.62, ease: EASE_RISE, delay: 0 }}
             className="text-[11px] font-semibold text-white/30 tracking-[0.12em] uppercase"
           >
             Ready
           </motion.p>
 
           <motion.h1
-            {...rise(D.h1)}
+            initial={reducedMotion ? undefined : { opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.62, ease: EASE_RISE, delay: 0.06 }}
             className="text-[22px] font-semibold text-white leading-snug"
             style={{ letterSpacing: '-0.01em', textWrap: 'balance' } as React.CSSProperties}
           >
@@ -112,7 +209,12 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
           </motion.h1>
 
           {(duration || stepCount != null) && (
-            <motion.div {...rise(D.pills)} className="flex items-center gap-2 mt-1">
+            <motion.div
+              initial={reducedMotion ? undefined : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.62, ease: EASE_RISE, delay: 0.15 }}
+              className="flex items-center gap-2 mt-1"
+            >
               {duration && (
                 <span
                   className="inline-flex items-center gap-1.5 rounded-lg"
@@ -135,47 +237,86 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
           )}
         </div>
 
-        {/* Block 2 — Deliverables */}
-        <ul className="flex flex-col gap-3.5">
-          {deliverables.map((text, i) => (
-            <li key={i} className="flex items-start gap-3">
-              <motion.span
-                {...pop(D.check[i])}
-                className="flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center mt-[3px]"
-                style={{ background: 'rgba(94,92,230,0.18)' }}
+        {/* Block 2 — Cards (group pulse wraps all 4) */}
+        <motion.div
+          className="flex flex-col gap-3"
+          animate={pulsing ? { scale: [1, 1.008, 1] } : { scale: 1 }}
+          transition={{ duration: 0.4, ease: 'easeInOut' }}
+          onAnimationComplete={() => { if (pulsing) setPulsing(false); }}
+        >
+          {cards.map((card, i) => (
+            <motion.div
+              key={i}
+              initial={skipStagger ? undefined : { y: 12, opacity: 0 }}
+              animate={
+                skipStagger
+                  ? { y: 0, opacity: 1 }
+                  : visibleCount > i
+                    ? { y: 0, opacity: 1 }
+                    : { y: 12, opacity: 0 }
+              }
+              transition={{ duration: 0.28, ease: 'easeOut' }}
+              className="flex items-center gap-2 rounded-card"
+              style={{
+                padding: '16px 20px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+              }}
+            >
+              {/* Checkmark well — 38×38, radius 8px, tinted */}
+              <div
+                className="flex-shrink-0 flex items-center justify-center"
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 8,
+                  background: 'rgba(94,92,230,0.15)',
+                }}
               >
-                <I.Check size={10} className="text-primary" strokeWidth={3} />
-              </motion.span>
-              <motion.span
-                {...rise(D.text[i])}
-                className="text-[15px] text-white/60 leading-snug"
-              >
-                {text}
-              </motion.span>
-            </li>
+                <I.Check size={16} strokeWidth={2.5} style={{ color: '#5E5CE6' }} />
+              </div>
+
+              {/* Text block */}
+              <div className="flex flex-col">
+                <span className="text-sm font-medium text-white leading-snug">
+                  {card.primary}
+                </span>
+                <span className="text-xs font-normal text-white/60 leading-snug mt-0.5">
+                  {card.secondary}
+                </span>
+              </div>
+            </motion.div>
           ))}
-        </ul>
+        </motion.div>
 
         {/* Block 3 — CTA + secondary nav */}
-        <div className="flex flex-col items-start gap-4">
-          <motion.div {...rise(D.cta)}>
-            <Button variant="primary" size="md" onClick={onViewSOP} className="gap-1.5">
-              View your SOP
-              <I.ArrowRight size={14} />
-            </Button>
-          </motion.div>
+        <motion.div
+          initial={reducedMotion ? undefined : { opacity: 0 }}
+          animate={{ opacity: ctaVisible ? 1 : 0 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+          className="flex flex-col items-start gap-4"
+          onClick={e => e.stopPropagation()}
+        >
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => handleCtaClick('sop', onViewSOP)}
+            iconRight={I.ArrowRight}
+          >
+            View your SOP
+          </Button>
 
-          <motion.div {...rise(D.nav)} className="flex items-center gap-5">
+          <div className="flex items-center gap-5">
             {(
               [
-                ['Video', onViewVideo],
-                ['Docs',  onViewDocs],
-                ['Embed', onViewEmbed],
-              ] as [string, () => void][]
-            ).map(([label, handler], i, arr) => (
+                ['Video', 'video', onViewVideo],
+                ['Docs',  'docs',  onViewDocs],
+                ['Embed', 'embed', onViewEmbed],
+              ] as [string, 'video' | 'docs' | 'embed', () => void][]
+            ).map(([label, output, handler], i, arr) => (
               <React.Fragment key={label}>
                 <button
-                  onClick={handler}
+                  onClick={() => handleCtaClick(output, handler)}
                   className="text-[13px] text-white/40 hover:text-white/60 transition-colors"
                 >
                   {label}
@@ -185,8 +326,8 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
                 )}
               </React.Fragment>
             ))}
-          </motion.div>
-        </div>
+          </div>
+        </motion.div>
 
       </div>
     </div>

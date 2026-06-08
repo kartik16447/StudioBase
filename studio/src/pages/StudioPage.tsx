@@ -153,7 +153,7 @@ export const StudioPage: React.FC = () => {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
         <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-6" />
-        <h2 className="text-xl font-medium text-text">Loading session data...</h2>
+        <h2 className="text-xl font-medium text-text">Generating your SOP narration…</h2>
       </div>
     );
   }
