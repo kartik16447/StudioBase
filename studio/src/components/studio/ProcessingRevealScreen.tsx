@@ -48,6 +48,18 @@ interface CardSpec {
 
 const EASE_RISE = [0.22, 1, 0.36, 1] as const;
 
+// Skeleton stagger — parent controls timing, children inherit via variants
+const skeletonContainer = {
+  hidden: {},
+  show: {
+    transition: { staggerChildren: 0.15, delayChildren: 0.1 },
+  },
+};
+const skeletonItem = {
+  hidden: { y: 12, opacity: 0 },
+  show:   { y: 0,  opacity: 1, transition: { duration: 0.28, ease: 'easeOut' } },
+};
+
 export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
   session,
   isProcessing,
@@ -302,18 +314,19 @@ export const ProcessingRevealScreen: React.FC<ProcessingRevealScreenProps> = ({
         <AnimatePresence>
           {phase === 'skeleton' ? (
 
-            /* ── Skeleton cards — stagger in one by one, then pulse-shimmer ─ */
+            /* ── Skeleton cards — stagger in one by one via variants ─────── */
             <motion.div
               key="skeletons"
               className="flex flex-col gap-3"
+              variants={reducedMotion ? undefined : skeletonContainer}
+              initial={reducedMotion ? undefined : 'hidden'}
+              animate={reducedMotion ? undefined : 'show'}
               exit={{ opacity: 0, transition: { duration: 0.15 } }}
             >
               {[0, 1, 2, 3].map((i) => (
                 <motion.div
                   key={i}
-                  initial={reducedMotion ? undefined : { y: 12, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.28, ease: 'easeOut', delay: 0.1 + i * 0.15 }}
+                  variants={reducedMotion ? undefined : skeletonItem}
                   className="flex items-center gap-2 rounded-card"
                   style={{
                     padding: '16px 20px',
