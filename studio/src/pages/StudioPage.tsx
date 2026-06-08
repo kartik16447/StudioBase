@@ -151,7 +151,7 @@ export const StudioPage: React.FC = () => {
           <Button variant="ghost" onClick={() => {
             sessionStorage.clear();
             localStorage.clear();
-            window.location.href = window.location.pathname; // Reload without query params
+            window.location.href = window.location.pathname;
           }}>Reset Session & Logout</Button>
           <Button variant="ghost" onClick={() => window.location.reload()}>Try Again</Button>
           <Button variant="primary" onClick={() => navigate('home')}>Go to Library</Button>
@@ -160,10 +160,32 @@ export const StudioPage: React.FC = () => {
     );
   }
 
-  // Show spinner while session is null OR while pipeline is still processing.
-  // Previously only checked !session — but when R2 has raw events, session is set
-  // with steps before narration is ready (status still 'processing'). Guard both
-  // so the reveal only fires after status === 'ready'.
+  // The reveal card IS the loading state — show it immediately on every session visit.
+  // While the pipeline runs, isProcessing=true and the card shows skeleton shimmer.
+  // When polling fires ready, isProcessing flips false and cards animate in.
+  // Only skip the reveal if the session is genuinely empty (ready + 0 steps).
+  if (showReveal) {
+    const inProgressStatuses = new Set(['processing', 'uploading', 'pending']);
+    const isStillProcessing =
+      !session || !sessionStatus || inProgressStatuses.has(sessionStatus);
+    const isGenuinelyEmpty =
+      !isStillProcessing && (session?.steps?.length ?? 0) === 0;
+
+    if (!isGenuinelyEmpty) {
+      return (
+        <ProcessingRevealScreen
+          session={session}
+          isProcessing={isStillProcessing}
+          onViewSOP={() => dismissReveal('sop')}
+          onViewVideo={() => dismissReveal('video')}
+          onViewDocs={() => dismissReveal('docs')}
+          onViewEmbed={() => dismissReveal('embed')}
+        />
+      );
+    }
+  }
+
+  // ── Post-reveal: session must be loaded and ready from here on ──────────
   if (!session || sessionStatus === 'processing' || sessionStatus === 'uploading' || sessionStatus === 'pending') {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
@@ -191,18 +213,6 @@ export const StudioPage: React.FC = () => {
           Back to Library
         </button>
       </div>
-    );
-  }
-
-  if (showReveal && session) {
-    return (
-      <ProcessingRevealScreen
-        session={session}
-        onViewSOP={() => dismissReveal('sop')}
-        onViewVideo={() => dismissReveal('video')}
-        onViewDocs={() => dismissReveal('docs')}
-        onViewEmbed={() => dismissReveal('embed')}
-      />
     );
   }
 
