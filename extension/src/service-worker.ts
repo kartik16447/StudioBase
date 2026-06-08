@@ -158,6 +158,22 @@ chrome.runtime.onMessage.addListener(
       return false;
     }
 
+    // GET_PRE_STOP_DATA — read-only snapshot of live session for the post-stop screen
+    if (msg.type === "GET_PRE_STOP_DATA") {
+      chrome.storage.session.get("sb_sessions").then((stored: any) => {
+        const session = stored?.sb_sessions;
+        if (!session || session.status !== "recording") {
+          sendResponse(null);
+          return;
+        }
+        sendResponse({
+          stepCount: session.events?.length ?? 0,
+          durationMs: Date.now() - new Date(session.startedAt).getTime(),
+        });
+      }).catch(() => sendResponse(null));
+      return true; // keep channel open for async response
+    }
+
     // GET_FRESH_TOKEN — used by the studio content script to get a guaranteed-live
     // Google access token. chrome.identity.getAuthToken handles the OAuth refresh
     // automatically so the returned token is always valid (never expired).

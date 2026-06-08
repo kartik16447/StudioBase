@@ -597,6 +597,34 @@ body {
   margin-bottom: 8px;
 }
 
+/* ── Post-Stop Screen ─────────────────────────── */
+.post-stop-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 36px 20px 28px;
+  gap: 2px;
+}
+
+.post-stop-line {
+  font-size: 15px;
+  color: var(--text-2);
+  line-height: 1.65;
+  font-weight: 400;
+}
+
+.post-stop-emphasis {
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.post-stop-cta {
+  margin-top: 24px;
+  width: 100%;
+  flex: none;
+  letter-spacing: 0.01em;
+}
+
 /* ── Countdown Overlay ────────────────────────── */
 .countdown-overlay {
   position: absolute;

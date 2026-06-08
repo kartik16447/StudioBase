@@ -79,11 +79,12 @@ const headerEl         = document.getElementById("header")!;
 const screenAuth       = document.getElementById("screen-auth")!;
 const screenIdle       = document.getElementById("screen-idle")!;
 const screenRecording  = document.getElementById("screen-recording")!;
+const screenPostStop   = document.getElementById("screen-post-stop")!;
 const screenUploading  = document.getElementById("screen-uploading")!;
 const screenSuccess    = document.getElementById("screen-success")!;
 const screenError      = document.getElementById("screen-error")!;
 
-const allScreens = [screenAuth, screenIdle, screenRecording, screenUploading, screenSuccess, screenError];
+const allScreens = [screenAuth, screenIdle, screenRecording, screenPostStop, screenUploading, screenSuccess, screenError];
 
 const headerUserInfo    = document.getElementById("header-user-info")!;
 const userAvatarEl      = document.getElementById("user-avatar")!;
@@ -95,6 +96,9 @@ const autoLoginHint     = document.getElementById("auto-login-hint")!;
 const btnNewRecording   = document.getElementById("btn-new-recording")!;
 const recTitleInput     = document.getElementById("rec-title-input") as HTMLInputElement;
 const btnStop           = document.getElementById("btn-stop")!;
+const btnGenerateSop    = document.getElementById("btn-generate-sop")!;
+const postStopStepsEl   = document.getElementById("post-stop-steps")!;
+const postStopDurationEl = document.getElementById("post-stop-duration")!;
 const btnCopyLink       = document.getElementById("btn-copy-link")!;
 const btnOpenStudio     = document.getElementById("btn-open-studio")!;
 const btnRecordAgain    = document.getElementById("btn-record-again")!;
@@ -371,6 +375,15 @@ async function handleAutoLogin() {
   }
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+function formatDuration(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = String(totalSec % 60).padStart(2, "0");
+  return `${m}:${s}`;
+}
+
 // ── Recording flow ────────────────────────────────────────────────────────
 
 async function sendStartRecording(target: AppState["target"]) {
@@ -535,6 +548,32 @@ btnSkipCountdown.addEventListener("click", () => {
 });
 
 btnStop.addEventListener("click", () => {
+  chrome.runtime.sendMessage(
+    { type: "GET_PRE_STOP_DATA" },
+    (res: { stepCount: number; durationMs: number } | null) => {
+      if (chrome.runtime.lastError || !res || res.stepCount == null) {
+        sbLog("post_stop_moment_skipped", { reason: "data_unavailable" });
+        chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
+        showScreen(screenUploading);
+        return;
+      }
+      postStopStepsEl.textContent = String(res.stepCount);
+      postStopDurationEl.textContent = formatDuration(res.durationMs);
+      showScreen(screenPostStop);
+    }
+  );
+});
+
+btnGenerateSop.addEventListener("click", () => {
+  const stepCount = parseInt(postStopStepsEl.textContent || "0", 10);
+  const durationText = postStopDurationEl.textContent || "0:00";
+  const [mStr, sStr] = durationText.split(":");
+  const durationSeconds = parseInt(mStr, 10) * 60 + parseInt(sStr, 10);
+  sbLog("post_stop_moment_viewed", {
+    step_count: stepCount,
+    duration_seconds: durationSeconds,
+    action: "generate",
+  });
   chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
   showScreen(screenUploading);
 });
