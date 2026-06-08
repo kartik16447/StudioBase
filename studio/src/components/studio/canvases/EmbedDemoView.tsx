@@ -387,8 +387,9 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNaviga
   cursorTween?: CursorTween | null;
 }) {
   const coords    = step.coordinates;
-  const rawX      = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : null;
-  const rawY      = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
+  const noCoords  = hasNoMeaningfulCoords(step);
+  const rawX      = !noCoords && coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : null;
+  const rawY      = !noCoords && coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;
   // Prefer creator-repositioned value; fall back to raw recorded coordinate
   const hotspotX  = step.animationTarget?.pctX  ?? rawX;
   const hotspotY  = step.animationTarget?.pctY  ?? rawY;
@@ -568,7 +569,17 @@ function resolveBackground(session: any, brand: string): string {
   return brandGradient(brand, 0.5);
 }
 
+function hasNoMeaningfulCoords(step: Step): boolean {
+  const coords = step.coordinates;
+  if (!coords) return true;
+  // (0,0) is a sentinel value stored for navigate steps or keyboard-triggered actions
+  return coords.x === 0 && coords.y === 0
+    && step.animationTarget?.pctX == null
+    && step.animationTarget?.pctY == null;
+}
+
 function getHotspotCoords(step: Step): { x: number; y: number } | null {
+  if (hasNoMeaningfulCoords(step)) return null;
   const coords = step.coordinates;
   const rawX = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : null;
   const rawY = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : null;

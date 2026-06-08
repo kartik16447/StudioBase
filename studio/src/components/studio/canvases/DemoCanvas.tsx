@@ -355,8 +355,9 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
   focusBodyRef?: React.MutableRefObject<(() => void) | null>;
 }) {
   const coords  = step?.coordinates;
-  const rawX    = coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : 50;
-  const rawY    = coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : 50;
+  const noCoords = coords && coords.x === 0 && coords.y === 0 && step?.animationTarget?.pctX == null && step?.animationTarget?.pctY == null;
+  const rawX    = !noCoords && coords && coords.viewportWidth  > 0 ? (coords.x / coords.viewportWidth)  * 100 : 50;
+  const rawY    = !noCoords && coords && coords.viewportHeight > 0 ? (coords.y / coords.viewportHeight) * 100 : 50;
 
   const savedX      = step?.animationTarget?.pctX;
   const savedY      = step?.animationTarget?.pctY;

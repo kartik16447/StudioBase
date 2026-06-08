@@ -251,6 +251,8 @@ export class CanvasRenderer implements IRenderer {
   ) {
     const coords = step?.coordinates;
     if (!coords || coords.x == null) return;
+    // (0,0) is a sentinel for keyboard-triggered or navigate steps — no real click position
+    if (coords.x === 0 && coords.y === 0) return;
 
     const { drawX, drawY, drawW, drawH } = layout;
     const cx = drawX + (coords.x / worldW) * drawW;
