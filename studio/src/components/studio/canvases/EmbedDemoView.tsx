@@ -439,59 +439,61 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNaviga
         const zoom = step.animationTarget?.zoomScale ?? 1;
         const px   = hotspotX ?? 50;
         const py   = hotspotY ?? 50;
-        const imgStyle: React.CSSProperties = zoom > 1 ? {
-          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain',
-          transformOrigin: '0 0',
-          transform: `translate(${50 - zoom * px}%, ${50 - zoom * py}%) scale(${zoom})`,
-          transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)',
-        } : {
-          position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain',
-          transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)',
-        };
-        return <img src={screenshotUrl} alt={`Step ${step.sequence}`} style={imgStyle} draggable={false} onLoad={handleImgLoad} />;
+        const zoomTransform = zoom > 1
+          ? `translate(${50 - zoom * px}%, ${50 - zoom * py}%) scale(${zoom})`
+          : undefined;
+        const zoomStyle: React.CSSProperties = zoomTransform
+          ? { position: 'absolute', inset: 0, transformOrigin: '0 0', transform: zoomTransform, transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)' }
+          : { position: 'absolute', inset: 0, transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)' };
+        return (
+          <>
+            <img src={screenshotUrl} alt={`Step ${step.sequence}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', ...zoomStyle }} draggable={false} onLoad={handleImgLoad} />
+            {/* Overlay layer shares the same transform as the image so coords stay aligned */}
+            <div style={{ ...zoomStyle, width: '100%', height: '100%' }}>
+              {blurs.map((a, i) => <BlurMask key={i} x={a.x} y={a.y} w={a.width ?? 10} h={a.height ?? 5} />)}
+              {cardBlurs.map((c) => <BlurMask key={c.id} x={c.rect!.x} y={c.rect!.y} w={c.rect!.w} h={c.rect!.h} />)}
+              {callouts.map((a, i) => <CalloutOverlay key={i} x={a.x} y={a.y} text={a.text!} brand={brand} />)}
+              {cardCallouts.map((c) => <CalloutOverlay key={c.id} x={c.rect!.x} y={c.rect!.y} text={c.body || 'Note'} brand={c.color || brand} />)}
+              {overlays.map((ov) => {
+                if (ov.type === 'spotlight' && ov.w && ov.h) {
+                  return (
+                    <SpotlightMask
+                      key={ov.id}
+                      rect={{ x: ov.pctX, y: ov.pctY, w: ov.w, h: ov.h }}
+                      shape={ov.shape ?? 'rounded'}
+                      overlayOpacity={ov.overlayOpacity ?? 55}
+                      borderColor={ov.borderColor ?? brand}
+                      onClick={ov.destination !== 'stay' ? () => onNavigate(ov) : undefined}
+                    />
+                  );
+                }
+                if (ov.type === 'hotspot' && !ov.invisible) {
+                  return <Hotspot key={ov.id} style={hotspotStyle} brand={brand} white x={ov.pctX} y={ov.pctY} size={20} onClick={ov.destination !== 'stay' ? () => onNavigate(ov) : undefined} title={ov.title} />;
+                }
+                if (ov.type === 'callout') {
+                  return (
+                    <CalloutCard
+                      key={ov.id}
+                      ov={ov}
+                      brand={brand}
+                      onClick={ov.destination !== 'stay' ? () => onNavigate(ov) : undefined}
+                    />
+                  );
+                }
+                return null;
+              })}
+              {hotspotX !== null && hotspotY !== null && !cursorTween
+                && !overlays.some((ov) => ov.destination !== 'stay' && (ov.type === 'spotlight' || ov.type === 'hotspot' || ov.type === 'callout'))
+                && (
+                <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={hotspotSz} onClick={() => onNavigate({ destination: 'next' })} title="Next" />
+              )}
+              {cursorTween && <CursorTweenOverlay tween={cursorTween} brand={brand} />}
+            </div>
+          </>
+        );
       })() : (
         <ScreenshotPlaceholder step={step} session={session} showChrome={false} aspect="16/9" rounded="" mode="stage" className="w-full h-full !shadow-none" />
       )}
-      {blurs.map((a, i) => <BlurMask key={i} x={a.x} y={a.y} w={a.width ?? 10} h={a.height ?? 5} />)}
-      {cardBlurs.map((c) => <BlurMask key={c.id} x={c.rect!.x} y={c.rect!.y} w={c.rect!.w} h={c.rect!.h} />)}
-      {callouts.map((a, i) => <CalloutOverlay key={i} x={a.x} y={a.y} text={a.text!} brand={brand} />)}
-      {cardCallouts.map((c) => <CalloutOverlay key={c.id} x={c.rect!.x} y={c.rect!.y} text={c.body || 'Note'} brand={c.color || brand} />)}
-      {/* Overlay layer */}
-      {overlays.map((ov) => {
-        if (ov.type === 'spotlight' && ov.w && ov.h) {
-          return (
-            <SpotlightMask
-              key={ov.id}
-              rect={{ x: ov.pctX, y: ov.pctY, w: ov.w, h: ov.h }}
-              shape={ov.shape ?? 'rounded'}
-              overlayOpacity={ov.overlayOpacity ?? 55}
-              borderColor={ov.borderColor ?? brand}
-              onClick={ov.destination !== 'stay' ? () => onNavigate(ov) : undefined}
-            />
-          );
-        }
-        if (ov.type === 'hotspot' && !ov.invisible) {
-          return <Hotspot key={ov.id} style={hotspotStyle} brand={brand} white x={ov.pctX} y={ov.pctY} size={20} onClick={ov.destination !== 'stay' ? () => onNavigate(ov) : undefined} title={ov.title} />;
-        }
-        if (ov.type === 'callout') {
-          return (
-            <CalloutCard
-              key={ov.id}
-              ov={ov}
-              brand={brand}
-              onClick={ov.destination !== 'stay' ? () => onNavigate(ov) : undefined}
-            />
-          );
-        }
-        return null;
-      })}
-      {/* Only show default nav hotspot when no creator overlay already handles navigation */}
-      {hotspotX !== null && hotspotY !== null && !cursorTween
-        && !overlays.some((ov) => ov.destination !== 'stay' && (ov.type === 'spotlight' || ov.type === 'hotspot' || ov.type === 'callout'))
-        && (
-        <Hotspot style={hotspotStyle} brand={brand} white={hotspotStyle !== 'arrow' && hotspotStyle !== 'ring'} x={hotspotX} y={hotspotY} size={hotspotSz} onClick={() => onNavigate({ destination: 'next' })} title="Next" />
-      )}
-      {cursorTween && <CursorTweenOverlay tween={cursorTween} brand={brand} />}
     </div>
   );
 }
