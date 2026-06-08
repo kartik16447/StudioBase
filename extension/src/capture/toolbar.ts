@@ -19,7 +19,7 @@ let mouseMoveHandler:  ((e: MouseEvent) => void) | null = null;
 let mouseClickHandler: ((e: MouseEvent) => void) | null = null;
 let toolbarState: ToolbarState   = 'recording';
 let isToolbarExpanded             = false;
-let toolbarPosition: ToolbarPosition = 'top';
+let toolbarPosition: ToolbarPosition = 'bottom';
 
 // drag state
 let dragActive    = false;
@@ -53,7 +53,7 @@ export function injectToolbar(): void {
   injectStyles();
 
   isToolbarExpanded = false;
-  toolbarPosition   = 'top';
+  toolbarPosition   = 'bottom';
 
   toolbarContainer = document.createElement('div');
   toolbarContainer.id = 'sb-toolbar-container';

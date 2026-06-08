@@ -746,6 +746,58 @@ steps.post('/:sessionId/steps/:stepId/screenshot', async (c) => {
   return c.json({ screenshotKey: r2Key, screenshotUrl: `${origin}/v1/assets/${r2Key}` });
 });
 
+// PATCH /:sessionId/steps/:stepId — update step fields directly in the R2 envelope.
+// Supports: stepTitle, textOverride, generatedText, displayText, locked.
+// Used by the console fix script and future editor actions that need to patch R2 directly
+// (when no D1 SOP rows exist for the session).
+const PatchStepFieldsSchema = z.object({
+  stepTitle:    z.string().max(300).nullable().optional(),
+  textOverride: z.string().max(2000).nullable().optional(),
+  generatedText: z.string().max(5000).nullable().optional(),
+  displayText:  z.string().max(2000).nullable().optional(),
+  locked:       z.boolean().optional(),
+});
+
+steps.patch('/:sessionId/steps/:stepId',
+  zValidator('json', PatchStepFieldsSchema),
+  async (c) => {
+    const user = c.get('user');
+    const { sessionId, stepId } = c.req.param();
+    const updates = c.req.valid('json');
+
+    const session = await requireSession(c.env, sessionId, user.id);
+    const assetKey = (session as any).r2JsonKey || `sessions/${sessionId}/session.json`;
+    const assetObj = await c.env.R2.get(assetKey);
+    if (!assetObj) throw new HTTPException(404, { message: 'Session asset not found' });
+
+    let envelope: any;
+    try {
+      envelope = JSON.parse(await assetObj.text());
+    } catch {
+      throw new HTTPException(500, { message: 'Invalid session data' });
+    }
+
+    const stepIndex = (envelope.steps ?? []).findIndex((s: any) => s.id === stepId);
+    if (stepIndex === -1) return c.json({ error: 'Step not found' }, 404);
+
+    // Apply only defined fields — don't clobber unrelated properties
+    const patch: Record<string, any> = {};
+    if ('stepTitle'     in updates) patch.stepTitle     = updates.stepTitle;
+    if ('textOverride'  in updates) patch.textOverride  = updates.textOverride;
+    if ('generatedText' in updates) patch.generatedText = updates.generatedText;
+    if ('displayText'   in updates) patch.displayText   = updates.displayText;
+    if ('locked'        in updates) patch.locked        = updates.locked;
+
+    envelope.steps[stepIndex] = { ...envelope.steps[stepIndex], ...patch };
+
+    await c.env.R2.put(assetKey, JSON.stringify(envelope), {
+      httpMetadata: { contentType: 'application/json' },
+    });
+
+    return c.json({ ok: true });
+  }
+);
+
 // DELETE /:sessionId/steps/:stepId — remove a step from the session JSON in R2
 steps.delete('/:sessionId/steps/:stepId', async (c) => {
   const user = c.get('user');

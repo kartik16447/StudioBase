@@ -196,6 +196,8 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
       const res = await apiClient.sessions.setShare(sessionId, !isPublic);
       setIsPublic(res.isPublic);
       setShareToken(res.shareToken);
+      // Keep store in sync so subsequent setSession calls don't overwrite these values
+      if (session) setSession({ ...session, isPublic: res.isPublic, shareToken: res.shareToken } as any);
     } catch (e) {
       console.error(e);
     } finally {
@@ -211,8 +213,9 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
     setFormatSaving(true);
     try {
       await apiClient.patch(`/sessions/${sessionId}/share-formats`, { [field]: next });
-      // Keep store in sync so re-opening the modal reads fresh values
-      if (session) setSession({ ...session, [field]: next } as any);
+      // Keep store in sync — include current isPublic/shareToken so the sync useEffect
+      // doesn't reset them when it reads back from the updated session
+      if (session) setSession({ ...session, isPublic, shareToken, [field]: next } as any);
       const updated = { ...formats, [field]: next };
       // Notify same-tab SharePage preview
       window.dispatchEvent(new CustomEvent('sb_formats_updated', { detail: updated }));
@@ -251,7 +254,7 @@ export const ShareModal: React.FC<{ open: boolean; onClose: () => void }> = ({ o
       }
       setFormats(f => ({ ...f, cinematicEnabled: true }));
       cinematicPaidRef.current = true; // credits spent — re-enable is always free from now on
-      if (session) setSession({ ...session, cinematicEnabled: true } as any);
+      if (session) setSession({ ...session, isPublic, shareToken, cinematicEnabled: true } as any);
     } catch (e: any) {
       setCinematicError(e?.message || 'Failed to unlock cinematic.');
     } finally {

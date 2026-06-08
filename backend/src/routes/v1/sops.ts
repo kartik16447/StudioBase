@@ -36,6 +36,7 @@ const UpdateStepBody = z.object({
   cards: z.array(z.any()).optional(),
   overlays: z.array(z.any()).optional(),
   stepTitle: z.string().max(300).nullable().optional(),
+  locked: z.boolean().optional(),
 });
 
 sops.patch('/:sopId/steps/:stepId', requireWorkspaceMembership('editor'), async (c) => {

@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "wiki",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "4444", "."],
+      "cwd": "/Users/kartikupadhyay/Downloads/studiobase",
+      "port": 4444
+    },
+    {
+      "name": "studio",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/kartikupadhyay/Downloads/studiobase/studio",
+      "port": 5173
+    }
+  ]
+}
