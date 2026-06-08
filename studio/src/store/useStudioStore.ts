@@ -392,8 +392,18 @@ export const useStudioStore = create<StudioState>((set, get) => ({
           failed: 'Session processing failed.',
           deleted: 'This session has been deleted.',
         };
+        // For in-progress states: don't show an error — start polling silently and wait.
+        // Previously this set sessionError for 'processing' status, which broke polling
+        // (early return skipped startPipelinePolling) and required 2-4 manual reloads.
+        if (data.status === 'processing' || data.status === 'uploading' || data.status === 'pending') {
+          set({ sessionStatus: data.status ?? null, isAiProcessing: true });
+          if (!pipelinePollInterval) {
+            get().startPipelinePolling(sessionId);
+          }
+          return;
+        }
         const msg = terminalFailures[data.status]
-          ?? `Session is still uploading or processing (status: ${data.status}).`;
+          ?? `Session processing failed (status: ${data.status}).`;
         set({ sessionError: msg, sessionStatus: data.status ?? null });
         return;
       }

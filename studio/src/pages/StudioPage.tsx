@@ -44,6 +44,7 @@ export const StudioPage: React.FC = () => {
   const { isEmbed, mode } = useIsEmbed();
   const session = useStudioStore(state => state.session);
   const sessionError = useStudioStore(state => state.sessionError);
+  const sessionStatus = useStudioStore(state => state.sessionStatus);
   const activeTab = useStudioStore(state => state.activeTab);
   const activeView = useStudioStore(state => state.activeView);
   const isPanelOpen = useStudioStore(state => state.isPanelOpen);
@@ -60,6 +61,9 @@ export const StudioPage: React.FC = () => {
   const [isSeededSession, setIsSeededSession] = useState(false);
   const [sopToDocPromptSeen, setSopToDocPromptSeen] = useState(true); // default true — only show when explicitly false
   // Reveal screen: shown once per session (sessionStorage flag), or forced via ?reveal=1
+  // NOTE: the sessionStorage flag is set in dismissReveal — NOT here on page load.
+  // Setting it here caused a bug where visiting a session while it was still processing
+  // permanently suppressed the reveal on all future visits.
   const [showReveal, setShowReveal] = useState(() => {
     const forceReveal = new URLSearchParams(window.location.search).get('reveal') === '1';
     if (forceReveal) return true;
@@ -67,12 +71,14 @@ export const StudioPage: React.FC = () => {
       || window.location.pathname.split('/sessions/')[1]?.split('/')[0];
     if (!sessionId) return false;
     const key = `reveal_seen_${sessionId}`;
-    if (sessionStorage.getItem(key)) return false;
-    sessionStorage.setItem(key, '1');
-    return true;
+    return !sessionStorage.getItem(key);
   });
 
   const dismissReveal = (view: 'sop' | 'video' | 'docs' | 'embed') => {
+    // Mark as seen only when the reveal is actually dismissed — not on page load
+    const sessionId = new URLSearchParams(window.location.search).get('session')
+      || window.location.pathname.split('/sessions/')[1]?.split('/')[0];
+    if (sessionId) sessionStorage.setItem(`reveal_seen_${sessionId}`, '1');
     setShowReveal(false);
     if (view === 'sop') setActiveView('sop');
     else if (view === 'video') setActiveView('video');
@@ -149,7 +155,11 @@ export const StudioPage: React.FC = () => {
     );
   }
 
-  if (!session) {
+  // Show spinner while session is null OR while pipeline is still processing.
+  // Previously only checked !session — but when R2 has raw events, session is set
+  // with steps before narration is ready (status still 'processing'). Guard both
+  // so the reveal only fires after status === 'ready'.
+  if (!session || sessionStatus === 'processing' || sessionStatus === 'uploading' || sessionStatus === 'pending') {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
         <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-6" />
