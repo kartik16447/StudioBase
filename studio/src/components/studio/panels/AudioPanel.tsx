@@ -313,7 +313,15 @@ const StepAudioRow: React.FC<{
 
       {/* Script editor drawer */}
       {isScriptOpen && (
-        <div className="mx-2 p-3 bg-surface-2 border border-border rounded-lg flex flex-col gap-2.5 animate-in slide-in-from-top-1 duration-150">
+        <div
+          className="mx-2 p-3 bg-surface-2 border border-border rounded-lg flex flex-col gap-2.5 animate-in slide-in-from-top-1 duration-150"
+          onBlur={(e) => {
+            // Close when focus leaves the entire drawer (not just the textarea)
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setIsScriptOpen(false);
+            }
+          }}
+        >
           <div className="flex items-center gap-1.5">
             <I.Pencil size={12} className="text-primary" />
             <span className="text-[11px] font-semibold text-text-1">Voiceover Script</span>
@@ -352,6 +360,13 @@ const StepAudioRow: React.FC<{
             value={localScript}
             onChange={e => setLocalScript(e.target.value)}
             onBlur={() => persistScript(localScript)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                persistScript(localScript);
+                setIsScriptOpen(false);
+              }
+            }}
             rows={3}
             className="w-full bg-surface-3 border border-border rounded-md px-2.5 py-2 text-[11px] text-text leading-relaxed resize-none focus:outline-none focus:border-primary transition-colors placeholder:text-text-3"
             placeholder="Enter voiceover script…"
