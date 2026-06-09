@@ -64,10 +64,6 @@ export const StudioPage: React.FC = () => {
   // NOTE: the sessionStorage flag is set in dismissReveal — NOT here on page load.
   // Setting it here caused a bug where visiting a session while it was still processing
   // permanently suppressed the reveal on all future visits.
-  // TESTING: always show reveal card on every visit (ignore sessionStorage seen-flag).
-  // Revert to the block below when testing is done.
-  const [showReveal, setShowReveal] = useState(true);
-  /* PRODUCTION (restore when done testing):
   const [showReveal, setShowReveal] = useState(() => {
     const forceReveal = new URLSearchParams(window.location.search).get('reveal') === '1';
     if (forceReveal) return true;
@@ -77,7 +73,6 @@ export const StudioPage: React.FC = () => {
     const key = `reveal_seen_${sessionId}`;
     return !sessionStorage.getItem(key);
   });
-  */
 
   const dismissReveal = (view: 'sop' | 'video' | 'docs' | 'embed') => {
     // Mark as seen only when the reveal is actually dismissed — not on page load
@@ -185,8 +180,14 @@ export const StudioPage: React.FC = () => {
     }
   }
 
-  // ── Post-reveal: session must be loaded and ready from here on ──────────
-  if (!session || sessionStatus === 'processing' || sessionStatus === 'uploading' || sessionStatus === 'pending') {
+  // ── Post-reveal: block only when session data hasn't loaded at all yet ──
+  // Do NOT block when sessionStatus === 'processing' on an existing session —
+  // that happens when the user clicks "Generate AI Content" / "Regenerate All"
+  // on a session that already has steps. In that case, isAiProcessing=true and
+  // the AIShimmer overlay in SOPCanvas handles the in-progress state while
+  // leaving the step list visible and updating in place.
+  const hasSteps = (session?.steps?.length ?? 0) > 0;
+  if (!session || (!hasSteps && (sessionStatus === 'processing' || sessionStatus === 'uploading' || sessionStatus === 'pending'))) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-20 text-center">
         <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin mb-6" />
