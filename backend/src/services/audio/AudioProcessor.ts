@@ -33,10 +33,12 @@ function preprocessForNaturalSpeech(text: string): string {
   // (e.g. 8447518814 → "8 4 4 7 5 1 8 8 1 4")
   let t = text.replace(/\b(\d{5,})\b/g, (m) => m.split('').join(' '));
 
-  // Add a leading full-stop so Deepgram treats it as a sentence boundary and
-  // exhales before the first word — stronger ramp-up than a comma alone.
-  if (!t.trimStart().startsWith('.') && !t.trimStart().startsWith('...')) {
-    t = '. ' + t.trimStart();
+  // Stack "..., " at the start: the ellipsis triggers a breath/trail-off pause
+  // and the comma adds a secondary beat — together they give Deepgram enough
+  // lead-in that the first real word doesn't sound clipped or rushed.
+  const stripped = t.trimStart();
+  if (!stripped.startsWith('...') && !stripped.startsWith(',')) {
+    t = '..., ' + stripped;
   }
 
   // Insert commas before common mid-sentence transition words to add breath pauses.
