@@ -456,6 +456,8 @@ export const AudioPanel: React.FC = () => {
   const sessionStatus = useStudioStore(s => s.sessionStatus);
   const creditsBalance = useStudioStore(s => s.creditsBalance);
   const openCreditsModal = useStudioStore(s => s.setCreditsModalOpen);
+  const isAiProcessing = useStudioStore(s => s.isAiProcessing);
+  const triggerPipeline = useStudioStore(s => s.triggerPipeline);
 
   const sessionId = (session as any)?.id || (session as any)?.sessionId;
 
@@ -555,19 +557,28 @@ export const AudioPanel: React.FC = () => {
         <div className="flex items-center gap-2 mb-0.5">
           <I.Mic size={14} className="text-primary" />
           <span className="text-[13px] font-semibold text-text">AI Voiceover</span>
-          {hasAnyAudio && (
-            <span className="ml-auto text-[11px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-md font-medium">
-              {doneCount}/{stepsWithText.length} steps
-            </span>
-          )}
+          <button
+            disabled={isAiProcessing}
+            onClick={() => triggerPipeline()}
+            className="ml-auto text-[11px] text-primary font-semibold inline-flex items-center gap-1 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <I.Sparkles size={11} strokeWidth={2.4} className={cn(isAiProcessing && 'animate-spin')} />
+            {isAiProcessing ? 'Regenerating...' : 'Regenerate all'}
+          </button>
         </div>
         <p className="text-[11px] text-text-3 mt-0.5">
           Generates a natural AI voice for your entire recording
+          {hasAnyAudio && (
+            <span className="ml-1 text-[11px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-md font-medium">
+              {doneCount}/{stepsWithText.length} steps
+            </span>
+          )}
         </p>
       </div>
 
       {/* ── Body ── */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
+      <AIShimmer isActive={isAiProcessing} className="flex-1 min-h-0 overflow-hidden">
+      <div className="h-full overflow-y-auto px-4 py-4 flex flex-col gap-3">
 
         {/* Generating state — shimmer banner */}
         {activelyGenerating && (
@@ -625,6 +636,7 @@ export const AudioPanel: React.FC = () => {
           })}
         </div>
       </div>
+      </AIShimmer>
 
       {/* ── Footer CTA ── */}
       <div className="px-4 pb-4 pt-2 border-t border-border shrink-0 flex flex-col gap-2.5">
