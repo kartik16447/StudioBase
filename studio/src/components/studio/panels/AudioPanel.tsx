@@ -94,11 +94,26 @@ const StepAudioRow: React.FC<{
     }
   }
 
+  async function persistScript(script: string) {
+    if (!script.trim()) return;
+    try {
+      await apiClient.request(`/sessions/${sessionId}/steps/${step.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ generatedText: script }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      useStudioStore.getState().updateStep(step.id, { generatedText: script } as any);
+    } catch {
+      // silent — user can retry by editing again
+    }
+  }
+
   async function handleGenerateStepAudio() {
     if (!localScript.trim()) return;
     setIsGeneratingStepAudio(true);
     setScriptError(null);
     try {
+      await persistScript(localScript);
       await apiClient.post(`/sessions/${sessionId}/steps/${step.id}/generate-audio`, {
         text: localScript,
       });
@@ -225,16 +240,11 @@ const StepAudioRow: React.FC<{
           {step.sequence}
         </div>
 
-        {/* Step label: title if available, else fall back to script snippet */}
-        <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-          <p className="text-[11px] font-medium text-text-1 line-clamp-1">
-            {step.stepTitle || step.elementText || `Step ${step.sequence}`}
+        {/* Step label: script text snippet, or fallback */}
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] text-text-1 line-clamp-2 leading-snug">
+            {text || `Step ${step.sequence}`}
           </p>
-          {text && (
-            <p className="text-[10px] text-text-3 line-clamp-1">
-              {text}
-            </p>
-          )}
         </div>
 
         {/* Edit script button — always visible */}
@@ -341,6 +351,7 @@ const StepAudioRow: React.FC<{
           <textarea
             value={localScript}
             onChange={e => setLocalScript(e.target.value)}
+            onBlur={() => persistScript(localScript)}
             rows={3}
             className="w-full bg-surface-3 border border-border rounded-md px-2.5 py-2 text-[11px] text-text leading-relaxed resize-none focus:outline-none focus:border-primary transition-colors placeholder:text-text-3"
             placeholder="Enter voiceover script…"
