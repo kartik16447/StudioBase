@@ -516,6 +516,18 @@ export const AudioPanel: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
+  // When "Regenerate all" is clicked from this panel, auto-trigger audio after script pipeline finishes.
+  const pendingAudioAfterScript = useRef(false);
+  const prevIsAiProcessing = useRef(isAiProcessing);
+  useEffect(() => {
+    if (prevIsAiProcessing.current && !isAiProcessing && pendingAudioAfterScript.current) {
+      pendingAudioAfterScript.current = false;
+      handleGenerateAll();
+    }
+    prevIsAiProcessing.current = isAiProcessing;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAiProcessing]);
+
   // ── Generate all ──
   async function handleGenerateAll() {
     console.log(`[AudioPanel][Regenerate AI Voice] Clicked Generate All. sessionId=${sessionId}, valid steps=${stepsWithText.length}`);
@@ -561,7 +573,9 @@ export const AudioPanel: React.FC = () => {
           <button
             disabled={isAiProcessing}
             onClick={() => {
+              pendingAudioAfterScript.current = true;
               triggerPipeline().catch((err: any) => {
+                pendingAudioAfterScript.current = false;
                 showToast('error', err?.message || 'AI generation failed');
               });
             }}
