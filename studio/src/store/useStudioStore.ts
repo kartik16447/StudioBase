@@ -234,9 +234,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
   navigate: (name, params = {}) => set((state) => {
     // 1. Sync Browser URL
     const search = new URLSearchParams(window.location.search);
-    
-    // If we're navigating home, clear session-specific params
-    if (name === 'home') {
+
+    // For non-studio routes, always strip ?session= so reloads don't re-trigger
+    // the deep-link guard and navigate back to Smart Studio.
+    if (name !== 'studio') {
       search.delete('session');
     } else if (params.sessionId) {
       search.set('session', params.sessionId);
