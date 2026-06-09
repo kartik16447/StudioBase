@@ -1,5 +1,6 @@
 import type { JSONContent } from '@tiptap/react';
 import type { Step } from '../../../../../shared/types/session';
+import { resolveDisplayText } from '../../../lib/textUtils';
 
 function text(t: string): JSONContent {
   return { type: 'text', text: t };
@@ -32,12 +33,12 @@ function bulletList(items: string[]): JSONContent {
 }
 
 function stepTitle(step: Step): string {
-  const base = step.stepTitle?.trim() || step.generatedText?.trim().slice(0, 60) || '';
+  const base = step.stepTitle?.trim() || resolveDisplayText(step).slice(0, 60) || '';
   return base ? `Step ${step.sequence} — ${base}` : `Step ${step.sequence}`;
 }
 
 function stepBody(step: Step): string {
-  return (step.textOverride?.trim() || step.generatedText?.trim() || '');
+  return resolveDisplayText(step);
 }
 
 export function sopToTiptapContent(
