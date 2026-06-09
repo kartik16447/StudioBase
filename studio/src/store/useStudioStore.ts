@@ -249,11 +249,10 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     
     const searchStr = search.toString();
     // Use canonical paths so reloads always land on the correct route.
-    // studio + sessionId → /sessions/<id>  (deep-linkable)
-    // any other named route → /            (no session path leaking through)
-    // Keeps workspaceId in the query string for all routes.
-    const canonicalPath = name === 'studio' && params.sessionId
-      ? `/sessions/${params.sessionId}`
+    const canonicalPath =
+      name === 'studio'      && params.sessionId  ? `/sessions/${params.sessionId}`
+      : name === 'player'    && params.shareToken ? `/s/${params.shareToken}`
+      : name === 'shared-doc'&& params.shareToken ? `/share/docs/${params.shareToken}`
       : '/';
     const newUrl = canonicalPath + (searchStr ? '?' + searchStr : '');
     
