@@ -4,6 +4,7 @@ import { apiClient } from '../../../lib/apiClient';
 import { I } from '../../icons';
 import { cn, Button, AIShimmer } from '../../ui';
 import { stripAudioMarkers } from '../../../lib/textUtils';
+import { showToast } from '../../GlobalToast';
 
 // Credit cost for bulk narration (1 per step)
 const NARRATION_CREDIT_PER_STEP = 1;
@@ -559,7 +560,11 @@ export const AudioPanel: React.FC = () => {
           <span className="text-[13px] font-semibold text-text">AI Voiceover</span>
           <button
             disabled={isAiProcessing}
-            onClick={() => triggerPipeline()}
+            onClick={() => {
+              triggerPipeline().catch((err: any) => {
+                showToast('error', err?.message || 'AI generation failed');
+              });
+            }}
             className="ml-auto text-[11px] text-primary font-semibold inline-flex items-center gap-1 hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <I.Sparkles size={11} strokeWidth={2.4} className={cn(isAiProcessing && 'animate-spin')} />
