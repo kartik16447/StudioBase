@@ -426,11 +426,8 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNaviga
         const zoom = step.animationTarget?.zoomScale ?? 1;
         const px   = hotspotX ?? 50;
         const py   = hotspotY ?? 50;
-        const zoomTransform = zoom > 1
-          ? `translate(${50 - zoom * px}%, ${50 - zoom * py}%) scale(${zoom})`
-          : undefined;
-        const zoomStyle: React.CSSProperties = zoomTransform
-          ? { position: 'absolute', inset: 0, transformOrigin: '0 0', transform: zoomTransform, transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)' }
+        const zoomStyle: React.CSSProperties = zoom > 1
+          ? { position: 'absolute', inset: 0, transformOrigin: `${px}% ${py}%`, transform: `scale(${zoom})`, transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)' }
           : { position: 'absolute', inset: 0, transition: 'transform 350ms cubic-bezier(0.22,1,0.36,1)' };
         return (
           <>

@@ -439,9 +439,9 @@ export const SharePage: React.FC = () => {
   // Cinematic tab appears only when credits have been spent to unlock it.
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     ...(sopEnabled !== false ? [{ id: 'guide' as Tab, label: 'Step Guide', icon: <I.List size={13} /> }] : []),
-    ...(demoEnabled && (session?.steps?.length ?? 0) > 0 ? [{ id: 'demo' as Tab, label: 'Interactive Demo', icon: <I.MousePointer size={13} /> }] : []),
     ...(_rawEnabled !== false && videoUrl ? [{ id: 'recording' as Tab, label: 'Raw Video', icon: <I.Video size={13} /> }] : []),
     ...(cinematicEnabled ? [{ id: 'cinematic' as Tab, label: 'Cinematic AI', icon: <I.Play size={13} /> }] : []),
+    ...(demoEnabled && (session?.steps?.length ?? 0) > 0 ? [{ id: 'demo' as Tab, label: 'Interactive Demo', icon: <I.MousePointer size={13} /> }] : []),
   ];
 
   // Auto-select first available tab (or keep current if still valid)
