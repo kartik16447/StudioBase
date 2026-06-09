@@ -60,7 +60,7 @@ Output fields:
 - steps: For each input step produce:
     - stepTitle: A short noun phrase naming the goal of this step.
     - generatedText: The narration script for text-to-speech. See all rules below.
-    - displayText: A clean, standalone instruction sentence for display in the UI (step cards, SOP, player). Rules: (1) Complete sentence ending with a period. (2) No leading connectors ("then", "from here", "next"). (3) No trailing "...". (4) Imperative voice: "Click X to open Y." or "Select X from the sidebar." (5) If generatedText is [SILENCE], displayText must be empty string "". (6) Max 2 sentences — keep it concise but complete. (7) NEVER echo raw inputValue data verbatim — describe the field instead. BAD: "Enter kartik first project in the project name field." GOOD: "Enter the project name." BAD: "Search for praduman in the search field." GOOD: "Search for the contact by name." BAD: "Enter 9811981120 in the phone number field." GOOD: "Enter the lead's phone number." (8) Use strong action verbs: "Click", "Select", "Enter", "Open", "Set", "Choose". Avoid weak/passive verbs like "View", "See", "Check", "Look at". BAD: "View the lead form." GOOD: "Review the lead details." (9) When a button label is itself a verb ("Select", "Create", "Delete"), write "Click [Label]" not "Choose [Label]". BAD: "Choose Select." GOOD: "Click Select to confirm."
+    - displayText: A clean, standalone instruction sentence for display in the UI (step cards, SOP, player). Rules: (0) PLAIN TEXT ONLY — no markdown, no asterisks, no bold (**), no underscores, no backticks, no special formatting of any kind. (1) Complete sentence ending with a period. (2) No leading connectors ("then", "from here", "next"). (3) No trailing "...". (4) Imperative voice: "Click X to open Y." or "Select X from the sidebar." (5) If generatedText is [SILENCE], displayText must be empty string "". (6) Max 2 sentences — keep it concise but complete. (7) NEVER echo raw inputValue data verbatim — this includes phone numbers, IDs, codes, names, email addresses, numeric values, or any user-typed content. Describe the field/action instead. BAD: "Enter kartik first project in the project name field." GOOD: "Enter the project name." BAD: "Search for praduman in the search field." GOOD: "Search for the contact by name." BAD: "Enter 9811981120 in the phone number field." GOOD: "Enter the lead's phone number." BAD: "Enter c-4 as the lead code." GOOD: "Enter the lead code." (8) Use strong action verbs: "Click", "Select", "Enter", "Open", "Set", "Choose". Avoid weak/passive verbs like "View", "See", "Check", "Look at". BAD: "View the lead form." GOOD: "Review the lead details." (9) When a button label is itself a verb ("Select", "Create", "Delete"), write "Click [Label]" not "Choose [Label]". BAD: "Choose Select." GOOD: "Click Select to confirm."
 - chapterBreaks: Group steps into logical workflow phases using afterStepId. STRICT RULES: (1) Never place a chapter break after step 1 or step 2. (2) Require at least 4 steps between chapter breaks. (3) Only break when the workflow phase genuinely changes (e.g. setup → configuration → launch). Fewer chapters is always better — if in doubt, omit the break. For sessions under 8 steps, 0–1 chapter breaks is appropriate.
 
 **PUNCTUATION AS SPEECH RHYTHM:**
@@ -433,8 +433,8 @@ export class PipelineProcessor {
             text = trimToBudget(text, budget);
           }
 
-          // displayText: empty for silence steps, otherwise use AI value
-          const display = text === '[SILENCE]' ? '' : (s.displayText?.trim() || '');
+          // displayText: empty for silence steps, otherwise strip any markdown bold the LLM snuck in
+          const display = text === '[SILENCE]' ? '' : (s.displayText?.trim() || '').replace(/\*\*(.*?)\*\*/g, '$1');
 
           return [s.id, { ...s, generatedText: text, displayText: display }];
         }));

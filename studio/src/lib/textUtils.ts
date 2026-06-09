@@ -21,7 +21,7 @@ export function resolveDisplayText(step: {
   generatedText?: string | null;
 }): string {
   if (step.textOverride) return stripAudioMarkers(step.textOverride);
-  if (step.displayText)  return step.displayText;
+  if (step.displayText)  return step.displayText.replace(/\*\*(.*?)\*\*/g, '$1');
   return stripAudioMarkers(step.generatedText);
 }
 

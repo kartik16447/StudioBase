@@ -33,10 +33,10 @@ function preprocessForNaturalSpeech(text: string): string {
   // (e.g. 8447518814 → "8 4 4 7 5 1 8 8 1 4")
   let t = text.replace(/\b(\d{5,})\b/g, (m) => m.split('').join(' '));
 
-  // Add a soft leading comma so the voice engine doesn't slam into the first
-  // word at full pace — gives a natural ramp-up breath.
-  if (!t.trimStart().startsWith(',') && !t.trimStart().startsWith('...')) {
-    t = ', ' + t.trimStart();
+  // Add a leading full-stop so Deepgram treats it as a sentence boundary and
+  // exhales before the first word — stronger ramp-up than a comma alone.
+  if (!t.trimStart().startsWith('.') && !t.trimStart().startsWith('...')) {
+    t = '. ' + t.trimStart();
   }
 
   // Insert commas before common mid-sentence transition words to add breath pauses.
