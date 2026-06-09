@@ -487,13 +487,13 @@ export const AudioPanel: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [globalVoice, setGlobalVoice] = useState(ELEVENLABS_VOICES[0].id);
   const [hasInitializedVoice, setHasInitializedVoice] = useState(false);
-  // Show a success toast when the pipeline finishes from this panel's "Regenerate all" button
-  const prevIsAiProcessing = useRef(false);
+  // Show a toast when the pipeline finishes from this panel's "Regenerate all" button
+  const prevIsAiProcessingToast = useRef(false);
   useEffect(() => {
-    if (prevIsAiProcessing.current && !isAiProcessing) {
-      showToast('success', 'Narration scripts regenerated — regenerate voice to apply new audio');
+    if (prevIsAiProcessingToast.current && !isAiProcessing) {
+      showToast('info', 'Narration scripts regenerated — regenerate voice to apply new audio');
     }
-    prevIsAiProcessing.current = isAiProcessing;
+    prevIsAiProcessingToast.current = isAiProcessing;
   }, [isAiProcessing]);
 
   // Auto-initialize globalVoice from the first step that already has a swapVoiceId,
