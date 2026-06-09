@@ -92,6 +92,7 @@ If you write more words than the budget allows, audio will OVERRUN the video and
 - isModalInput is true with no meaningful inputValue -- silence.
 - elementRole is "svg" or "img" with no elementText and the URL has not changed from the previous step -- silence.
 - The step's enrichedElementText contains "(test input)" -- silence.
+- isDuplicateClick is true: this is a repeated click on the same button already narrated in the previous step -- silence.
 - ONLY silence a click/input step if ALL of: enrichedElementText is null/empty AND inputValue is null AND the URL has not changed from the previous step.
 
 **DO NOT silence:**
@@ -183,6 +184,16 @@ function enrichElementText(s: Step): string | null {
     }
   }
 
+  // Long elementText = extension captured a container's full text (form labels, modal body).
+  // Extract only the first meaningful line so the AI doesn't read a UI dump verbatim.
+  if (raw && raw.length > 100) {
+    const firstLine = raw.split(/[\n\r*]+/).map(l => l.trim()).find(l => l.length > 2 && l.length < 60);
+    if (firstLine) return firstLine;
+    // Fall back to truncating at 60 chars at a word boundary
+    const truncated = raw.slice(0, 60).replace(/\s+\S*$/, '');
+    return truncated || null;
+  }
+
   return raw;
 }
 
@@ -230,6 +241,7 @@ interface StepPayloadItem {
   visualDurationSeconds: number;
   isBackNavigation: boolean;
   isModalInput: boolean;
+  isDuplicateClick: boolean;
 }
 
 // Extension stores captured data inside step.data when root-level fields are empty.
@@ -276,6 +288,17 @@ function buildStepPayload(steps: Step[]): { payload: StepPayloadItem[]; budgetMa
     const backNav  = isBackNavigation(s, prevStep);
     const noisy    = isNoisyInput(s);
 
+    // Consecutive clicks on the same element (same URL + same elementText) after the first
+    // are duplicate confirmation clicks — the first was already narrated.
+    const isDuplicateClick = !!(
+      s.action === 'click' &&
+      prevStep &&
+      prevStep.action === 'click' &&
+      s.url === prevStep.url &&
+      s.elementText && prevStep.elementText &&
+      s.elementText.trim() === prevStep.elementText.trim()
+    );
+
     return {
       id:                  s.id,
       action:              s.action,
@@ -287,6 +310,7 @@ function buildStepPayload(steps: Step[]): { payload: StepPayloadItem[]; budgetMa
       visualDurationSeconds: Math.round(budgetSeconds * 10) / 10,
       isBackNavigation:    backNav,
       isModalInput:        noisy,
+      isDuplicateClick,
     };
   });
 
