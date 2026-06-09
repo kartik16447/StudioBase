@@ -417,9 +417,12 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNaviga
     return (coords.y / coords.viewportHeight) * 100;
   })();
 
-  // Prefer creator-repositioned value; fall back to raw recorded coordinate
-  const hotspotX  = step.animationTarget?.pctX  ?? rawX;
-  const hotspotY  = step.animationTarget?.pctY  ?? rawY;
+  // rawY is chrome-corrected (screenshot-space). pctY is stored in viewport-space
+  // and equals cy/viewportHeight — wrong when browser chrome is in the screenshot.
+  // Always use rawY when coords are available; fall back to pctY only when we have
+  // no recorded coordinates (e.g. creator manually placed an overlay-only step).
+  const hotspotX  = rawX  ?? step.animationTarget?.pctX  ?? null;
+  const hotspotY  = rawY  ?? step.animationTarget?.pctY  ?? null;
   const hotspotSz = step.animationTarget?.hotspotSize ?? 20;
   const cards: DemoCard[] = (step as any).cards ?? [];
   const overlays: Overlay[] = (step as any).overlays ?? [];

@@ -370,6 +370,8 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
 
   const [localOverlays, setLocalOverlays] = useState<any[]>(step?.overlays ?? []);
   const draggingOverlayId = useRef<string | null>(null);
+  const [imgNaturalAspect, setImgNaturalAspect] = useState<string | null>(null);
+  const screenshotUrl = step?.screenshotKey && session?.assets?.[step.screenshotKey] ? session.assets[step.screenshotKey] : null;
 
   // Zoom-focus rect draw state
   const [focusRect, setFocusRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
@@ -383,6 +385,7 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
     setPos({ x, y });
     dragPos.current = { x, y };
     setFocusRect(null);
+    setImgNaturalAspect(null);
   }, [step?.id]);
 
   // Sync overlays safely
@@ -530,12 +533,12 @@ function BrowserMock({ step, session, brand, hotspotStyle, onUpdateHotspot, acti
               e.stopPropagation();
               focusBodyRef?.current?.();
             }}
-            style={{ position: 'relative', aspectRatio: (coords && coords.viewportWidth && coords.viewportHeight) ? `${coords.viewportWidth}/${coords.viewportHeight}` : '16/9', background: '#fff', userSelect: 'none', cursor: activeTool ? 'crosshair' : 'default' }}
+            style={{ position: 'relative', aspectRatio: imgNaturalAspect ?? ((coords?.viewportWidth && coords?.viewportHeight) ? `${coords.viewportWidth}/${coords.viewportHeight}` : '16/9'), background: '#111', userSelect: 'none', cursor: activeTool ? 'crosshair' : 'default' }}
           >
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'rgba(0,0,0,0.1)', zIndex: 30 }}>
               <div style={{ height: '100%', background: brand }} />
             </div>
-            <ScreenshotPlaceholder step={step} session={session} showChrome={false} aspect={(coords && coords.viewportWidth && coords.viewportHeight) ? `${coords.viewportWidth}/${coords.viewportHeight}` : '16/9'} rounded="" mode="stage" className="w-full h-full !shadow-none" />
+            {screenshotUrl && <img src={screenshotUrl} alt="" draggable={false} onLoad={(e) => setImgNaturalAspect(`${e.currentTarget.naturalWidth} / ${e.currentTarget.naturalHeight}`)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', pointerEvents: 'none' }} />}
 
             {/* Blur overlays */}
             {blurCards.map((card) => (
