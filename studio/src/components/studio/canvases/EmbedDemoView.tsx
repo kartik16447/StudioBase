@@ -429,9 +429,14 @@ function ScreenshotCard({ step, session, brand, hotspotStyle, progress, onNaviga
   const cardCallouts = cards.filter((c) => c.type === 'callout' && c.rect);
   const screenshotUrl = step.screenshotKey && session?.assets?.[step.screenshotKey] ? session.assets[step.screenshotKey] : null;
 
-  const aspectStr = (coords && coords.viewportWidth && coords.viewportHeight) 
-    ? `${coords.viewportWidth} / ${coords.viewportHeight}` 
-    : '16 / 9';
+  // Use screenshot natural dimensions once loaded — this eliminates letterbox bars so
+  // percentage coordinates map directly to image content with no offset correction needed.
+  // Before load, approximate with viewport dimensions (same aspect when no chrome captured).
+  const aspectStr = imgNaturalSize
+    ? `${imgNaturalSize.w} / ${imgNaturalSize.h}`
+    : (coords?.viewportWidth && coords?.viewportHeight)
+      ? `${coords.viewportWidth} / ${coords.viewportHeight}`
+      : '16 / 9';
 
   return (
     <div style={{ position: 'relative', width: '100%', aspectRatio: aspectStr, borderRadius: 14, overflow: 'hidden', background: '#111', boxShadow: '0 30px 80px -20px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06)' }}>
