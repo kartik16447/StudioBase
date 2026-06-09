@@ -240,11 +240,13 @@ const ScriptStepRow: React.FC<{
   const [isEditing, setIsEditing] = useState(false);
   // Script panel shows displayText (SOP documentation style).
   // Falls back to generatedText for sessions processed before the displayText split.
-  const [text, setText] = useState((step as any).displayText || step.generatedText || '');
+  const stripBold = (s: string) => s.replace(/\*\*(.*?)\*\*/g, '$1');
+  const resolveText = () => stripBold((step as any).displayText || step.generatedText || '');
+  const [text, setText] = useState(resolveText);
   const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
-    setText((step as any).displayText || step.generatedText || '');
+    setText(resolveText());
   }, [(step as any).displayText, step.generatedText]);
 
   const deleteStep = useStudioStore(state => state.deleteStep);
