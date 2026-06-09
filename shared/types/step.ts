@@ -80,6 +80,8 @@ export const StepSchema = z.object({
   elementText: z.string().nullable(),
   elementRole: z.string().nullable(),
   elementType: z.string().nullable(),
+  inputType: z.string().nullable().optional(),
+  placeholder: z.string().nullable().optional(),
   inputValue: z.string().nullable(),
   coordinates: z.object({
     x: z.number(),

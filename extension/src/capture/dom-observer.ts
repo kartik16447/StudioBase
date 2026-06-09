@@ -24,6 +24,8 @@ export interface RawStepPayload {
   elementText: string | null;
   elementRole: string | null;
   elementType: string | null;
+  inputType: string | null;
+  placeholder: string | null;
   inputValue: string | null;
   coordinates: {
     x: number;
@@ -125,6 +127,8 @@ function handleInteraction(
     elementText: getElementText(target),
     elementRole: target.getAttribute('role') || target.tagName.toLowerCase(),
     elementType: target.tagName.toLowerCase(),
+    inputType: target.tagName.toLowerCase() === 'input' ? (target as HTMLInputElement).type || null : null,
+    placeholder: (target as HTMLInputElement).placeholder || target.getAttribute('placeholder') || null,
     inputValue: inputValue || null,
     coordinates: {
       x: clientX ?? rect.left + rect.width / 2,

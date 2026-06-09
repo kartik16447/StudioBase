@@ -108,6 +108,7 @@ If you write more words than the budget allows, audio will OVERRUN the video and
 4. Reveal tone: Use "!" once per chapter when something important appears. Example: "There it is -- the full build history!"
 5. Grouping: If multiple rapid clicks happen under 1 second apart, summarize as one fluid sentence.
 6. Input values: NEVER read out the literal inputValue. Describe what's being typed, not the value itself. BAD: "type praduman in the search field..." GOOD: "search for the contact by name..." BAD: "enter 9811981120..." GOOD: "enter the phone number..."
+7. Field type: Use the `inputType` and `placeholder` fields to identify what kind of field is being filled. ONLY call something a "search field" if inputType is "search" or the placeholder contains the word "search". If inputType is "text", "tel", "email", "number", or similar, it is a FORM FIELD — describe it by its placeholder (e.g. placeholder "First Name" → "Enter the first name") or contextually ("fill in the field"). Never guess "search field" for a plain text input.
 7. Voice: Speak directly to the viewer — imperative or first-person plural ("we", "let's"). NEVER say "The user" or "the user". The narrator is a guide, not an observer describing someone else.
 
 **YOUR TASK:**
@@ -235,6 +236,8 @@ interface StepPayloadItem {
   action: string | null | undefined;
   enrichedElementText: string | null;
   elementRole: string | null | undefined;
+  inputType: string | null | undefined;
+  placeholder: string | null | undefined;
   inputValue: string | null | undefined;
   pageTitle: string | null | undefined;
   url: string | null | undefined;
@@ -304,6 +307,8 @@ function buildStepPayload(steps: Step[]): { payload: StepPayloadItem[]; budgetMa
       action:              s.action,
       enrichedElementText: enrichElementText(s),
       elementRole:         s.elementRole,
+      inputType:           s.action === 'input' ? ((s as any).inputType || null) : null,
+      placeholder:         s.action === 'input' ? ((s as any).placeholder || null) : null,
       inputValue:          noisy ? null : s.inputValue,
       pageTitle:           s.pageTitle,
       url:                 s.url,
