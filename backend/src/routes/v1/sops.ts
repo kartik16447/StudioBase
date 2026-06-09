@@ -32,6 +32,7 @@ sops.get('/:sopId', requireWorkspaceMembership('viewer'), async (c) => {
 // Update a step's text override (editor action)
 const UpdateStepBody = z.object({
   textOverride: z.string().max(2000).optional(),
+  displayText: z.string().max(2000).optional(),
   annotations: z.array(z.any()).optional(),
   cards: z.array(z.any()).optional(),
   overlays: z.array(z.any()).optional(),

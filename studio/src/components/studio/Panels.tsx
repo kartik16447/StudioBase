@@ -122,16 +122,14 @@ export const ScriptPanel: React.FC = () => {
                 setStepIndex(idx);
                 triggerScroll();
               }}
-              onLiveUpdate={(text) => updateStep(step.id, { textOverride: text }, true /* skipUndo */)}
+              onLiveUpdate={(text) => updateStep(step.id, { displayText: text } as any, true /* skipUndo */)}
               onCommit={(text) => {
-                // Push undo snapshot and persist to backend on blur / Enter
-                updateStep(step.id, { textOverride: text });
-                saveStep(step.id, { textOverride: text }).catch(err =>
+                // Script panel edits save to displayText (SOP documentation field).
+                // Audio narration (generatedText / textOverride) is untouched.
+                updateStep(step.id, { displayText: text } as any);
+                saveStep(step.id, { displayText: text }).catch(err =>
                   console.warn('[ScriptPanel] saveStep failed:', err),
                 );
-                // Clear stale audio whenever the script text changes
-                updateStep(step.id, { voiceoverKey: null, voiceoverDurationMs: null } as any);
-                saveStep(step.id, { voiceoverKey: null, voiceoverDurationMs: null } as any).catch(() => {});
               }}
               innerRef={el => { if (el) stepRefs.current.set(step.id, el); else stepRefs.current.delete(step.id); }}
             />
@@ -240,12 +238,14 @@ const ScriptStepRow: React.FC<{
   innerRef?: (el: HTMLDivElement | null) => void
 }> = ({ step, active, isPlaying, onClick, onLiveUpdate, onCommit, innerRef }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [text, setText] = useState(step.textOverride || step.generatedText || '');
+  // Script panel shows displayText (SOP documentation style).
+  // Falls back to generatedText for sessions processed before the displayText split.
+  const [text, setText] = useState((step as any).displayText || step.generatedText || '');
   const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
-    setText(step.textOverride || step.generatedText || '');
-  }, [step.textOverride, step.generatedText]);
+    setText((step as any).displayText || step.generatedText || '');
+  }, [(step as any).displayText, step.generatedText]);
 
   const deleteStep = useStudioStore(state => state.deleteStep);
   const session = useStudioStore(state => state.session);
@@ -282,7 +282,8 @@ const ScriptStepRow: React.FC<{
       console.log(`[Panels][AI Regenerate] Successfully received AI response! Data:`, res);
 
       if (res.generatedText) {
-        setText(res.generatedText);
+        // Script panel shows displayText; fall back to generatedText if displayText is absent
+        setText(res.displayText || res.generatedText);
         updateStep(step.id, {
           generatedText: res.generatedText,
           textOverride: undefined,

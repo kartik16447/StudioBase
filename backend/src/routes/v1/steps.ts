@@ -128,7 +128,7 @@ Average speaking rate is 2.5 words per second.
 Given the UI Action and Time Budget, output valid JSON with three fields:
 - "generatedText": The spoken narration script for text-to-speech ONLY. Natural flow with light connectors. End with "..." so the voice trails off. Do not include conversational filler.
 - "stepTitle": A short noun phrase (3-6 words) naming the goal of this step. Used as a heading in the SOP document. Examples: "Opening the Support Tab", "Entering Contact Details", "Saving the Project".
-- "displayText": A clean standalone instruction sentence for the SOP document body. Rules: (1) Complete sentence ending with a period. (2) No leading connectors. (3) Imperative voice: "Click X to open Y." (4) NEVER echo raw inputValue — describe the field instead. (5) Max 2 sentences. (6) Use strong verbs: Click, Select, Enter, Open, Set, Choose.`;
+- "displayText": A detailed SOP documentation paragraph for this step. Rules: (1) 2–4 complete sentences. (2) First sentence: imperative action naming the exact element and its location (e.g. "In the left sidebar, click **Deployments** to open the deployments panel."). (3) Second sentence: what this page/view shows or what the action does. (4) Optional third sentence: why this matters, what to look for, or next logical context. (5) No audio connectors ("then", "now", "next", "from here"). (6) No trailing "...". (7) Written like official product documentation — objective, precise, professional. (8) NEVER echo raw inputValue — describe the field/purpose instead. (9) Use strong verbs: Click, Select, Enter, Navigate, Open, Set, Choose.`;
 
     const userMessage = JSON.stringify({
       action: stepData.action,

@@ -94,7 +94,7 @@ interface StudioState {
   setSopStatus: (status: 'draft' | 'review' | 'published' | null) => void;
   publishedAt: string | null;
   lastPublishedMs: number | null;
-  saveStep: (stepId: string, updates: { textOverride?: string; annotations?: any[]; cards?: any[]; overlays?: any[]; stepTitle?: string | null; locked?: boolean }) => Promise<void>;
+  saveStep: (stepId: string, updates: { textOverride?: string; displayText?: string; annotations?: any[]; cards?: any[]; overlays?: any[]; stepTitle?: string | null; locked?: boolean }) => Promise<void>;
   saveAnnotations: (stepId: string, annotations: any[]) => void;
   saveAnimationTarget: (stepId: string, animationTarget: any) => Promise<void>;
   saveChapterBreaks: (chapterBreaks: { afterStepId: string; chapterTitle: string }[]) => Promise<void>;
