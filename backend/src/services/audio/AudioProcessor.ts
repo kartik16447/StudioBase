@@ -24,6 +24,28 @@ export interface AudioSwapJob {
   jobId: string;
 }
 
+// Prepares raw script text for TTS to sound natural and well-paced.
+// Works for both Deepgram Aura (punctuation-only pacing) and ElevenLabs.
+function preprocessForNaturalSpeech(text: string): string {
+  if (!text.trim() || text.trim() === '[SILENCE]') return text;
+
+  // Expand digit strings of 5+ chars so TTS reads them as individual digits
+  // (e.g. 8447518814 → "8 4 4 7 5 1 8 8 1 4")
+  let t = text.replace(/\b(\d{5,})\b/g, (m) => m.split('').join(' '));
+
+  // Add a soft leading comma so the voice engine doesn't slam into the first
+  // word at full pace — gives a natural ramp-up breath.
+  if (!t.trimStart().startsWith(',') && !t.trimStart().startsWith('...')) {
+    t = ', ' + t.trimStart();
+  }
+
+  // Insert commas before common mid-sentence transition words to add breath pauses.
+  // Only fires when the word is not already preceded by punctuation.
+  t = t.replace(/([a-zA-Z])\s+\b(then|next|now|here|after that|from here|and then)\b/g, '$1, $2');
+
+  return t;
+}
+
 export class AudioProcessor {
   constructor(private env: Env) {}
 
@@ -36,16 +58,13 @@ export class AudioProcessor {
 
     console.log(`[AUDIO] TTS start — session:${sessionId} step:${stepId} voiceId:${effectiveVoiceId} jobId:${jobId}`);
 
-    // Expand digit strings of 5+ consecutive digits to space-separated digits so
-    // TTS reads them as individual digits rather than a large integer.
-    // Handles phone numbers, IDs, zip codes, etc. (e.g. 8447518814 → "8 4 4 7 5 1 8 8 1 4")
-    const expandedText = text.replace(/\b(\d{5,})\b/g, (m) => m.split('').join(' '));
+    const processedText = preprocessForNaturalSpeech(text);
 
     // Ensure natural trailing breath for Aura's punctuation-based pacing.
     // "..." cues Aura to trail off before the next step begins.
-    const ttsText = expandedText.trimEnd().endsWith('...') || expandedText.trimEnd().endsWith('[SILENCE]')
-      ? expandedText
-      : expandedText.trimEnd() + '...';
+    const ttsText = processedText.trimEnd().endsWith('...') || processedText.trimEnd().endsWith('[SILENCE]')
+      ? processedText
+      : processedText.trimEnd() + '...';
 
     const audioService = getElevenLabsService(this.env);
     const result = await audioService.generateFromText(ttsText, { language, voiceId: effectiveVoiceId });
