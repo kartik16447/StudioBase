@@ -123,7 +123,7 @@ function App() {
 
       // Restore last visited route instead of always landing on home
       const lastRoute = localStorage.getItem('sb_last_route') as any;
-      const validRoutes = ['home', 'brand', 'templates', 'team', 'audit-logs', 'admin', 'analytics'];
+      const validRoutes = ['home', 'brand', 'templates', 'team', 'audit-logs', 'admin', 'analytics', 'docs'];
       if (lastRoute && validRoutes.includes(lastRoute) && route.name !== lastRoute) {
         navigate(lastRoute);
       }

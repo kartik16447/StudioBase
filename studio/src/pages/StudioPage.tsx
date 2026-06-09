@@ -60,19 +60,8 @@ export const StudioPage: React.FC = () => {
   const [isOpeningInDocs, setIsOpeningInDocs] = useState(false);
   const [isSeededSession, setIsSeededSession] = useState(false);
   const [sopToDocPromptSeen, setSopToDocPromptSeen] = useState(true); // default true — only show when explicitly false
-  // Reveal screen: shown once per session (sessionStorage flag), or forced via ?reveal=1
-  // NOTE: the sessionStorage flag is set in dismissReveal — NOT here on page load.
-  // Setting it here caused a bug where visiting a session while it was still processing
-  // permanently suppressed the reveal on all future visits.
-  const [showReveal, setShowReveal] = useState(() => {
-    const forceReveal = new URLSearchParams(window.location.search).get('reveal') === '1';
-    if (forceReveal) return true;
-    const sessionId = new URLSearchParams(window.location.search).get('session')
-      || window.location.pathname.split('/sessions/')[1]?.split('/')[0];
-    if (!sessionId) return false;
-    const key = `reveal_seen_${sessionId}`;
-    return !sessionStorage.getItem(key);
-  });
+  // Reveal screen: always show on session visit (intentional for habituation UX).
+  const [showReveal, setShowReveal] = useState(true);
 
   const dismissReveal = (view: 'sop' | 'video' | 'docs' | 'embed') => {
     // Mark as seen only when the reveal is actually dismissed — not on page load

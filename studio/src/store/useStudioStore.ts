@@ -176,7 +176,7 @@ interface StudioState {
 }
 
 // const RESTORABLE_ROUTES: RouteName[] = ['home', 'brand', 'templates', 'team', 'analytics'];
-const RESTORABLE_ROUTES_STR = ['home', 'brand', 'templates', 'team', 'audit-logs', 'admin', 'analytics'];
+const RESTORABLE_ROUTES_STR = ['home', 'brand', 'templates', 'team', 'audit-logs', 'admin', 'analytics', 'docs'];
 
 function getInitialRoute(): { name: RouteName; params: Record<string, any> } {
   try {
@@ -247,12 +247,13 @@ export const useStudioStore = create<StudioState>((set, get) => ({
     }
     
     const searchStr = search.toString();
-    // Always use a canonical pathname for the studio route so the URL never
-    // inherits an arbitrary path (e.g. /YOUR_EXTENSION_URL) from wherever
-    // the user happened to be when the session was opened.
+    // Use canonical paths so reloads always land on the correct route.
+    // studio + sessionId → /sessions/<id>  (deep-linkable)
+    // any other named route → /            (no session path leaking through)
+    // Keeps workspaceId in the query string for all routes.
     const canonicalPath = name === 'studio' && params.sessionId
       ? `/sessions/${params.sessionId}`
-      : window.location.pathname;
+      : '/';
     const newUrl = canonicalPath + (searchStr ? '?' + searchStr : '');
     
     // Only push if different from current state to avoid loops
