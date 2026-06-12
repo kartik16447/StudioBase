@@ -13,6 +13,7 @@ import { AuditLogPage } from './pages/AuditLogPage';
 import { AdminDiagnosticsPage } from './pages/AdminDiagnosticsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { DocsPage } from './pages/DocsPage';
+import { KnowledgeBasePage } from './pages/KnowledgeBasePage';
 import { SharedDocPage } from './pages/SharedDocPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { LoginPage } from './pages/LoginPage';
@@ -274,6 +275,7 @@ function App() {
         case 'admin' as any: return <AdminDiagnosticsPage />;
         case 'analytics': return <AnalyticsPage />;
         case 'docs': return <DocsPage />;
+        case 'knowledge': return <KnowledgeBasePage />;
         case 'shared-doc': return <SharedDocPage shareToken={route.params.shareToken} />;
         case 'privacy': return <PrivacyPage />;
         default: return <HomePage />;

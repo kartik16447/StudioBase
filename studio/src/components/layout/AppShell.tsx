@@ -213,7 +213,7 @@ export const Sidebar: React.FC = () => {
         <section>
           {!collapsed && <div className="px-3 mb-2 text-[10.5px] font-bold text-white/30 uppercase tracking-[0.16em]">Resources</div>}
           <div className={cn('space-y-0.5', collapsed && 'flex flex-col items-center')}>
-            <SidebarItem collapsed={collapsed} id="knowledge" icon={I.Bookmark} label="Knowledge Base" active={active === 'knowledge'} onClick={() => {}} disabled={true} badge="Soon" />
+            <SidebarItem collapsed={collapsed} id="knowledge" icon={I.Bookmark} label="Knowledge Base" active={active === 'knowledge'} onClick={() => navigate('knowledge')} />
             <SidebarItem collapsed={collapsed} id="team" icon={I.Settings} label="Workspace Settings" active={active === 'team'} onClick={() => navigate('team')} />
             <SidebarItem collapsed={collapsed} id="analytics" icon={I.BarChart2} label="Analytics" active={active === 'analytics'} onClick={() => navigate('analytics')} />
             {/* Audit Logs — enterprise only */}
