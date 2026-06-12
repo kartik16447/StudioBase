@@ -117,6 +117,18 @@ class ApiClient {
     return this.handleResponse<T>(res, path);
   }
 
+  async getBlob(path: string): Promise<Blob> {
+    const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let msg = 'Export failed';
+      try { msg = JSON.parse(text)?.error || msg; } catch {}
+      throw new Error(msg);
+    }
+    return res.blob();
+  }
+
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
     this.logLegacyWarning(url);

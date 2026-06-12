@@ -10,6 +10,7 @@ import { resolveDisplayText } from '../../../lib/textUtils';
 import { showToast } from '../../GlobalToast';
 import { CommentPanel } from '../panels/CommentPanel';
 import { EmbedModal } from '../panels/EmbedModal';
+import { apiClient } from '../../../lib/apiClient';
 
 export const SOPCanvas: React.FC = () => {
   const session = useStudioStore(state => state.session);
@@ -471,6 +472,24 @@ export const SOPCanvas: React.FC = () => {
               }}
             >
               Export PDF
+            </Button>
+            <Button
+              variant="ghost" size="sm" icon={I.FileText}
+              onClick={async () => {
+                try {
+                  const blob = await apiClient.getBlob(`/sessions/${session.sessionId}/export?format=docx`);
+                  const url = URL.createObjectURL(blob);
+                  Object.assign(document.createElement('a'), {
+                    href: url,
+                    download: `${session.aiOutputs?.title || 'sop'}.docx`,
+                  }).click();
+                  URL.revokeObjectURL(url);
+                } catch (e: any) {
+                  showToast('error', e?.message || 'Export failed');
+                }
+              }}
+            >
+              Export Word
             </Button>
             <Button variant="ghost" size="sm" icon={I.Code2} onClick={() => setEmbedOpen(true)}>
               Embed

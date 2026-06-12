@@ -22,6 +22,7 @@
   "dependencies": {
     "@hono/zod-validator": "^0.8.0",
     "@sentry/cloudflare": "^10.53.1",
+    "docx": "^9.7.1",
     "hono": "^4.12.18",
     "resend": "^6.12.4",
     "zod": "^4.4.3"

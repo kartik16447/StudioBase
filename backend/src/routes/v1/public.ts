@@ -122,7 +122,9 @@ publicRoutes.post('/:shareToken/view', async (c) => {
       const title = session.title || session.capturedTitle || 'Your SOP';
       const ownerName = owner.name || owner.email.split('@')[0];
       c.executionCtx.waitUntil(
-        emailSvc.sendFirstViewEmail({ ownerEmail: owner.email, ownerName, sessionTitle: title, shareToken }).catch(() => {})
+        emailSvc.sendFirstViewEmail({ ownerEmail: owner.email, ownerName, sessionTitle: title, shareToken })
+          .then(() => console.log(`[Email] First-view email sent to ${owner.email}`))
+          .catch(err => console.error('[Email] First-view email failed:', err))
       );
     }
   }

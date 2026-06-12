@@ -13,6 +13,9 @@ import { recordEvent, Events } from '../../telemetry/events';
 
 import { SessionService } from '../../services/SessionService';
 import { checkLowCreditNotify } from '../../services/CreditService';
+import { SOPService } from '../../services/SOPService';
+import { ExportService } from '../../services/ExportService';
+import { planGate } from '../../middlewares/plan';
 
 const sessions = new Hono<{ Bindings: Env; Variables: Variables }>();
 const STUDIO_BASE_URL = 'https://studiobase-umber.vercel.app';
@@ -283,6 +286,42 @@ sessions.patch('/:id/enable-cinematic', requirePermission('sop:edit'), async (c)
   checkLowCreditNotify(c.env.DB, ws.id).catch(() => {});
 
   return c.json({ cinematicEnabled: true, charged: true });
+});
+
+// GET /v1/sessions/:id/export?format=docx
+sessions.get('/:id/export', planGate('export'), async (c) => {
+  const { id } = c.req.param();
+  const format = c.req.query('format') || 'docx';
+  const ws = c.get('workspace');
+
+  const session = await c.env.DB.prepare(
+    `SELECT id, title, capturedTitle, capturedUrl FROM sessions WHERE id = ? AND workspaceId = ?`
+  ).bind(id, ws.id).first<any>();
+  if (!session) return c.json({ error: 'Not found' }, 404);
+
+  const sopRow = await c.env.DB.prepare(
+    `SELECT id FROM sops WHERE sessionId = ? AND workspaceId = ?`
+  ).bind(id, ws.id).first<{ id: string }>();
+  if (!sopRow) return c.json({ error: 'SOP not found' }, 404);
+
+  const sopService = new SOPService(c.env.DB);
+  const steps = await sopService.getSteps(sopRow.id, ws.id);
+
+  const exporter = new ExportService();
+  const title = session.title || session.capturedTitle || 'Untitled SOP';
+
+  if (format === 'docx') {
+    const buf = await exporter.generateDocx({ title, capturedUrl: session.capturedUrl, stepCount: steps.length }, steps);
+    const filename = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.docx`;
+    return new Response(buf, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    });
+  }
+
+  return c.json({ error: 'Unsupported format' }, 400);
 });
 
 export default sessions;
