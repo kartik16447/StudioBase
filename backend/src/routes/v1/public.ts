@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { Env, Variables } from '../../types/hono';
 import { DocumentService } from '../../services/DocumentService';
 import { AnalyticsService } from '../../services/AnalyticsService';
+import { EmailService } from '../../services/EmailService';
 
 export const publicRoutes = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -99,11 +100,32 @@ publicRoutes.post('/:shareToken/view', async (c) => {
   const viewerEmail: string | null = body.viewerEmail || null;
   const viewerFingerprint: string | null = body.viewerFingerprint || null;
 
+  // Check if this is the first view before inserting
+  const { count } = await c.env.DB.prepare(
+    `SELECT COUNT(*) as count FROM share_views WHERE sessionId = ?`
+  ).bind(session.id).first<{ count: number }>() ?? { count: 0 };
+
   const id = crypto.randomUUID();
   await c.env.DB.prepare(
     `INSERT INTO share_views (id, sessionId, shareToken, viewerEmail, viewerFingerprint, viewedAt)
      VALUES (?, ?, ?, ?, ?, ?)`
   ).bind(id, session.id, shareToken, viewerEmail, viewerFingerprint, Date.now()).run().catch(() => {});
+
+  // Send first-view email to owner — fire and forget, non-blocking
+  if (count === 0 && c.env.RESEND_API_KEY) {
+    const owner = await c.env.DB.prepare(
+      `SELECT name, email FROM users WHERE id = ?`
+    ).bind(session.ownerId).first<{ name: string; email: string }>().catch(() => null);
+
+    if (owner?.email) {
+      const emailSvc = new EmailService(c.env.RESEND_API_KEY, c.env.APP_URL || 'https://studiobase.app');
+      const title = session.title || session.capturedTitle || 'Your SOP';
+      const ownerName = owner.name || owner.email.split('@')[0];
+      c.executionCtx.waitUntil(
+        emailSvc.sendFirstViewEmail({ ownerEmail: owner.email, ownerName, sessionTitle: title, shareToken }).catch(() => {})
+      );
+    }
+  }
 
   return c.json({ ok: true });
 });

@@ -71,7 +71,8 @@
 		"AUDIO_PROVIDER": "workersai",
 		"ALLOWED_ORIGINS": "https://studio.studiobase.app,https://studiobase-umber.vercel.app,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174",
 		"ENCRYPTION_KEY": "REPLACE_ME_WITH_SECURE_KEY",
-		"ELEVENLABS_API_KEY": "DUMMY_KEY"
+		"ELEVENLABS_API_KEY": "DUMMY_KEY",
+		"APP_URL": "https://studiobase-umber.vercel.app"
 	},
 	// Local development overrides: `wrangler dev` picks these up automatically.
 	// DEV_BYPASS_EMAIL is ONLY defined here — never in production vars.

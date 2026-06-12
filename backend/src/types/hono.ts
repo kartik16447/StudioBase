@@ -24,6 +24,8 @@ export interface Env {
   VERCEL_WEBHOOK_SECRET?: string;
   GITHUB_TOKEN?: string;
   POLL_SECRET?: string;
+  RESEND_API_KEY?: string;
+  APP_URL?: string;
 }
 
 export interface User {
