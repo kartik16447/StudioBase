@@ -201,6 +201,7 @@ export class AuthService {
       email: user.email,
       workspaceId: user.workspaceId,
       role: user.workspaceRole,
+      iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7, // 1 week
     }, this.env.ENCRYPTION_KEY);
   }

@@ -32,10 +32,11 @@ export const authMiddleware = (options: { optional?: boolean } = {}) => {
         const payload = await verify(token, c.env.ENCRYPTION_KEY, 'HS256');
         if (payload && payload.id) {
           console.log(`[DIAGNOSTIC] Modern JWT Validated for ${path}. User: ${payload.id}, Workspace: ${payload.workspaceId}`);
-          
+
           c.set('user', {
             id: payload.id as string,
             email: payload.email as string,
+            iat: payload.iat as number | undefined,
           });
           return next();
         }

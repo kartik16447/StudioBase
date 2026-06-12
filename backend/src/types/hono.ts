@@ -35,6 +35,7 @@ export interface User {
   avatarUrl?: string;
   workspaceId?: string;
   role?: string;
+  iat?: number; // JWT issued-at (seconds). Used by revoke-all-sessions check in workspaceMiddleware.
 }
 
 export type Variables = {

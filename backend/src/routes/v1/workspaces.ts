@@ -11,6 +11,9 @@ import {
 } from '../../schemas/workspaces';
 import { WorkspaceController } from '../../controllers/WorkspaceController';
 import { planGate } from '../../middlewares/plan';
+import { FeatureGateService } from '../../services/FeatureGateService';
+import { EmailService } from '../../services/EmailService';
+import { AuditService } from '../../services/AuditService';
 import { HTTPException } from 'hono/http-exception';
 
 const UpdateMemberRoleSchema = z.object({
@@ -107,6 +110,133 @@ wsRoutes.patch('/members/:userId', requirePermission('workspace:admin'), zValida
   ).bind(role, ws.id, targetUserId).run();
 
   return c.json({ success: true, userId: targetUserId, role });
+});
+
+// 9. Revoke all active sessions (owner/admin) — sets revokedBefore timestamp
+wsRoutes.post('/sessions/revoke-all', requirePermission('workspace:admin'), async (c) => {
+  const ws = c.get('workspace');
+  const actor = c.get('user');
+  const now = Date.now();
+
+  await c.env.DB.prepare(
+    `INSERT INTO workspace_settings (workspaceId, revokedBefore, dataRegion, retentionDays)
+     VALUES (?, ?, 'global', 90)
+     ON CONFLICT(workspaceId) DO UPDATE SET revokedBefore = excluded.revokedBefore`
+  ).bind(ws.id, now).run();
+
+  const audit = new AuditService(c.env, c.executionCtx);
+  await audit.record({ eventName: 'workspace.sessions_revoked', workspaceId: ws.id, userId: actor.id, properties: { revokedBefore: now } });
+
+  return c.json({ ok: true, revokedBefore: now });
+});
+
+// 10. Update workspace settings (allowedDomains, dataRegion)
+wsRoutes.patch('/settings', requirePermission('workspace:admin'), async (c) => {
+  const ws = c.get('workspace');
+  const body = await c.req.json<{ allowedDomains?: string; dataRegion?: string; retentionDays?: number }>();
+
+  await c.env.DB.prepare(
+    `INSERT INTO workspace_settings (workspaceId, allowedDomains, dataRegion, retentionDays)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(workspaceId) DO UPDATE SET
+       allowedDomains = COALESCE(excluded.allowedDomains, allowedDomains),
+       dataRegion     = COALESCE(excluded.dataRegion, dataRegion),
+       retentionDays  = COALESCE(excluded.retentionDays, retentionDays),
+       updatedAt      = ${Date.now()}`
+  ).bind(
+    ws.id,
+    body.allowedDomains ?? null,
+    body.dataRegion ?? 'global',
+    body.retentionDays ?? 90,
+  ).run();
+
+  return c.json({ ok: true });
+});
+
+// 11. Transfer ownership — owner-only, two-step confirmed on frontend
+wsRoutes.post('/transfer-owner', async (c) => {
+  const ws = c.get('workspace');
+  const actor = c.get('user');
+
+  if (ws.role !== 'Owner') throw new HTTPException(403, { message: 'Only the Owner can transfer ownership' });
+
+  const { targetUserId } = await c.req.json<{ targetUserId: string }>();
+  if (!targetUserId) throw new HTTPException(400, { message: 'targetUserId required' });
+  if (targetUserId === actor.id) throw new HTTPException(400, { message: 'Cannot transfer to yourself' });
+
+  const target = await c.env.DB.prepare(
+    'SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?'
+  ).bind(ws.id, targetUserId).first<{ role: string }>();
+
+  if (!target) throw new HTTPException(404, { message: 'Target user is not a workspace member' });
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE workspace_members SET role = ? WHERE workspaceId = ? AND userId = ?')
+      .bind('Owner', ws.id, targetUserId),
+    c.env.DB.prepare('UPDATE workspace_members SET role = ? WHERE workspaceId = ? AND userId = ?')
+      .bind('Admin', ws.id, actor.id),
+    c.env.DB.prepare('UPDATE workspaces SET ownerId = ? WHERE id = ?')
+      .bind(targetUserId, ws.id),
+  ]);
+
+  const audit = new AuditService(c.env, c.executionCtx);
+  await audit.record({ eventName: 'workspace.ownership_transferred', workspaceId: ws.id, userId: actor.id, properties: { toUserId: targetUserId } });
+
+  return c.json({ ok: true, newOwnerId: targetUserId });
+});
+
+// 12. Bulk invite — team+ plan required, sends individual email per address
+wsRoutes.post('/invites/bulk', requirePermission('member:invite'), async (c) => {
+  const ws = c.get('workspace');
+  const actor = c.get('user');
+
+  // Feature gate check
+  const gates = new FeatureGateService(c.env);
+  const flag = await gates.resolve(ws.id, 'workspace:bulk_invite');
+  if (!flag.enabled) throw new HTTPException(402, { message: 'PLAN_LIMIT: bulk_invite requires Team plan or above' });
+
+  const { emails, role = 'Member' } = await c.req.json<{ emails: string[]; role?: string }>();
+  if (!Array.isArray(emails) || emails.length === 0) throw new HTTPException(400, { message: 'emails array required' });
+  if (emails.length > 50) throw new HTTPException(400, { message: 'Max 50 emails per bulk invite' });
+
+  const now = Date.now();
+  const expiresAt = now + 7 * 24 * 60 * 60 * 1000;
+
+  // Resolve workspace name + actor name for email
+  const wsRow = await c.env.DB.prepare('SELECT name FROM workspaces WHERE id = ?').bind(ws.id).first<{ name: string }>();
+  const actorRow = await c.env.DB.prepare('SELECT name, email FROM users WHERE id = ?').bind(actor.id).first<{ name: string; email: string }>();
+  const workspaceName = wsRow?.name ?? 'StudioBase workspace';
+  const inviterName = actorRow?.name || actorRow?.email || 'Someone';
+
+  const results: { email: string; status: 'sent' | 'failed'; token?: string }[] = [];
+  const appUrl = c.env.APP_URL ?? 'https://app.studiobase.so';
+
+  for (const email of emails) {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed.includes('@')) { results.push({ email: trimmed, status: 'failed' }); continue; }
+
+    try {
+      const id = crypto.randomUUID();
+      const token = crypto.randomUUID();
+
+      await c.env.DB.prepare(
+        'INSERT INTO invites (id, workspaceId, token, role, email, createdAt, expiresAt, invitedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      ).bind(id, ws.id, token, role, trimmed, now, expiresAt, actor.id).run();
+
+      const inviteUrl = `${appUrl}?join=${token}`;
+
+      if (c.env.RESEND_API_KEY) {
+        const emailSvc = new EmailService(c.env.RESEND_API_KEY, appUrl);
+        await emailSvc.sendInviteEmail({ toEmail: trimmed, inviterName, workspaceName, role, inviteUrl });
+      }
+
+      results.push({ email: trimmed, status: 'sent', token });
+    } catch {
+      results.push({ email: trimmed, status: 'failed' });
+    }
+  }
+
+  return c.json({ ok: true, results });
 });
 
 workspaces.route('/', wsRoutes);

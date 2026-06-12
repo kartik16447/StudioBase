@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { apiClient, type PendingInvite } from '../lib/apiClient';
 import { sessionManager } from '../lib/auth/sessionManager';
+import { useFeatureFlag } from '../hooks/useFeatureFlag';
+import { FeatureGate } from '../components/ui/FeatureGate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -171,6 +173,25 @@ export const WorkspaceSettingsPage: React.FC = () => {
   const [reauthTooltipVisible, setReauthTooltipVisible] = useState(false);
   const [reauthDays, setReauthDays] = useState(30);
 
+  // Bulk invite modal
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkEmailsRaw, setBulkEmailsRaw] = useState('');
+  const [bulkRole, setBulkRole] = useState<'Member' | 'Admin' | 'Viewer'>('Member');
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkResults, setBulkResults] = useState<{ email: string; status: 'sent' | 'failed' }[] | null>(null);
+
+  // Transfer ownership modal
+  const [transferTarget, setTransferTarget] = useState<Member | null>(null);
+  const [transferLoading, setTransferLoading] = useState(false);
+
+  // Workspace settings save (allowedDomains, dataRegion)
+  const [settingsDomains, setSettingsDomains] = useState('');
+  const [settingsRegion, setSettingsRegion] = useState('global');
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+
+  const bulkInviteFlag = useFeatureFlag('workspace:bulk_invite');
+
   const loadData = () => {
     if (!workspaceId) return;
     setLoading(true);
@@ -183,6 +204,8 @@ export const WorkspaceSettingsPage: React.FC = () => {
       setMembers(membersRes.members || []);
       setPendingInvites(invitesRes.invites || []);
       if (settingsRes.settings?.retentionDays) setReauthDays(settingsRes.settings.retentionDays);
+      if (settingsRes.settings?.allowedDomains) setSettingsDomains(settingsRes.settings.allowedDomains);
+      if (settingsRes.settings?.dataRegion) setSettingsRegion(settingsRes.settings.dataRegion);
     }).catch(err => setError(err.message))
       .finally(() => setLoading(false));
   };
@@ -221,6 +244,85 @@ export const WorkspaceSettingsPage: React.FC = () => {
     navigator.clipboard.writeText(url);
     setCopiedToken(true);
     setTimeout(() => setCopiedToken(false), 2000);
+  };
+
+  // Bulk invite
+  const handleBulkInvite = async () => {
+    if (!workspaceId) return;
+    const emails = bulkEmailsRaw.split(/[\n,]+/).map(e => e.trim()).filter(Boolean);
+    if (!emails.length) return;
+    setBulkLoading(true);
+    setBulkResults(null);
+    try {
+      const res = await apiClient.request(`/workspaces/invites/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+        body: JSON.stringify({ emails, role: bulkRole }),
+      }) as { results: { email: string; status: 'sent' | 'failed' }[] };
+      setBulkResults(res.results);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  // Transfer ownership
+  const handleTransferOwner = async () => {
+    if (!workspaceId || !transferTarget) return;
+    setTransferLoading(true);
+    try {
+      await apiClient.request(`/workspaces/transfer-owner`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+        body: JSON.stringify({ targetUserId: transferTarget.userId }),
+      });
+      setMembers(prev => prev.map(m => {
+        if (m.userId === transferTarget.userId) return { ...m, role: 'Owner' };
+        if (m.role === 'Owner') return { ...m, role: 'Admin' };
+        return m;
+      }));
+      setTransferTarget(null);
+    } catch (e: any) {
+      setError(e.message || 'Failed to transfer ownership');
+    } finally {
+      setTransferLoading(false);
+    }
+  };
+
+  // Revoke all sessions
+  const handleRevokeAllSessions = async () => {
+    if (!workspaceId) return;
+    if (!window.confirm('This will sign out every member (including yourself) across all devices. Continue?')) return;
+    try {
+      await apiClient.request(`/workspaces/sessions/revoke-all`, {
+        method: 'POST',
+        headers: { 'x-workspace-id': workspaceId },
+      });
+      sessionManager.logout();
+    } catch (e: any) {
+      setError(e.message || 'Failed to revoke sessions');
+    }
+  };
+
+  // Save workspace settings
+  const handleSaveSettings = async () => {
+    if (!workspaceId) return;
+    setSettingsSaving(true);
+    setSettingsSaved(false);
+    try {
+      await apiClient.request(`/workspaces/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+        body: JSON.stringify({ allowedDomains: settingsDomains || null, dataRegion: settingsRegion }),
+      });
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 2500);
+    } catch (e: any) {
+      setError(e.message || 'Failed to save settings');
+    } finally {
+      setSettingsSaving(false);
+    }
   };
 
   const font = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, sans-serif';
@@ -281,14 +383,18 @@ export const WorkspaceSettingsPage: React.FC = () => {
           </div>
           {activeTab === 'members' && (
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <button className="ws-btn-ghost" style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 10,
-                padding: '8px 14px', fontSize: 13, fontWeight: 500, color: '#4A4A55',
-                cursor: 'pointer', boxShadow: '0 1px 2px rgba(16,18,27,0.04)',
-              }}>
-                {Ic.mail(14)} Bulk invite
-              </button>
+              {bulkInviteFlag.enabled ? (
+                <button className="ws-btn-ghost" onClick={() => { setBulkOpen(true); setBulkResults(null); setBulkEmailsRaw(''); }} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 10,
+                  padding: '8px 14px', fontSize: 13, fontWeight: 500, color: '#4A4A55',
+                  cursor: 'pointer', boxShadow: '0 1px 2px rgba(16,18,27,0.04)',
+                }}>
+                  {Ic.mail(14)} Bulk invite
+                </button>
+              ) : (
+                <FeatureGate feature="workspace:bulk_invite" showUpgradeNudge />
+              )}
               <button className="ws-btn-pri" onClick={handleCreateInvite} disabled={inviteLoading} style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 background: '#5E5CE6', border: 'none', borderRadius: 10,
@@ -550,7 +656,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
                               <div style={{ height: 1, background: '#ECECEF', margin: '8px 0' }} />
                               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 12px 4px', fontSize: 12, color: '#8A8A95' }}>
                                 {Ic.info(13, '#B8B8C2')}
-                                <span><strong style={{ color: '#4A4A55' }}>Owner</strong> can only be transferred — not assigned. <span style={{ color: '#5E5CE6', fontWeight: 600, cursor: 'pointer' }}>Transfer ownership →</span></span>
+                                <span><strong style={{ color: '#4A4A55' }}>Owner</strong> can only be transferred — not assigned. <span onClick={() => setTransferTarget(m)} style={{ color: '#5E5CE6', fontWeight: 600, cursor: 'pointer' }}>Transfer ownership →</span></span>
                               </div>
                             </div>
                           )}
@@ -702,41 +808,53 @@ export const WorkspaceSettingsPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* SAML fields */}
+                {/* SAML read-only fields */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
                   {[
                     { label: 'Entity ID', value: settings?.workspaceId ? `https://auth.studiobase.so/saml/${settings.workspaceId}` : 'Not configured' },
                     { label: 'ACS URL (Reply URL)', value: settings?.workspaceId ? `https://auth.studiobase.so/saml/${settings.workspaceId}/acs` : 'Not configured' },
-                    { label: 'Allowed Domains', value: settings?.allowedDomains || 'Not configured' },
-                    { label: 'Data Region', value: settings?.dataRegion || 'us-east' },
                   ].map(f => (
                     <div key={f.label}>
                       <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>{f.label}</label>
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <input
-                          readOnly
-                          value={f.value}
-                          style={{
-                            flex: 1, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 11.5,
-                            background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8,
-                            padding: '8px 12px', color: '#4A4A55', outline: 'none', minWidth: 0,
-                          }}
-                        />
-                        <button
-                          onClick={() => navigator.clipboard.writeText(f.value)}
-                          className="ws-btn-soft"
-                          style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            width: 36, height: 36, background: '#F5F5F7', border: '1px solid #ECECEF',
-                            borderRadius: 8, cursor: 'pointer', flexShrink: 0,
-                          }}
-                          title="Copy"
-                        >
+                        <input readOnly value={f.value} style={{ flex: 1, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 11.5, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, padding: '8px 12px', color: '#4A4A55', outline: 'none', minWidth: 0 }} />
+                        <button onClick={() => navigator.clipboard.writeText(f.value)} className="ws-btn-soft" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, cursor: 'pointer', flexShrink: 0 }} title="Copy">
                           {Ic.copy(13, '#8A8A95')}
                         </button>
                       </div>
                     </div>
                   ))}
+                </div>
+
+                {/* Editable: Allowed Domains + Data Region */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                  <div>
+                    <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>Allowed Domains</label>
+                    <input
+                      value={settingsDomains}
+                      onChange={e => setSettingsDomains(e.target.value)}
+                      placeholder="e.g. acme.com, corp.acme.com"
+                      style={{ width: '100%', fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 11.5, background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 8, padding: '8px 12px', color: '#0B0B0F', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>Data Region</label>
+                    <select
+                      value={settingsRegion}
+                      onChange={e => setSettingsRegion(e.target.value)}
+                      style={{ width: '100%', fontSize: 12.5, background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 8, padding: '8px 12px', color: '#0B0B0F', outline: 'none', fontFamily: font }}
+                    >
+                      <option value="global">Global (default)</option>
+                      <option value="us-east">US East</option>
+                      <option value="eu-west">EU West</option>
+                      <option value="ap-southeast">AP Southeast</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+                  <button onClick={handleSaveSettings} disabled={settingsSaving} className="ws-btn-pri" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: settingsSaved ? '#10B981' : '#5E5CE6', border: 'none', borderRadius: 10, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#FFFFFF', cursor: settingsSaving ? 'wait' : 'pointer', opacity: settingsSaving ? 0.7 : 1, transition: 'background 0.2s' }}>
+                    {settingsSaved ? <>{Ic.check(13, '#FFFFFF')} Saved</> : settingsSaving ? 'Saving…' : 'Save settings'}
+                  </button>
                 </div>
 
                 {/* IdP logos */}
@@ -856,7 +974,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
                       Sign every member (including yourself) out of all browsers and devices. They'll need to sign in again.
                     </div>
                   </div>
-                  <button style={{
+                  <button onClick={handleRevokeAllSessions} style={{
                     flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6,
                     background: 'transparent', border: '1px solid #EF4444',
                     borderRadius: 10, padding: '9px 16px', fontSize: 13, fontWeight: 600,
@@ -951,5 +1069,71 @@ export const WorkspaceSettingsPage: React.FC = () => {
         )}
       </div>
     </div>
+
+    {/* ── BULK INVITE MODAL ────────────────────────────────────────────────── */}
+    {bulkOpen && (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)' }} onClick={() => setBulkOpen(false)}>
+        <div style={{ background: '#FFFFFF', borderRadius: 20, padding: 28, width: 480, maxWidth: '95vw', boxShadow: '0 24px 80px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: '#0B0B0F', marginBottom: 6, fontFamily: font }}>Bulk invite</div>
+          <div style={{ fontSize: 13, color: '#8A8A95', marginBottom: 18, fontFamily: font }}>Enter email addresses separated by commas or new lines. Invites expire in 7 days.</div>
+
+          {!bulkResults ? (
+            <>
+              <textarea
+                value={bulkEmailsRaw}
+                onChange={e => setBulkEmailsRaw(e.target.value)}
+                placeholder={'alice@acme.com\nbob@acme.com\ncarol@acme.com'}
+                rows={6}
+                style={{ width: '100%', fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 12.5, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 10, padding: '10px 12px', color: '#0B0B0F', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, fontFamily: font }}>
+                <span style={{ fontSize: 13, color: '#4A4A55', fontWeight: 500 }}>Invite as:</span>
+                <select value={bulkRole} onChange={e => setBulkRole(e.target.value as any)} style={{ background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, padding: '7px 10px', fontSize: 13, color: '#0B0B0F', outline: 'none', fontFamily: font }}>
+                  <option value="Member">Member</option>
+                  <option value="Admin">Admin</option>
+                  <option value="Viewer">Viewer</option>
+                </select>
+                <button onClick={handleBulkInvite} disabled={bulkLoading || !bulkEmailsRaw.trim()} style={{ marginLeft: 'auto', background: '#5E5CE6', border: 'none', borderRadius: 10, padding: '8px 20px', fontSize: 13, fontWeight: 600, color: '#FFFFFF', cursor: bulkLoading ? 'wait' : 'pointer', opacity: bulkLoading ? 0.7 : 1 }}>
+                  {bulkLoading ? 'Sending…' : 'Send invites'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div style={{ fontFamily: font }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#0B0B0F', marginBottom: 12 }}>Results</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+                {bulkResults.map(r => (
+                  <div key={r.email} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
+                    <span style={{ flex: 1, color: '#4A4A55', fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 12 }}>{r.email}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: r.status === 'sent' ? '#059669' : '#EF4444', background: r.status === 'sent' ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)', padding: '2px 8px', borderRadius: 99 }}>
+                      {r.status === 'sent' ? '✓ Sent' : '✗ Failed'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setBulkOpen(false)} style={{ marginTop: 18, background: '#5E5CE6', border: 'none', borderRadius: 10, padding: '8px 20px', fontSize: 13, fontWeight: 600, color: '#FFFFFF', cursor: 'pointer' }}>Done</button>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+
+    {/* ── TRANSFER OWNERSHIP MODAL ─────────────────────────────────────────── */}
+    {transferTarget && (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)' }} onClick={() => setTransferTarget(null)}>
+        <div style={{ background: '#FFFFFF', borderRadius: 20, padding: 28, width: 420, maxWidth: '95vw', boxShadow: '0 24px 80px rgba(0,0,0,0.2)', fontFamily: font }} onClick={e => e.stopPropagation()}>
+          <div style={{ fontSize: 17, fontWeight: 700, color: '#0B0B0F', marginBottom: 8 }}>Transfer ownership</div>
+          <div style={{ fontSize: 13.5, color: '#4A4A55', lineHeight: 1.6, marginBottom: 20 }}>
+            You are about to make <strong>{transferTarget.name || transferTarget.email}</strong> the new Owner of this workspace. You will be demoted to Admin. <strong>This cannot be undone.</strong>
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button onClick={() => setTransferTarget(null)} style={{ background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#4A4A55', cursor: 'pointer' }}>Cancel</button>
+            <button onClick={handleTransferOwner} disabled={transferLoading} style={{ background: '#EF4444', border: 'none', borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#FFFFFF', cursor: transferLoading ? 'wait' : 'pointer', opacity: transferLoading ? 0.7 : 1 }}>
+              {transferLoading ? 'Transferring…' : 'Yes, transfer ownership'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   );
 };

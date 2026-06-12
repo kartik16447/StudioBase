@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { SessionEnvelope, Step } from '../../../shared/types/session';
 import { apiClient, type CommentItem, type NotificationItem } from '../lib/apiClient';
+import type { FeatureKey, FeatureMap } from '../lib/featureFlags';
 import { showToast } from '../components/GlobalToast';
 
 let pipelinePollInterval: ReturnType<typeof setInterval> | null = null;
@@ -173,6 +174,11 @@ interface StudioState {
   creditsModalOpen: boolean;
   setCreditsModalOpen: (open: boolean) => void;
   fetchCredits: () => Promise<void>;
+
+  // Feature flags (resolved per workspace + plan, fetched once on load)
+  features: FeatureMap | null;
+  fetchFeatures: () => Promise<void>;
+  getFlag: (key: FeatureKey) => { enabled: boolean; limits: Record<string, any> | null };
 }
 
 // const RESTORABLE_ROUTES: RouteName[] = ['home', 'brand', 'templates', 'team', 'analytics'];
@@ -1312,6 +1318,19 @@ export const useStudioStore = create<StudioState>((set, get) => ({
       const data = await apiClient.get<{ creditsBalance: number; monthlyAllocation: number }>('/auth/me');
       set({ creditsBalance: data.creditsBalance ?? 0, monthlyAllocation: data.monthlyAllocation ?? 50 });
     } catch {}
+  },
+
+  // Feature flags
+  features: null,
+  fetchFeatures: async () => {
+    try {
+      const data = await apiClient.get<{ features: FeatureMap }>('/features');
+      set({ features: data.features });
+    } catch {}
+  },
+  getFlag: (key) => {
+    const flags = get().features;
+    return flags?.[key] ?? { enabled: false, limits: null };
   },
 
   // Global undo/redo

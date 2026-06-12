@@ -64,7 +64,18 @@ export const workspaceMiddleware = () => {
       });
     }
 
-    // 3. Inject Workspace Context
+    // 3. Check session revocation (if owner called revoke-all-sessions)
+    if (user.iat) {
+      const revokeRow = await c.env.DB.prepare(
+        'SELECT revokedBefore FROM workspace_settings WHERE workspaceId = ?'
+      ).bind(workspaceId).first<{ revokedBefore: number | null }>().catch(() => null);
+
+      if (revokeRow?.revokedBefore && user.iat * 1000 < revokeRow.revokedBefore) {
+        throw new HTTPException(401, { message: 'SESSIONS_REVOKED' });
+      }
+    }
+
+    // 4. Inject Workspace Context
     const wsContext: WorkspaceContext = {
       id: workspaceId,
       role: (membership.role.charAt(0).toUpperCase() + membership.role.slice(1).toLowerCase()) as WorkspaceRole,

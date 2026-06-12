@@ -138,6 +138,7 @@ export const Sidebar: React.FC = () => {
   const route = useStudioStore(state => state.route);
   const navigate = useStudioStore(state => state.navigate);
   const fetchCredits = useStudioStore(s => s.fetchCredits);
+  const fetchFeatures = useStudioStore(s => s.fetchFeatures);
   const active = route.name;
   const plan = usePlan();
   const userName = sessionManager.getUser()?.name || sessionManager.getUser()?.email?.split('@')[0] || 'You';
@@ -145,7 +146,10 @@ export const Sidebar: React.FC = () => {
     try { return localStorage.getItem('sb_sidebar_collapsed') === 'true'; } catch { return false; }
   });
 
-  useEffect(() => { fetchCredits(); }, [fetchCredits]);
+  useEffect(() => {
+    fetchCredits();
+    fetchFeatures();
+  }, [fetchCredits, fetchFeatures]);
 
   const toggle = () => {
     const next = !collapsed;
