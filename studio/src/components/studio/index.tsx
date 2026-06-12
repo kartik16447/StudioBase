@@ -696,12 +696,17 @@ export const SummaryCallout: React.FC<{ session: SessionEnvelope }> = ({ session
 };
 
 // ─── SessionCard ───────────────────────────────────────────────────────
-export const SessionCard: React.FC<{ 
-  session: SessionEnvelope; 
+export const SessionCard: React.FC<{
+  session: SessionEnvelope;
   onClick?: () => void;
   onRename?: (newTitle: string) => void;
   onDelete?: () => void;
-}> = ({ session, onClick, onRename, onDelete }) => {
+  pipelineStatus?: string;
+  errorReason?: string | null;
+  r2ExportKey?: string | null;
+  onRetry?: () => void;
+  apiBaseUrl?: string;
+}> = ({ session, onClick, onRename, onDelete, pipelineStatus, errorReason, r2ExportKey, onRetry, apiBaseUrl }) => {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
   
@@ -836,6 +841,49 @@ export const SessionCard: React.FC<{
             </div>
           </div>
         </div>
+
+        {pipelineStatus && (
+          <div className="flex items-center justify-between px-5 py-2 border-t border-border bg-surface-2/40">
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                'text-[10px] font-bold px-2 py-0.5 rounded-full border',
+                pipelineStatus === 'ready'      ? 'bg-green-500/15 text-green-300 border-green-500/30' :
+                pipelineStatus === 'processing' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
+                pipelineStatus === 'queued'     ? 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30' :
+                pipelineStatus === 'failed'     ? 'bg-red-500/15 text-red-300 border-red-500/30' :
+                'bg-white/10 text-text-3 border-white/10'
+              )}>
+                {pipelineStatus.toUpperCase()}
+              </span>
+              {pipelineStatus === 'failed' && errorReason && (
+                <span className="text-[11px] text-red-300 truncate max-w-[160px]" title={errorReason}>
+                  {errorReason}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              {r2ExportKey && apiBaseUrl && (
+                <a
+                  href={`${apiBaseUrl}/assets/${encodeURIComponent(r2ExportKey)}`}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:text-primary/80 transition-colors"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <I.Download size={12} /> Download
+                </a>
+              )}
+              {pipelineStatus === 'failed' && onRetry && (
+                <button
+                  className="flex items-center gap-1 text-[11px] font-semibold text-yellow-300 hover:text-yellow-200 transition-colors"
+                  onClick={e => { e.stopPropagation(); onRetry(); }}
+                >
+                  <I.RefreshCw size={12} /> Retry
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
