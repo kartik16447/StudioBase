@@ -291,6 +291,17 @@ export const PlayerPage: React.FC<{ shareToken: string }> = ({ shareToken }) => 
     return () => clearInterval(id);
   }, [fetchSessionData]);
 
+  // Record view — fire once on mount, best-effort
+  useEffect(() => {
+    if (!shareToken) return;
+    const fingerprint = [navigator.language, screen.width, screen.height, Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
+    fetch(`${BACKEND_URL}/v1/public/${shareToken}/view`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ viewerFingerprint: btoa(fingerprint) }),
+    }).catch(() => {});
+  }, [shareToken]);
+
   // When in embed mode, keep the Zustand store in sync so embed views can read the session
   useEffect(() => {
     if (isEmbed && session) {
