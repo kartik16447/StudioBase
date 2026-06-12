@@ -19,6 +19,7 @@ import { LoginPage } from './pages/LoginPage';
 import { CommandPalette } from './components/CommandPalette';
 import { GlobalToastContainer } from './components/GlobalToast';
 import { sessionManager } from './lib/auth/sessionManager';
+import { identifyUser } from './lib/openreplay';
 
 function App() {
   const { isEmbed } = useIsEmbed();
@@ -82,6 +83,8 @@ function App() {
 
       if (sessionManager.isAuthenticated()) {
         await sessionManager.syncWorkspaces();
+        const email = sessionManager.getUser()?.email;
+        if (email) identifyUser(email);
       }
 
       const workspaceId = params.get('workspaceId') || sessionManager.getWorkspaceId();
@@ -150,6 +153,8 @@ function App() {
         await sessionManager.loginWithGoogle(freshToken);
         localStorage.removeItem('sb_ext_token');
         await sessionManager.syncWorkspaces();
+        const email = sessionManager.getUser()?.email;
+        if (email) identifyUser(email);
         setAuthed(true);
         setInitializing(false);
       } catch {
