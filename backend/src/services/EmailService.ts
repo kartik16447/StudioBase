@@ -19,7 +19,7 @@ export class EmailService {
     const shareUrl = `${this.appUrl}/s/${shareToken}`;
 
     await this.resend.emails.send({
-      from: 'StudioBase <noreply@studiobase.app>',
+      from: 'StudioBase <onboarding@resend.dev>',
       to: ownerEmail,
       subject: `Someone just viewed "${sessionTitle}"`,
       html: `
