@@ -13,6 +13,11 @@ export interface SessionEventInput {
   timestamp: number;
 }
 
+export interface DateRange {
+  since: number;
+  until: number;
+}
+
 export class AnalyticsService {
   constructor(private env: Env) {}
 
@@ -35,7 +40,10 @@ export class AnalyticsService {
     }
   }
 
-  async getSopAnalytics(sopId: string, workspaceId: string) {
+  async getSopAnalytics(sopId: string, workspaceId: string, range?: DateRange) {
+    const since = range?.since ?? 0;
+    const until = range?.until ?? Date.now();
+
     const { results: rows } = await this.env.DB.prepare(
       `SELECT
          stepIndex,
@@ -44,10 +52,10 @@ export class AnalyticsService {
          SUM(CASE WHEN eventType='step_skipped'  THEN 1 ELSE 0 END) as skips,
          AVG(CASE WHEN eventType='step_viewed' AND durationMs IS NOT NULL THEN durationMs END) as avgDwellMs
        FROM session_events
-       WHERE sopId = ? AND workspaceId = ?
+       WHERE sopId = ? AND workspaceId = ? AND timestamp >= ? AND timestamp <= ?
        GROUP BY stepIndex
        ORDER BY stepIndex ASC`
-    ).bind(sopId, workspaceId).all<any>();
+    ).bind(sopId, workspaceId, since, until).all<any>();
 
     const { results: summary } = await this.env.DB.prepare(
       `SELECT
@@ -55,15 +63,15 @@ export class AnalyticsService {
          SUM(CASE WHEN eventType='sop_completed' THEN 1 ELSE 0 END) as completions,
          AVG(CASE WHEN eventType='sop_completed' AND durationMs IS NOT NULL THEN durationMs END) as avgCompletionTimeMs
        FROM session_events
-       WHERE sopId = ? AND workspaceId = ?`
-    ).bind(sopId, workspaceId).all<any>();
+       WHERE sopId = ? AND workspaceId = ? AND timestamp >= ? AND timestamp <= ?`
+    ).bind(sopId, workspaceId, since, until).all<any>();
 
     const { results: dropoffs } = await this.env.DB.prepare(
       `SELECT stepIndex, COUNT(*) as cnt
        FROM session_events
-       WHERE sopId = ? AND workspaceId = ? AND eventType='sop_abandoned'
+       WHERE sopId = ? AND workspaceId = ? AND eventType='sop_abandoned' AND timestamp >= ? AND timestamp <= ?
        GROUP BY stepIndex`
-    ).bind(sopId, workspaceId).all<any>();
+    ).bind(sopId, workspaceId, since, until).all<any>();
 
     const dropoffMap = new Map<number, number>(
       (dropoffs as any[]).map((r) => [r.stepIndex, r.cnt])
@@ -92,8 +100,9 @@ export class AnalyticsService {
     };
   }
 
-  async getWorkspaceAnalytics(workspaceId: string) {
-    const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  async getWorkspaceAnalytics(workspaceId: string, range?: DateRange) {
+    const since = range?.since ?? Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const until = range?.until ?? Date.now();
 
     const { results: sopRows } = await this.env.DB.prepare(
       `SELECT
@@ -104,18 +113,17 @@ export class AnalyticsService {
          AVG(CASE WHEN se.eventType='step_viewed' AND se.durationMs IS NOT NULL THEN se.durationMs END) as avgDwellMs
        FROM session_events se
        LEFT JOIN sops s ON s.id = se.sopId
-       WHERE se.workspaceId = ? AND se.timestamp >= ? AND se.sopId IS NOT NULL
+       WHERE se.workspaceId = ? AND se.timestamp >= ? AND se.timestamp <= ? AND se.sopId IS NOT NULL
        GROUP BY se.sopId, s.title
        ORDER BY views DESC`
-    ).bind(workspaceId, since).all<any>();
+    ).bind(workspaceId, since, until).all<any>();
 
-    // Problem step: the step with most dropoffs per SOP
     const { results: dropoffRows } = await this.env.DB.prepare(
       `SELECT sopId, stepIndex, COUNT(*) as cnt
        FROM session_events
-       WHERE workspaceId = ? AND eventType='sop_abandoned' AND timestamp >= ? AND sopId IS NOT NULL
+       WHERE workspaceId = ? AND eventType='sop_abandoned' AND timestamp >= ? AND timestamp <= ? AND sopId IS NOT NULL
        GROUP BY sopId, stepIndex`
-    ).bind(workspaceId, since).all<any>();
+    ).bind(workspaceId, since, until).all<any>();
 
     const problemStepMap = new Map<string, number>();
     const tempMap = new Map<string, { stepIndex: number; cnt: number }>();
@@ -128,8 +136,8 @@ export class AnalyticsService {
     const { results: totals } = await this.env.DB.prepare(
       `SELECT COUNT(DISTINCT sessionId) as totalSessions, COUNT(*) as totalViews
        FROM session_events
-       WHERE workspaceId = ? AND timestamp >= ?`
-    ).bind(workspaceId, since).all<any>();
+       WHERE workspaceId = ? AND timestamp >= ? AND timestamp <= ?`
+    ).bind(workspaceId, since, until).all<any>();
 
     const t = (totals as any[])[0] ?? {};
 
@@ -144,10 +152,71 @@ export class AnalyticsService {
 
     return {
       workspaceId,
-      period: 'last_30_days',
+      since,
+      until,
       totalSessions: t.totalSessions ?? 0,
       totalViews: t.totalViews ?? 0,
       sops,
     };
+  }
+
+  // Returns daily buckets of views + sessions for the sparkline / time-series chart
+  async getTimeSeries(workspaceId: string, range: DateRange): Promise<{ date: string; views: number; sessions: number }[]> {
+    const { results } = await this.env.DB.prepare(
+      `SELECT
+         strftime('%Y-%m-%d', datetime(timestamp/1000, 'unixepoch')) as date,
+         COUNT(*) as views,
+         COUNT(DISTINCT sessionId) as sessions
+       FROM session_events
+       WHERE workspaceId = ? AND timestamp >= ? AND timestamp <= ?
+         AND eventType IN ('step_viewed', 'sop_completed')
+       GROUP BY date
+       ORDER BY date ASC`
+    ).bind(workspaceId, range.since, range.until).all<any>();
+
+    return (results as any[]).map((r) => ({
+      date: r.date as string,
+      views: r.views ?? 0,
+      sessions: r.sessions ?? 0,
+    }));
+  }
+
+  // Streams a flat CSV of all session_events in the range
+  async *exportCsvRows(workspaceId: string, range: DateRange): AsyncGenerator<string> {
+    yield 'date,sopId,sopTitle,eventType,sessionId,stepIndex,durationMs\n';
+
+    const batchSize = 500;
+    let offset = 0;
+
+    while (true) {
+      const { results } = await this.env.DB.prepare(
+        `SELECT
+           strftime('%Y-%m-%d', datetime(se.timestamp/1000, 'unixepoch')) as date,
+           se.sopId, s.title as sopTitle, se.eventType, se.sessionId, se.stepIndex, se.durationMs
+         FROM session_events se
+         LEFT JOIN sops s ON s.id = se.sopId
+         WHERE se.workspaceId = ? AND se.timestamp >= ? AND se.timestamp <= ?
+         ORDER BY se.timestamp ASC
+         LIMIT ? OFFSET ?`
+      ).bind(workspaceId, range.since, range.until, batchSize, offset).all<any>();
+
+      if ((results as any[]).length === 0) break;
+
+      for (const r of results as any[]) {
+        const row = [
+          r.date ?? '',
+          r.sopId ?? '',
+          `"${(r.sopTitle ?? 'Untitled').replace(/"/g, '""')}"`,
+          r.eventType ?? '',
+          r.sessionId ?? '',
+          r.stepIndex ?? '',
+          r.durationMs ?? '',
+        ].join(',');
+        yield row + '\n';
+      }
+
+      offset += batchSize;
+      if ((results as any[]).length < batchSize) break;
+    }
   }
 }

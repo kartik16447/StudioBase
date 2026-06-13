@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { apiClient } from '../lib/apiClient';
+import { useFeatureFlag, useFlag } from '../hooks/useFeatureFlag';
 
 // ─── Types (keep original API shapes) ─────────────────────────────────────────
 
@@ -23,10 +24,18 @@ interface StepData {
 
 interface WorkspaceAnalytics {
   workspaceId: string;
-  period: string;
+  since: number;
+  until: number;
   totalSessions: number;
   totalViews: number;
   sops: SopRow[];
+  comparison?: { totalSessions: number; totalViews: number } | null;
+}
+
+interface TimeSeriesPoint {
+  date: string;
+  views: number;
+  sessions: number;
 }
 
 interface SopAnalytics {
@@ -42,6 +51,9 @@ interface ViewerRow {
   viewerEmail: string | null;
   viewerFingerprint: string | null;
   viewedAt: number;
+  stepsCompleted?: number;
+  totalSteps?: number;
+  completedAt?: number | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -415,11 +427,25 @@ const InlineViewerTable: React.FC<{ views: ViewerRow[]; loading: boolean }> = ({
           {views.map(v => {
             const label = v.viewerEmail || 'Anonymous viewer';
             const ts = new Date(v.viewedAt).toLocaleString();
+            const hasProgress = v.totalSteps != null && v.stepsCompleted != null;
+            const pct = hasProgress ? Math.round((v.stepsCompleted! / v.totalSteps!) * 100) : null;
+            const done = hasProgress && v.stepsCompleted === v.totalSteps;
             return (
               <tr key={v.id} style={{ borderBottom: '1px solid #F0F0F3' }}>
                 <td style={{ padding: '8px 0', color: '#0B0B0F', fontWeight: 500, fontStyle: v.viewerEmail ? 'normal' : 'italic' }}>{label}</td>
                 <td style={{ padding: '8px 16px', color: '#4A4A55', fontVariantNumeric: 'tabular-nums', fontSize: 12 }}>{ts}</td>
-                <td style={{ padding: '8px 0', textAlign: 'right', color: '#B8B8C2', fontSize: 12 }}>—</td>
+                <td style={{ padding: '8px 0', textAlign: 'right', fontSize: 12 }}>
+                  {hasProgress ? (
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      padding: '2px 8px', borderRadius: 99, fontWeight: 600,
+                      background: done ? 'rgba(16,185,129,0.1)' : 'rgba(94,92,230,0.08)',
+                      color: done ? '#059669' : '#5E5CE6',
+                    }}>
+                      {v.stepsCompleted}/{v.totalSteps} ({pct}%)
+                    </span>
+                  ) : <span style={{ color: '#B8B8C2' }}>—</span>}
+                </td>
               </tr>
             );
           })}
@@ -511,8 +537,24 @@ const StepHeatmapCard: React.FC<{ sopDetail: SopAnalytics; sopTitle: string }> =
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
+// Preset windows. maxDays=null means unlimited (enterprise).
+type DatePreset = { label: string; days: number | null };
+const DATE_PRESETS: DatePreset[] = [
+  { label: 'Last 7 days',  days: 7  },
+  { label: 'Last 30 days', days: 30 },
+  { label: 'Last 90 days', days: 90 },
+  { label: 'All time',     days: null },
+];
+
+function pctDelta(curr: number, prev: number): { label: string; dir: 'up' | 'down' } | null {
+  if (!prev) return null;
+  const pct = Math.round(((curr - prev) / prev) * 100);
+  return { label: `${Math.abs(pct)}%`, dir: pct >= 0 ? 'up' : 'down' };
+}
+
 export const AnalyticsPage: React.FC = () => {
   const [workspace, setWorkspace] = useState<WorkspaceAnalytics | null>(null);
+  const [timeSeries, setTimeSeries] = useState<TimeSeriesPoint[]>([]);
   const [sopDetail, setSopDetail] = useState<SopAnalytics | null>(null);
   const [selectedSopId, setSelectedSopId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -520,14 +562,52 @@ export const AnalyticsPage: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [viewerData, setViewerData] = useState<ViewerRow[] | null>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [preset, setPreset] = useState<DatePreset>(DATE_PRESETS[1]); // default 30d
+  const [exporting, setExporting] = useState(false);
 
-  useEffect(() => {
+  const dateRangeFlag = useFeatureFlag('analytics:date_range');
+  const canCompare    = useFlag('analytics:period_comparison');
+  const canExport     = useFlag('analytics:export');
+  // Clamp preset to what the plan allows
+  const planMaxDays: number | null = dateRangeFlag.limits?.days ?? 7;
+
+  const effectivePreset = useMemo<DatePreset>(() => {
+    if (planMaxDays === null) return preset;
+    if (preset.days === null || preset.days > planMaxDays) {
+      return DATE_PRESETS.find(p => p.days === planMaxDays) ?? DATE_PRESETS[0];
+    }
+    return preset;
+  }, [preset, planMaxDays]);
+
+  const rangeParams = useMemo(() => {
+    const until = Date.now();
+    const since = effectivePreset.days ? until - effectivePreset.days * 86400_000 : 0;
+    return { since, until };
+  }, [effectivePreset]);
+
+  const fetchAll = useCallback(() => {
     setLoading(true);
-    apiClient.get<WorkspaceAnalytics>('/analytics/workspace')
-      .then(setWorkspace)
+    setError(null);
+    const q = `?since=${rangeParams.since}&until=${rangeParams.until}`;
+    Promise.all([
+      apiClient.get<WorkspaceAnalytics>(`/analytics/workspace${q}`),
+      apiClient.get<{ series: TimeSeriesPoint[] }>(`/analytics/timeseries${q}`),
+    ])
+      .then(([ws, ts]) => { setWorkspace(ws); setTimeSeries(ts.series ?? []); })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [rangeParams]);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Close date picker on outside click
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const handler = () => setPickerOpen(false);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [pickerOpen]);
 
   const handleSelectSop = async (sopId: string | null) => {
     setSelectedSopId(sopId);
@@ -536,9 +616,10 @@ export const AnalyticsPage: React.FC = () => {
     setDetailLoading(true);
     setViewerLoading(true);
     setSopDetail(null);
+    const q = `?since=${rangeParams.since}&until=${rangeParams.until}`;
     try {
       const [detail, viewerRes] = await Promise.all([
-        apiClient.get<SopAnalytics>(`/analytics/sops/${sopId}`),
+        apiClient.get<SopAnalytics>(`/analytics/sops/${sopId}${q}`),
         apiClient.get<{ views: ViewerRow[] }>(`/analytics/views/${sopId}`),
       ]);
       setSopDetail(detail);
@@ -570,9 +651,31 @@ export const AnalyticsPage: React.FC = () => {
 
   const totalViews = workspace?.totalViews ?? 0;
 
-  // Sparkline data from SOP views (descending sorted, take views as sequential points)
-  const sparkViews = workspace?.sops.slice().sort((a, b) => a.views - b.views).map(s => s.views) ?? [0];
+  // Real daily sparkline data from timeseries endpoint
+  const sparkViews = timeSeries.length > 1 ? timeSeries.map(p => p.views) : (workspace?.sops.slice().sort((a, b) => a.views - b.views).map(s => s.views) ?? [0]);
+  const sparkSessions = timeSeries.length > 1 ? timeSeries.map(p => p.sessions) : (workspace ? [0, workspace.totalSessions] : [0]);
   const sparkCompletion = workspace?.sops.slice().sort((a, b) => a.completionRate - b.completionRate).map(s => Math.round(s.completionRate * 100)) ?? [0];
+
+  // Period-over-period deltas (only available for team+)
+  const deltaViews    = canCompare && workspace?.comparison ? pctDelta(workspace.totalViews, workspace.comparison.totalViews) : null;
+  const deltaSessions = canCompare && workspace?.comparison ? pctDelta(workspace.totalSessions, workspace.comparison.totalSessions) : null;
+
+  const handleExport = async () => {
+    if (!canExport || exporting) return;
+    setExporting(true);
+    try {
+      const q = `?format=csv&since=${rangeParams.since}&until=${rangeParams.until}`;
+      const blob = await apiClient.getBlob(`/analytics/export${q}`);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'analytics-export.csv'; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Export failed', e);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '32px 40px 64px', background: '#F5F5F7', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, sans-serif' }}>
@@ -584,23 +687,68 @@ export const AnalyticsPage: React.FC = () => {
           <div style={{ marginTop: 4, fontSize: 14.5, color: '#8A8A95' }}>Understand how your knowledge base is being consumed.</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 10,
-            padding: '8px 14px', fontSize: 13, fontWeight: 500, color: '#4A4A55',
-            cursor: 'pointer', boxShadow: '0 1px 2px rgba(16,18,27,0.04)',
-          }}>
-            {Ic.download('#8A8A95', 14)} Export
+          <button
+            onClick={handleExport}
+            disabled={!canExport || exporting}
+            title={canExport ? 'Download CSV' : 'Upgrade to Team to export data'}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 10,
+              padding: '8px 14px', fontSize: 13, fontWeight: 500,
+              color: canExport ? '#4A4A55' : '#B8B8C2',
+              cursor: canExport ? 'pointer' : 'default',
+              opacity: exporting ? 0.6 : 1,
+              boxShadow: '0 1px 2px rgba(16,18,27,0.04)',
+            }}
+          >
+            {Ic.download(canExport ? '#8A8A95' : '#C8C8D0', 14)} {exporting ? 'Exporting…' : 'Export'}
           </button>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 10,
-            padding: '8px 12px', fontSize: 13, fontWeight: 500, color: '#0B0B0F',
-            boxShadow: '0 1px 2px rgba(16,18,27,0.04)',
-          }}>
-            {Ic.calendar('#8A8A95', 14)}
-            <span>Last 30 days</span>
-            <span style={{ color: '#8A8A95', marginLeft: 2 }}>{Ic.down('#8A8A95', 14)}</span>
+          {/* Date range picker */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setPickerOpen(p => !p)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 10,
+                padding: '8px 12px', fontSize: 13, fontWeight: 500, color: '#0B0B0F',
+                cursor: 'pointer', boxShadow: '0 1px 2px rgba(16,18,27,0.04)',
+              }}
+            >
+              {Ic.calendar('#8A8A95', 14)}
+              <span>{effectivePreset.label}</span>
+              <span style={{ color: '#8A8A95', marginLeft: 2 }}>{Ic.down('#8A8A95', 14)}</span>
+            </button>
+            {pickerOpen && (
+              <div
+                style={{
+                  position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 50,
+                  background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 12,
+                  boxShadow: '0 8px 32px -4px rgba(16,18,27,0.16)', padding: 6, minWidth: 160,
+                }}
+              >
+                {DATE_PRESETS.map(p => {
+                  const locked = planMaxDays !== null && (p.days === null || p.days > planMaxDays);
+                  return (
+                    <button
+                      key={p.label}
+                      disabled={locked}
+                      onClick={() => { if (!locked) { setPreset(p); setPickerOpen(false); } }}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        width: '100%', padding: '8px 12px', border: 'none', borderRadius: 8,
+                        background: effectivePreset.label === p.label ? 'rgba(94,92,230,0.08)' : 'transparent',
+                        color: locked ? '#C8C8D0' : '#0B0B0F',
+                        fontSize: 13, fontWeight: effectivePreset.label === p.label ? 600 : 400,
+                        cursor: locked ? 'default' : 'pointer', textAlign: 'left', gap: 8,
+                      }}
+                    >
+                      <span>{p.label}</span>
+                      {locked && <span style={{ fontSize: 10, color: '#C8C8D0', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Team+</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -627,7 +775,9 @@ export const AnalyticsPage: React.FC = () => {
               label="Total SOP views"
               labelIcon={Ic.eye('#B8B8C2', 13)}
               value={totalViews.toLocaleString()}
-              sub="vs. previous 30 days"
+              sub={deltaViews ? `vs. previous ${effectivePreset.label.replace('Last ', '')}` : effectivePreset.label}
+              delta={deltaViews?.label}
+              deltaDir={deltaViews?.dir}
               foot={<Sparkline data={sparkViews.length > 1 ? sparkViews : [0, totalViews]} color="#5E5CE6" height={36} />}
             />
             <StatCard
@@ -641,8 +791,10 @@ export const AnalyticsPage: React.FC = () => {
               label="Total sessions"
               labelIcon={Ic.users('#B8B8C2', 13)}
               value={workspace.totalSessions.toLocaleString()}
-              sub="viewer sessions this period"
-              foot={<Sparkline data={sparkViews.length > 1 ? [...sparkViews].reverse() : [0, workspace.totalSessions]} color="#8B5CF6" height={36} />}
+              sub={deltaSessions ? `vs. previous ${effectivePreset.label.replace('Last ', '')}` : effectivePreset.label}
+              delta={deltaSessions?.label}
+              deltaDir={deltaSessions?.dir}
+              foot={<Sparkline data={sparkSessions.length > 1 ? sparkSessions : [0, workspace.totalSessions]} color="#8B5CF6" height={36} />}
             />
             <StatCard
               label="Most viewed SOP"

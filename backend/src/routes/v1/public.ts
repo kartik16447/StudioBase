@@ -556,6 +556,44 @@ publicRoutes.post('/analytics/events', async (c) => {
 });
 
 // POST /v1/public/:shareToken/request-access — no auth required
+// PATCH /public/:shareToken/view/:viewId/progress — upsert viewer step progress (no auth required)
+publicRoutes.patch('/:shareToken/view/:viewId/progress', async (c) => {
+  const { shareToken, viewId } = c.req.param();
+  const body = await c.req.json().catch(() => ({})) as any;
+  const stepIndex: number | null = typeof body.stepIndex === 'number' ? body.stepIndex : null;
+  const totalSteps: number | null = typeof body.totalSteps === 'number' ? body.totalSteps : null;
+  const completed: boolean = !!body.completed;
+
+  if (stepIndex === null) return c.json({ ok: true });
+
+  // Verify the view row belongs to this shareToken (security: don't let callers update arbitrary rows)
+  const row = await c.env.DB.prepare(
+    `SELECT sv.id FROM share_views sv
+     JOIN sessions s ON s.id = sv.sessionId
+     WHERE sv.id = ? AND (s.shareToken = ? OR sv.shareToken = ?)`
+  ).bind(viewId, shareToken, shareToken).first<{ id: string }>().catch(() => null);
+
+  if (!row) return c.json({ ok: true }); // silent — don't leak existence
+
+  await c.env.DB.prepare(
+    `UPDATE share_views
+     SET lastStepIndex = ?,
+         stepsCompleted = MAX(COALESCE(stepsCompleted, 0), ?),
+         totalSteps = COALESCE(?, totalSteps),
+         completedAt = CASE WHEN ? AND completedAt IS NULL THEN ? ELSE completedAt END
+     WHERE id = ?`
+  ).bind(
+    stepIndex,
+    stepIndex + 1,
+    totalSteps,
+    completed ? 1 : 0,
+    completed ? Date.now() : null,
+    viewId,
+  ).run().catch(() => {});
+
+  return c.json({ ok: true });
+});
+
 publicRoutes.post('/:shareToken/request-access', async (c) => {
   const { shareToken } = c.req.param();
   const body = await c.req.json().catch(() => ({})) as any;
