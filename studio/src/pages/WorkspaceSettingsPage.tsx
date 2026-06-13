@@ -102,6 +102,40 @@ const Toggle: React.FC<{ on: boolean; onChange: () => void }> = ({ on, onChange 
   </button>
 );
 
+// ─── Credit bar chart sub-component (avoids IIFE in JSX for tsc -b compat) ───
+
+const CREDIT_COLORS: Record<string, string> = {
+  narration: '#5E5CE6', voiceover: '#8B5CF6', cinematic: '#EC4899',
+  demo: '#F59E0B', audio_tts: '#3B82F6', audio_narration: '#06B6D4', audio_swap: '#10B981',
+};
+
+const CreditBarChart: React.FC<{ rows: { actionType: string; creditsSpent: number }[] }> = ({ rows }) => {
+  const max = Math.max(...rows.map(r => r.creditsSpent), 1);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rows.map(row => (
+        <div key={row.actionType} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 100, fontSize: 12, color: '#0B0B0F', fontWeight: 500, textTransform: 'capitalize', flexShrink: 0 }}>
+            {row.actionType.replace(/_/g, ' ')}
+          </div>
+          <div style={{ flex: 1, background: '#ECECEF', borderRadius: 6, height: 20, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%',
+              width: `${(row.creditsSpent / max) * 100}%`,
+              background: CREDIT_COLORS[row.actionType] ?? '#5E5CE6',
+              borderRadius: 6,
+              transition: 'width 0.4s ease',
+            }} />
+          </div>
+          <div style={{ width: 40, fontSize: 12, fontWeight: 600, color: '#0B0B0F', textAlign: 'right', flexShrink: 0 }}>
+            {row.creditsSpent}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 // ─── Section card wrapper ─────────────────────────────────────────────────────
 
 const Card: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
@@ -152,30 +186,6 @@ const InviteLinkBanner: React.FC<{
   </div>
 );
 
-const CREDIT_COLORS: Record<string, string> = {
-  narration: '#5E5CE6', voiceover: '#8B5CF6', cinematic: '#EC4899',
-  demo: '#F59E0B', audio_tts: '#3B82F6', audio_narration: '#06B6D4', audio_swap: '#10B981',
-};
-const CreditBarChart: React.FC<{ rows: { actionType: string; creditsSpent: number }[] }> = ({ rows }) => {
-  const max = Math.max(...rows.map(r => r.creditsSpent), 1);
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {rows.map(row => (
-        <div key={row.actionType} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 100, fontSize: 12, color: '#0B0B0F', fontWeight: 500, textTransform: 'capitalize', flexShrink: 0 }}>
-            {row.actionType.replace(/_/g, ' ')}
-          </div>
-          <div style={{ flex: 1, background: '#ECECEF', borderRadius: 6, height: 20, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${(row.creditsSpent / max) * 100}%`, background: CREDIT_COLORS[row.actionType] ?? '#5E5CE6', borderRadius: 6, transition: 'width 0.4s ease' }} />
-          </div>
-          <div style={{ width: 40, fontSize: 12, fontWeight: 600, color: '#0B0B0F', textAlign: 'right', flexShrink: 0 }}>
-            {row.creditsSpent}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-};
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
