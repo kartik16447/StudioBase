@@ -130,24 +130,51 @@ wsRoutes.post('/sessions/revoke-all', requirePermission('workspace:admin'), asyn
   return c.json({ ok: true, revokedBefore: now });
 });
 
-// 10. Update workspace settings (allowedDomains, dataRegion)
+// 10. Update workspace settings (allowedDomains, dataRegion, sessionTtlHours, mfaRequired)
 wsRoutes.patch('/settings', requirePermission('workspace:admin'), async (c) => {
   const ws = c.get('workspace');
-  const body = await c.req.json<{ allowedDomains?: string; dataRegion?: string; retentionDays?: number }>();
+  const body = await c.req.json<{
+    allowedDomains?: string;
+    dataRegion?: string;
+    retentionDays?: number;
+    sessionTtlHours?: number | null;
+    mfaRequired?: boolean;
+  }>();
 
+  // Validate enterprise-gated fields
+  if ('sessionTtlHours' in body || 'mfaRequired' in body) {
+    const gates = new FeatureGateService(c.env);
+    const [sessionFlag, mfaFlag] = await Promise.all([
+      gates.resolve(ws.id, 'workspace:session_policy'),
+      gates.resolve(ws.id, 'workspace:mfa_enforce'),
+    ]);
+    if ('sessionTtlHours' in body && !sessionFlag.enabled) {
+      return c.json({ error: 'workspace:session_policy requires an Enterprise plan' }, 403);
+    }
+    if ('mfaRequired' in body && !mfaFlag.enabled) {
+      return c.json({ error: 'workspace:mfa_enforce requires an Enterprise plan' }, 403);
+    }
+  }
+
+  const now = Date.now();
   await c.env.DB.prepare(
-    `INSERT INTO workspace_settings (workspaceId, allowedDomains, dataRegion, retentionDays)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO workspace_settings (workspaceId, allowedDomains, dataRegion, retentionDays, sessionTtlHours, mfaRequired, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(workspaceId) DO UPDATE SET
-       allowedDomains = COALESCE(excluded.allowedDomains, allowedDomains),
-       dataRegion     = COALESCE(excluded.dataRegion, dataRegion),
-       retentionDays  = COALESCE(excluded.retentionDays, retentionDays),
-       updatedAt      = ${Date.now()}`
+       allowedDomains   = COALESCE(excluded.allowedDomains, allowedDomains),
+       dataRegion       = COALESCE(excluded.dataRegion, dataRegion),
+       retentionDays    = COALESCE(excluded.retentionDays, retentionDays),
+       sessionTtlHours  = CASE WHEN ${body.sessionTtlHours === null ? '1' : '0'} THEN NULL ELSE COALESCE(excluded.sessionTtlHours, sessionTtlHours) END,
+       mfaRequired      = COALESCE(excluded.mfaRequired, mfaRequired),
+       updatedAt        = excluded.updatedAt`
   ).bind(
     ws.id,
     body.allowedDomains ?? null,
     body.dataRegion ?? 'global',
     body.retentionDays ?? 90,
+    body.sessionTtlHours ?? null,
+    body.mfaRequired !== undefined ? (body.mfaRequired ? 1 : 0) : null,
+    now,
   ).run();
 
   return c.json({ ok: true });

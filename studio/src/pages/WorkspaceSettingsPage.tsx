@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { apiClient, type PendingInvite } from '../lib/apiClient';
 import { sessionManager } from '../lib/auth/sessionManager';
-import { useFeatureFlag } from '../hooks/useFeatureFlag';
+import { useFeatureFlag, useFlag } from '../hooks/useFeatureFlag';
 import { FeatureGate } from '../components/ui/FeatureGate';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -13,6 +13,8 @@ interface WorkspaceSettings {
   allowedDomains: string | null;
   dataRegion: string;
   retentionDays: number;
+  sessionTtlHours: number | null;
+  mfaRequired: number;
 }
 
 interface Member {
@@ -167,11 +169,23 @@ export const WorkspaceSettingsPage: React.FC = () => {
       .finally(() => setCreditLoading(false));
   }, [activeTab, workspaceId, creditData]);
 
-  // Security toggles (UI-only; reflect API state)
+  // Security toggles
   const [ssoTooltipVisible, setSsoTooltipVisible] = useState(false);
-  const [mfaTooltipVisible, setMfaTooltipVisible] = useState(false);
-  const [reauthTooltipVisible, setReauthTooltipVisible] = useState(false);
-  const [reauthDays, setReauthDays] = useState(30);
+  const [reauthEnabled, setReauthEnabled] = useState(false);
+  const [reauthHours, setReauthHours] = useState(24);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [securitySaving, setSecuritySaving] = useState(false);
+  const [securitySaved, setSecuritySaved] = useState(false);
+
+  const canSessionPolicy = useFlag('workspace:session_policy');
+  const canMfaEnforce    = useFlag('workspace:mfa_enforce');
+
+  // MFA setup modal state
+  const [mfaSetupOpen, setMfaSetupOpen] = useState(false);
+  const [mfaSetupData, setMfaSetupData] = useState<{ secret: string; uri: string; backupCodes: string[] } | null>(null);
+  const [mfaVerifyCode, setMfaVerifyCode] = useState('');
+  const [mfaVerifyError, setMfaVerifyError] = useState<string | null>(null);
+  const [mfaVerifying, setMfaVerifying] = useState(false);
 
   // Bulk invite modal
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -203,9 +217,13 @@ export const WorkspaceSettingsPage: React.FC = () => {
       setSettings(settingsRes.settings);
       setMembers(membersRes.members || []);
       setPendingInvites(invitesRes.invites || []);
-      if (settingsRes.settings?.retentionDays) setReauthDays(settingsRes.settings.retentionDays);
       if (settingsRes.settings?.allowedDomains) setSettingsDomains(settingsRes.settings.allowedDomains);
       if (settingsRes.settings?.dataRegion) setSettingsRegion(settingsRes.settings.dataRegion);
+      if (settingsRes.settings?.sessionTtlHours) {
+        setReauthEnabled(true);
+        setReauthHours(settingsRes.settings.sessionTtlHours);
+      }
+      if (settingsRes.settings?.mfaRequired) setMfaEnabled(true);
     }).catch(err => setError(err.message))
       .finally(() => setLoading(false));
   };
@@ -322,6 +340,68 @@ export const WorkspaceSettingsPage: React.FC = () => {
       setError(e.message || 'Failed to save settings');
     } finally {
       setSettingsSaving(false);
+    }
+  };
+
+  // Save session TTL + MFA settings
+  const handleSaveSecurity = async () => {
+    if (!workspaceId) return;
+    setSecuritySaving(true);
+    setSecuritySaved(false);
+    try {
+      await apiClient.request(`/workspaces/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+        body: JSON.stringify({
+          sessionTtlHours: reauthEnabled ? reauthHours : null,
+          mfaRequired: mfaEnabled,
+        }),
+      });
+      setSecuritySaved(true);
+      setTimeout(() => setSecuritySaved(false), 2500);
+    } catch (e: any) {
+      setError(e.message || 'Failed to save security settings');
+    } finally {
+      setSecuritySaving(false);
+    }
+  };
+
+  // Start MFA setup for the current user
+  const handleStartMfaSetup = async () => {
+    if (!workspaceId) return;
+    setMfaVerifyCode('');
+    setMfaVerifyError(null);
+    try {
+      const data = await apiClient.request<{ secret: string; uri: string; backupCodes: string[] }>('/auth/mfa/setup', {
+        method: 'POST',
+        headers: { 'x-workspace-id': workspaceId },
+      });
+      setMfaSetupData(data);
+      setMfaSetupOpen(true);
+    } catch (e: any) {
+      setError(e.message || 'Failed to start MFA setup');
+    }
+  };
+
+  // Confirm MFA TOTP code to complete setup
+  const handleVerifyMfa = async () => {
+    if (!workspaceId || !mfaVerifyCode.trim()) return;
+    setMfaVerifying(true);
+    setMfaVerifyError(null);
+    try {
+      const res = await apiClient.request<{ token: string }>('/auth/mfa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+        body: JSON.stringify({ code: mfaVerifyCode.trim() }),
+      });
+      // Store the new JWT so subsequent requests carry mfaVerified:true
+      localStorage.setItem('sb_token', res.token);
+      setMfaSetupOpen(false);
+      setMfaSetupData(null);
+    } catch (e: any) {
+      setMfaVerifyError(e.message || 'Invalid code — check your authenticator app');
+    } finally {
+      setMfaVerifying(false);
     }
   };
 
@@ -888,80 +968,81 @@ export const WorkspaceSettingsPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Re-auth row */}
+                {/* Re-auth / Session TTL row */}
                 <div style={{
                   display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24,
                   padding: '18px 0', borderBottom: '1px solid #F0F0F3',
+                  opacity: canSessionPolicy ? 1 : 0.5,
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#0B0B0F' }}>Require re-authentication</span>
-                      <span style={{ fontSize: 11, fontWeight: 600, background: 'rgba(180,180,190,0.12)', color: '#8A8A95', padding: '2px 8px', borderRadius: 999 }}>Coming soon</span>
+                      {!canSessionPolicy && (
+                        <span style={{ fontSize: 11, fontWeight: 600, background: 'rgba(94,92,230,0.1)', color: '#5E5CE6', padding: '2px 8px', borderRadius: 999 }}>Enterprise</span>
+                      )}
                     </div>
                     <div style={{ fontSize: 13, color: '#8A8A95', lineHeight: 1.5 }}>
-                      Members will be asked to sign in again after a set period of inactivity. Recommended for shared devices.
+                      Members are asked to sign in again after a set time. Recommended for shared or high-security devices.
                     </div>
-                  </div>
-                  <div
-                    style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}
-                    onMouseEnter={() => setReauthTooltipVisible(true)}
-                    onMouseLeave={() => setReauthTooltipVisible(false)}
-                  >
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 6, opacity: 0.45,
-                      background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, padding: '6px 10px',
-                    }}>
-                      <button disabled style={{ background: 'none', border: 'none', cursor: 'not-allowed', color: '#4A4A55', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>−</button>
-                      <input readOnly value={reauthDays} style={{ width: 40, textAlign: 'center', border: 'none', background: 'transparent', fontSize: 13.5, fontWeight: 600, color: '#0B0B0F', outline: 'none', fontVariantNumeric: 'tabular-nums', cursor: 'not-allowed' }} />
-                      <span style={{ fontSize: 12.5, color: '#8A8A95' }}>days</span>
-                      <button disabled style={{ background: 'none', border: 'none', cursor: 'not-allowed', color: '#4A4A55', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>+</button>
-                    </div>
-                    <Toggle on={false} onChange={() => {}} />
-                    {reauthTooltipVisible && (
-                      <div style={{
-                        position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50,
-                        background: '#1A1A20', color: '#E0E0E8', borderRadius: 10,
-                        padding: '10px 14px', fontSize: 12.5, lineHeight: 1.5,
-                        whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-                      }}>
-                        Session policy enforcement — coming soon.
+                    {reauthEnabled && canSessionPolicy && (
+                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12.5, color: '#4A4A55' }}>Session expires after</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, padding: '6px 10px' }}>
+                          <button onClick={() => setReauthHours(h => Math.max(1, h - 1))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A4A55', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>−</button>
+                          <input
+                            type="number" min={1} max={168} value={reauthHours}
+                            onChange={e => setReauthHours(Math.max(1, Math.min(168, parseInt(e.target.value) || 1)))}
+                            style={{ width: 48, textAlign: 'center', border: 'none', background: 'transparent', fontSize: 13.5, fontWeight: 600, color: '#0B0B0F', outline: 'none', fontVariantNumeric: 'tabular-nums' }}
+                          />
+                          <span style={{ fontSize: 12.5, color: '#8A8A95' }}>hours</span>
+                          <button onClick={() => setReauthHours(h => Math.min(168, h + 1))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4A4A55', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>+</button>
+                        </div>
                       </div>
                     )}
                   </div>
+                  <Toggle on={reauthEnabled && canSessionPolicy} onChange={v => canSessionPolicy && setReauthEnabled(v)} />
                 </div>
 
                 {/* MFA row */}
                 <div style={{
                   display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24,
                   padding: '18px 0', borderBottom: '1px solid #F0F0F3',
+                  opacity: canMfaEnforce ? 1 : 0.5,
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#0B0B0F' }}>Enforce two-factor authentication</span>
-                      <span style={{ fontSize: 11, fontWeight: 600, background: 'rgba(180,180,190,0.12)', color: '#8A8A95', padding: '2px 8px', borderRadius: 999 }}>Coming soon</span>
+                      {!canMfaEnforce && (
+                        <span style={{ fontSize: 11, fontWeight: 600, background: 'rgba(94,92,230,0.1)', color: '#5E5CE6', padding: '2px 8px', borderRadius: 999 }}>Enterprise</span>
+                      )}
                     </div>
                     <div style={{ fontSize: 13, color: '#8A8A95', lineHeight: 1.5 }}>
-                      Every member must set up 2FA before accessing the workspace. Admins can grant temporary bypass.
+                      Every member must verify with an authenticator app before accessing the workspace.
                     </div>
-                  </div>
-                  <div
-                    style={{ position: 'relative', flexShrink: 0 }}
-                    onMouseEnter={() => setMfaTooltipVisible(true)}
-                    onMouseLeave={() => setMfaTooltipVisible(false)}
-                  >
-                    <Toggle on={false} onChange={() => {}} />
-                    {mfaTooltipVisible && (
-                      <div style={{
-                        position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50,
-                        background: '#1A1A20', color: '#E0E0E8', borderRadius: 10,
-                        padding: '10px 14px', fontSize: 12.5, lineHeight: 1.5,
-                        whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-                      }}>
-                        MFA enforcement — coming soon.
-                      </div>
+                    {canMfaEnforce && (
+                      <button
+                        onClick={handleStartMfaSetup}
+                        style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: '1px solid #DEDEE3', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, fontWeight: 500, color: '#4A4A55', cursor: 'pointer' }}
+                      >
+                        {Ic.shield(13, '#8A8A95')} Set up my authenticator
+                      </button>
                     )}
                   </div>
+                  <Toggle on={mfaEnabled && canMfaEnforce} onChange={v => canMfaEnforce && setMfaEnabled(v)} />
                 </div>
+
+                {/* Security Save button */}
+                {(canSessionPolicy || canMfaEnforce) && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 16, borderBottom: '1px solid #F0F0F3', marginBottom: 0 }}>
+                    <button
+                      onClick={handleSaveSecurity}
+                      disabled={securitySaving}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: securitySaved ? '#10B981' : '#5E5CE6', border: 'none', borderRadius: 10, padding: '8px 18px', fontSize: 13, fontWeight: 600, color: '#FFFFFF', cursor: securitySaving ? 'wait' : 'pointer', opacity: securitySaving ? 0.7 : 1, transition: 'background 0.2s' }}
+                    >
+                      {securitySaved ? <>{Ic.check(13, '#FFFFFF')} Saved</> : securitySaving ? 'Saving…' : 'Save security settings'}
+                    </button>
+                  </div>
+                )}
 
                 {/* Danger: revoke all sessions */}
                 <div style={{
@@ -1130,6 +1211,62 @@ export const WorkspaceSettingsPage: React.FC = () => {
             <button onClick={() => setTransferTarget(null)} style={{ background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#4A4A55', cursor: 'pointer' }}>Cancel</button>
             <button onClick={handleTransferOwner} disabled={transferLoading} style={{ background: '#EF4444', border: 'none', borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#FFFFFF', cursor: transferLoading ? 'wait' : 'pointer', opacity: transferLoading ? 0.7 : 1 }}>
               {transferLoading ? 'Transferring…' : 'Yes, transfer ownership'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── MFA Setup Modal ───────────────────────────────────────────────────── */}
+    {mfaSetupOpen && mfaSetupData && (
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        onClick={() => setMfaSetupOpen(false)}
+      >
+        <div
+          style={{ background: '#FFFFFF', borderRadius: 20, padding: 32, width: 460, maxWidth: '95vw', boxShadow: '0 24px 80px rgba(0,0,0,0.2)', fontFamily: font }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div style={{ fontSize: 17, fontWeight: 700, color: '#0B0B0F', marginBottom: 6 }}>Set up authenticator app</div>
+          <div style={{ fontSize: 13, color: '#8A8A95', marginBottom: 20, lineHeight: 1.5 }}>
+            Scan the QR code in your authenticator app (Google Authenticator, 1Password, Authy, etc.) or enter the key manually.
+          </div>
+
+          {/* QR Code placeholder — show raw URI and secret for now */}
+          <div style={{ background: '#F5F5F7', borderRadius: 12, padding: 16, marginBottom: 16, fontFamily: 'monospace', wordBreak: 'break-all' }}>
+            <div style={{ fontSize: 11, color: '#8A8A95', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Manual key</div>
+            <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '0.1em', color: '#0B0B0F' }}>
+              {mfaSetupData.secret.match(/.{1,4}/g)?.join(' ')}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Backup codes (save these now)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+              {mfaSetupData.backupCodes.map((code, i) => (
+                <span key={i} style={{ fontFamily: 'monospace', fontSize: 12, color: '#4A4A55', background: '#F5F5F7', padding: '4px 8px', borderRadius: 6 }}>{code}</span>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#0B0B0F', marginBottom: 8 }}>Enter the 6-digit code from your app to confirm</div>
+            <input
+              type="text" inputMode="numeric" maxLength={6}
+              value={mfaVerifyCode}
+              onChange={e => setMfaVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="000000"
+              style={{ width: '100%', padding: '10px 14px', fontSize: 18, fontWeight: 700, letterSpacing: '0.2em', textAlign: 'center', border: `1.5px solid ${mfaVerifyError ? '#EF4444' : '#DEDEE3'}`, borderRadius: 10, outline: 'none', fontFamily: 'monospace', boxSizing: 'border-box' }}
+              onKeyDown={e => e.key === 'Enter' && handleVerifyMfa()}
+              autoFocus
+            />
+            {mfaVerifyError && <div style={{ marginTop: 6, fontSize: 12.5, color: '#EF4444' }}>{mfaVerifyError}</div>}
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button onClick={() => setMfaSetupOpen(false)} style={{ background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#4A4A55', cursor: 'pointer' }}>Cancel</button>
+            <button onClick={handleVerifyMfa} disabled={mfaVerifying || mfaVerifyCode.length !== 6} style={{ background: '#5E5CE6', border: 'none', borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 600, color: '#FFFFFF', cursor: (mfaVerifying || mfaVerifyCode.length !== 6) ? 'not-allowed' : 'pointer', opacity: (mfaVerifying || mfaVerifyCode.length !== 6) ? 0.6 : 1 }}>
+              {mfaVerifying ? 'Verifying…' : 'Confirm & activate'}
             </button>
           </div>
         </div>

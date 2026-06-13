@@ -40,15 +40,27 @@ export const GlobalToastContainer: React.FC = () => {
       add({ id: ++toastCount, type: 'warning', message: `Server error${path ? ` on ${path}` : ''}: ${message || 'Unknown error'}` });
     };
 
+    const onReauthRequired = () => {
+      add({ id: ++toastCount, type: 'error', message: 'Your session has expired (workspace policy). Please sign in again.' });
+      setTimeout(() => window.location.reload(), 2500);
+    };
+    const onMfaRequired = () => {
+      add({ id: ++toastCount, type: 'warning', message: 'This workspace requires two-factor authentication. Go to Settings → Security to set up your authenticator.' });
+    };
+
     window.addEventListener('SB_AUTH_EXPIRED', onAuthExpired);
     window.addEventListener('SB_PERMISSION_DENIED', onPermDenied);
     window.addEventListener('SB_SERVER_ERROR', onServerError);
+    window.addEventListener('SB_REAUTH_REQUIRED', onReauthRequired);
+    window.addEventListener('SB_MFA_REQUIRED', onMfaRequired);
 
     return () => {
       listeners.delete(add);
       window.removeEventListener('SB_AUTH_EXPIRED', onAuthExpired);
       window.removeEventListener('SB_PERMISSION_DENIED', onPermDenied);
       window.removeEventListener('SB_SERVER_ERROR', onServerError);
+      window.removeEventListener('SB_REAUTH_REQUIRED', onReauthRequired);
+      window.removeEventListener('SB_MFA_REQUIRED', onMfaRequired);
     };
   }, []);
 

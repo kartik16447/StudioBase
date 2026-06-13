@@ -64,14 +64,33 @@ export const workspaceMiddleware = () => {
       });
     }
 
-    // 3. Check session revocation (if owner called revoke-all-sessions)
-    if (user.iat) {
-      const revokeRow = await c.env.DB.prepare(
-        'SELECT revokedBefore FROM workspace_settings WHERE workspaceId = ?'
-      ).bind(workspaceId).first<{ revokedBefore: number | null }>().catch(() => null);
+    // 3. Check session revocation, TTL, and MFA in one query
+    const wsSettings = await c.env.DB.prepare(
+      'SELECT revokedBefore, sessionTtlHours, mfaRequired FROM workspace_settings WHERE workspaceId = ?'
+    ).bind(workspaceId).first<{
+      revokedBefore: number | null;
+      sessionTtlHours: number | null;
+      mfaRequired: number;
+    }>().catch(() => null);
 
-      if (revokeRow?.revokedBefore && user.iat * 1000 < revokeRow.revokedBefore) {
+    if (wsSettings && user.iat) {
+      // Revocation check
+      if (wsSettings.revokedBefore && user.iat * 1000 < wsSettings.revokedBefore) {
         throw new HTTPException(401, { message: 'SESSIONS_REVOKED' });
+      }
+      // Session TTL check (enterprise: workspace:session_policy)
+      if (wsSettings.sessionTtlHours) {
+        const expireAt = user.iat * 1000 + wsSettings.sessionTtlHours * 3_600_000;
+        if (expireAt < Date.now()) {
+          throw new HTTPException(401, { message: 'REAUTH_REQUIRED' });
+        }
+      }
+    }
+    // MFA enforcement check (enterprise: workspace:mfa_enforce)
+    if (wsSettings?.mfaRequired) {
+      const jwtPayload = user as any;
+      if (!jwtPayload.mfaVerified) {
+        throw new HTTPException(401, { message: 'MFA_REQUIRED' });
       }
     }
 

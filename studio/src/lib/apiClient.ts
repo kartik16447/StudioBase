@@ -38,8 +38,17 @@ class ApiClient {
 
       // Global Error Interceptor
       if (res.status === 401) {
-        console.warn('🔑 [API] 401 Unauthorized - Redirecting to login');
-        window.dispatchEvent(new CustomEvent('SB_AUTH_EXPIRED'));
+        const msg = errorData?.message || '';
+        if (msg === 'MFA_REQUIRED') {
+          console.warn('🔐 [API] MFA_REQUIRED');
+          window.dispatchEvent(new CustomEvent('SB_MFA_REQUIRED'));
+        } else if (msg === 'REAUTH_REQUIRED') {
+          console.warn('🔑 [API] REAUTH_REQUIRED - Session expired by policy');
+          window.dispatchEvent(new CustomEvent('SB_REAUTH_REQUIRED'));
+        } else {
+          console.warn('🔑 [API] 401 Unauthorized - Redirecting to login');
+          window.dispatchEvent(new CustomEvent('SB_AUTH_EXPIRED'));
+        }
       } else if (res.status === 403) {
         console.warn('🚫 [API] 403 Forbidden:', requestPath);
         window.dispatchEvent(new CustomEvent('SB_PERMISSION_DENIED', { 

@@ -195,12 +195,13 @@ export class AuthService {
     };
   }
 
-  async signToken(user: any) {
+  async signToken(user: any, extra?: { mfaVerified?: boolean }) {
     return await sign({
       id: user.id,
       email: user.email,
       workspaceId: user.workspaceId,
       role: user.workspaceRole,
+      ...(extra?.mfaVerified ? { mfaVerified: true } : {}),
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7, // 1 week
     }, this.env.ENCRYPTION_KEY);
