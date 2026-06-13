@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS workspace_feature_overrides (
   workspaceId   TEXT NOT NULL,
   featureKey    TEXT NOT NULL,
   enabled       INTEGER NOT NULL,
+  metadata      TEXT,    -- JSON: e.g. {"days":90} for per-workspace limit overrides
   overrideReason TEXT,
   expiresAt     INTEGER, -- null = permanent
   grantedBy     TEXT,    -- userId of admin who set it
