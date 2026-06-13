@@ -17,6 +17,7 @@ import usageRoutes from './routes/v1/usage';
 import adminRoutes from './routes/v1/admin';
 import auditLogRoutes from './routes/v1/audit-logs';
 import ssoRoutes from './routes/v1/sso';
+import { samlRoutes } from './routes/saml';
 import { sops } from './routes/v1/sops';
 import { docs } from './routes/v1/docs';
 import { knowledge } from './routes/v1/knowledge';
@@ -83,6 +84,9 @@ v1.all('/*', (c) => c.json({ error: 'Not Found', code: 'NOT_FOUND' }, 404));
 
 // Mount v1 router onto the root app
 app.route('/v1', v1);
+
+// SAML routes — top-level (IdP browser redirects, no /v1 prefix)
+app.route('/saml', samlRoutes);
 
 // --- Root level routes ---
 // Health check

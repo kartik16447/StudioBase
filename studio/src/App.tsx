@@ -107,6 +107,20 @@ function App() {
         navigate('privacy'); return;
       }
 
+      // SAML SSO callback — /sso/callback#token=...&workspaceId=...
+      if (window.location.pathname === '/sso/callback') {
+        const hash = new URLSearchParams(window.location.hash.slice(1));
+        const token = hash.get('token');
+        const workspaceId = hash.get('workspaceId');
+        if (token && workspaceId) {
+          localStorage.setItem('sb_token', token);
+          localStorage.setItem('sb_workspace_id', workspaceId);
+          window.history.replaceState({}, '', '/');
+          window.location.reload();
+          return;
+        }
+      }
+
       // Legacy ?share= param → redirect to /s/:token
       const legacyShare = params.get('share');
       if (legacyShare) {

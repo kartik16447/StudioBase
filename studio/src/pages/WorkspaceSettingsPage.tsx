@@ -10,6 +10,7 @@ interface WorkspaceSettings {
   workspaceId: string;
   ssoEnabled: number;
   ssoProvider: string | null;
+  samlConfig: string | null;
   allowedDomains: string | null;
   dataRegion: string;
   retentionDays: number;
@@ -169,7 +170,19 @@ export const WorkspaceSettingsPage: React.FC = () => {
       .finally(() => setCreditLoading(false));
   }, [activeTab, workspaceId, creditData]);
 
-  // Security toggles
+  // SAML SSO configure modal
+  const [ssoConfigOpen, setSsoConfigOpen] = useState(false);
+  const [ssoInputMode, setSsoInputMode] = useState<'xml' | 'manual'>('xml');
+  const [ssoMetadataXml, setSsoMetadataXml] = useState('');
+  const [ssoEntityId, setSsoEntityId] = useState('');
+  const [ssoUrl, setSsoUrl] = useState('');
+  const [ssoCert, setSsoCert] = useState('');
+  const [ssoSaving, setSsoSaving] = useState(false);
+  const [ssoSaved, setSsoSaved] = useState(false);
+  const [ssoError, setSsoError] = useState<string | null>(null);
+  const canSso = useFlag('workspace:sso_saml');
+
+  // Security toggles (non-SSO)
   const [ssoTooltipVisible, setSsoTooltipVisible] = useState(false);
   const [reauthEnabled, setReauthEnabled] = useState(false);
   const [reauthHours, setReauthHours] = useState(24);
@@ -219,6 +232,14 @@ export const WorkspaceSettingsPage: React.FC = () => {
       setPendingInvites(invitesRes.invites || []);
       if (settingsRes.settings?.allowedDomains) setSettingsDomains(settingsRes.settings.allowedDomains);
       if (settingsRes.settings?.dataRegion) setSettingsRegion(settingsRes.settings.dataRegion);
+      if (settingsRes.settings?.samlConfig) {
+        try {
+          const cfg = JSON.parse(settingsRes.settings.samlConfig);
+          if (cfg.entityId) setSsoEntityId(cfg.entityId);
+          if (cfg.ssoUrl) setSsoUrl(cfg.ssoUrl);
+          if (cfg.certificate) setSsoCert(cfg.certificate);
+        } catch {}
+      }
       if (settingsRes.settings?.sessionTtlHours) {
         setReauthEnabled(true);
         setReauthHours(settingsRes.settings.sessionTtlHours);
@@ -402,6 +423,44 @@ export const WorkspaceSettingsPage: React.FC = () => {
       setMfaVerifyError(e.message || 'Invalid code — check your authenticator app');
     } finally {
       setMfaVerifying(false);
+    }
+  };
+
+  const handleSaveSSO = async () => {
+    if (!workspaceId) return;
+    setSsoSaving(true); setSsoSaved(false); setSsoError(null);
+    try {
+      const body = ssoInputMode === 'xml'
+        ? { metadataXml: ssoMetadataXml, enabled: true }
+        : { entityId: ssoEntityId, ssoUrl: ssoUrl, certificate: ssoCert, enabled: true };
+      await apiClient.request<{ ok: boolean; entityId?: string }>('/workspaces/sso', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+        body: JSON.stringify(body),
+      });
+      setSsoSaved(true);
+      setSsoConfigOpen(false);
+      loadData();
+      setTimeout(() => setSsoSaved(false), 2500);
+    } catch (e: any) {
+      setSsoError(e.message || 'Failed to save SSO configuration');
+    } finally {
+      setSsoSaving(false);
+    }
+  };
+
+  const handleDisableSSO = async () => {
+    if (!workspaceId) return;
+    if (!window.confirm('This will disable SSO for your workspace. Members will need to sign in with their regular accounts. Continue?')) return;
+    try {
+      await apiClient.request('/workspaces/sso', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-workspace-id': workspaceId },
+        body: JSON.stringify({ enabled: false }),
+      });
+      loadData();
+    } catch (e: any) {
+      setError(e.message || 'Failed to disable SSO');
     }
   };
 
@@ -851,60 +910,66 @@ export const WorkspaceSettingsPage: React.FC = () => {
                       Require everyone in your workspace to sign in through your identity provider. Available on Team and Enterprise plans.
                     </div>
                   </div>
-                  <div
-                    style={{ position: 'relative', flexShrink: 0 }}
-                    onMouseEnter={() => setSsoTooltipVisible(true)}
-                    onMouseLeave={() => setSsoTooltipVisible(false)}
-                  >
-                    <button
-                      disabled
-                      className="ws-btn-pri"
-                      style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 7,
-                        background: '#ECECEF', border: 'none', borderRadius: 10, padding: '9px 16px',
-                        fontSize: 13, fontWeight: 600, color: '#B8B8C2', cursor: 'not-allowed',
-                      }}
-                    >
-                      {Ic.sparkle(14, '#B8B8C2')} Configure SAML
-                    </button>
-                    {ssoTooltipVisible && (
-                      <div style={{
-                        position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50,
-                        background: '#1A1A20', color: '#E0E0E8', borderRadius: 10,
-                        padding: '10px 14px', fontSize: 12.5, lineHeight: 1.5,
-                        whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-                        pointerEvents: 'auto',
-                      }}>
-                        SAML SSO — available Q3 2026.<br />
-                        <span style={{ color: '#A0A0B0' }}>Contact us to join the early access list — </span>
-                        <a
-                          href="mailto:kartik.upadhyay@foyr.com?subject=SSO%20Early%20Access%20Request"
-                          style={{ color: '#8B8BE8', textDecoration: 'underline' }}
-                        >
-                          request access
-                        </a>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    {settings?.ssoEnabled ? (
+                      <>
+                        <span style={{ fontSize: 12, fontWeight: 600, background: 'rgba(16,185,129,0.1)', color: '#059669', padding: '3px 10px', borderRadius: 999 }}>Active</span>
+                        <button onClick={() => setSsoConfigOpen(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 10, padding: '8px 14px', fontSize: 13, fontWeight: 600, color: '#4A4A55', cursor: 'pointer' }}>
+                          Edit config
+                        </button>
+                        <button onClick={handleDisableSSO} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'transparent', border: '1px solid #EF4444', borderRadius: 10, padding: '8px 14px', fontSize: 13, fontWeight: 600, color: '#EF4444', cursor: 'pointer' }}>
+                          Disable
+                        </button>
+                      </>
+                    ) : canSso ? (
+                      <button
+                        onClick={() => setSsoConfigOpen(true)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: '#5E5CE6', border: 'none', borderRadius: 10, padding: '9px 16px', fontSize: 13, fontWeight: 600, color: '#FFFFFF', cursor: 'pointer' }}
+                      >
+                        {Ic.sparkle(14, '#FFFFFF')} Configure SAML
+                      </button>
+                    ) : (
+                      <div
+                        style={{ position: 'relative' }}
+                        onMouseEnter={() => setSsoTooltipVisible(true)}
+                        onMouseLeave={() => setSsoTooltipVisible(false)}
+                      >
+                        <button disabled style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: '#ECECEF', border: 'none', borderRadius: 10, padding: '9px 16px', fontSize: 13, fontWeight: 600, color: '#B8B8C2', cursor: 'not-allowed' }}>
+                          {Ic.sparkle(14, '#B8B8C2')} Configure SAML
+                        </button>
+                        {ssoTooltipVisible && (
+                          <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 50, background: '#1A1A20', color: '#E0E0E8', borderRadius: 10, padding: '10px 14px', fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'nowrap', boxShadow: '0 4px 20px rgba(0,0,0,0.25)' }}>
+                            SAML SSO requires an Enterprise plan.
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* SAML read-only fields */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                  {[
-                    { label: 'Entity ID', value: settings?.workspaceId ? `https://auth.studiobase.so/saml/${settings.workspaceId}` : 'Not configured' },
-                    { label: 'ACS URL (Reply URL)', value: settings?.workspaceId ? `https://auth.studiobase.so/saml/${settings.workspaceId}/acs` : 'Not configured' },
-                  ].map(f => (
-                    <div key={f.label}>
-                      <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>{f.label}</label>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <input readOnly value={f.value} style={{ flex: 1, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 11.5, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, padding: '8px 12px', color: '#4A4A55', outline: 'none', minWidth: 0 }} />
-                        <button onClick={() => navigator.clipboard.writeText(f.value)} className="ws-btn-soft" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, cursor: 'pointer', flexShrink: 0 }} title="Copy">
-                          {Ic.copy(13, '#8A8A95')}
-                        </button>
-                      </div>
+                {/* SAML SP fields — show real backend URLs */}
+                {(() => {
+                  const backendBase = 'https://studiobase-backend.karthik-upadhyay98.workers.dev';
+                  const wid = settings?.workspaceId || '';
+                  return (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                      {[
+                        { label: 'SP Entity ID', value: wid ? `${backendBase}/saml/${wid}` : 'Not configured' },
+                        { label: 'ACS URL (Reply URL)', value: wid ? `${backendBase}/saml/${wid}/acs` : 'Not configured' },
+                      ].map(f => (
+                        <div key={f.label}>
+                          <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>{f.label}</label>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <input readOnly value={f.value} style={{ flex: 1, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 11.5, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, padding: '8px 12px', color: '#4A4A55', outline: 'none', minWidth: 0 }} />
+                            <button onClick={() => navigator.clipboard.writeText(f.value)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, cursor: 'pointer', flexShrink: 0 }} title="Copy">
+                              {Ic.copy(13, '#8A8A95')}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  );
+                })()}
 
                 {/* Editable: Allowed Domains + Data Region */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
@@ -1218,6 +1283,94 @@ export const WorkspaceSettingsPage: React.FC = () => {
     )}
 
     {/* ── MFA Setup Modal ───────────────────────────────────────────────────── */}
+    {ssoConfigOpen && (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ background: '#FFFFFF', borderRadius: 16, width: 540, maxWidth: '95vw', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', padding: 32, display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: '#0B0B0F', marginBottom: 4 }}>Configure SAML SSO</div>
+              <div style={{ fontSize: 13, color: '#8A8A95' }}>Paste your IdP's metadata XML, or enter connection details manually.</div>
+            </div>
+            <button onClick={() => { setSsoConfigOpen(false); setSsoError(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#8A8A95' }}>
+              ✕
+            </button>
+          </div>
+
+          {/* Input mode tabs */}
+          <div style={{ display: 'flex', gap: 0, background: '#F5F5F7', borderRadius: 10, padding: 3 }}>
+            {(['xml', 'manual'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setSsoInputMode(mode)}
+                style={{ flex: 1, padding: '7px 0', fontSize: 13, fontWeight: 600, borderRadius: 8, border: 'none', cursor: 'pointer', background: ssoInputMode === mode ? '#FFFFFF' : 'transparent', color: ssoInputMode === mode ? '#0B0B0F' : '#8A8A95', boxShadow: ssoInputMode === mode ? '0 1px 4px rgba(0,0,0,0.10)' : 'none', transition: 'all 0.15s' }}
+              >
+                {mode === 'xml' ? 'Metadata XML' : 'Manual entry'}
+              </button>
+            ))}
+          </div>
+
+          {ssoInputMode === 'xml' ? (
+            <div>
+              <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>IdP Metadata XML</label>
+              <textarea
+                value={ssoMetadataXml}
+                onChange={e => setSsoMetadataXml(e.target.value)}
+                rows={10}
+                placeholder='Paste your IdP federation metadata XML here...'
+                style={{ width: '100%', fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 11.5, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 10, padding: '10px 12px', color: '#0B0B0F', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
+              />
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {[
+                { label: 'IdP Entity ID', value: ssoEntityId, setter: setSsoEntityId, placeholder: 'https://your-idp.com/...' },
+                { label: 'SSO URL (Single Sign-On Service URL)', value: ssoUrl, setter: setSsoUrl, placeholder: 'https://your-idp.com/sso/saml' },
+              ].map(f => (
+                <div key={f.label}>
+                  <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>{f.label}</label>
+                  <input
+                    value={f.value}
+                    onChange={e => f.setter(e.target.value)}
+                    placeholder={f.placeholder}
+                    style={{ width: '100%', fontSize: 13, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 10, padding: '9px 12px', color: '#0B0B0F', outline: 'none', boxSizing: 'border-box' }}
+                  />
+                </div>
+              ))}
+              <div>
+                <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>X.509 Certificate</label>
+                <textarea
+                  value={ssoCert}
+                  onChange={e => setSsoCert(e.target.value)}
+                  rows={5}
+                  placeholder='-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----'
+                  style={{ width: '100%', fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 11.5, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 10, padding: '10px 12px', color: '#0B0B0F', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+          )}
+
+          {ssoError && (
+            <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#DC2626' }}>
+              {ssoError}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <button onClick={() => { setSsoConfigOpen(false); setSsoError(null); }} style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 10, color: '#4A4A55', cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveSSO}
+              disabled={ssoSaving}
+              style={{ padding: '9px 18px', fontSize: 13, fontWeight: 600, background: ssoSaving ? '#ECECEF' : '#5E5CE6', border: 'none', borderRadius: 10, color: ssoSaving ? '#B8B8C2' : '#FFFFFF', cursor: ssoSaving ? 'not-allowed' : 'pointer' }}
+            >
+              {ssoSaving ? 'Saving…' : ssoSaved ? 'Saved!' : 'Save & enable'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
     {mfaSetupOpen && mfaSetupData && (
       <div
         style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}

@@ -266,6 +266,65 @@ wsRoutes.post('/invites/bulk', requirePermission('member:invite'), async (c) => 
   return c.json({ ok: true, results });
 });
 
+// 13. Save/update SAML SSO configuration (enterprise: workspace:sso_saml)
+wsRoutes.patch('/sso', requirePermission('workspace:admin'), async (c) => {
+  const ws = c.get('workspace');
+  const body = await c.req.json<{
+    metadataXml?: string;          // paste IdP metadata XML
+    entityId?: string;             // or enter manually
+    ssoUrl?: string;
+    certificate?: string;
+    enabled?: boolean;
+  }>();
+
+  const gates = new FeatureGateService(c.env);
+  const flag = await gates.resolve(ws.id, 'workspace:sso_saml');
+  if (!flag.enabled) {
+    return c.json({ error: 'workspace:sso_saml requires an Enterprise plan' }, 403);
+  }
+
+  let idpConfig: { entityId: string; ssoUrl: string; certificate: string } | null = null;
+
+  if (body.metadataXml) {
+    try {
+      const { SAMLService } = await import('../../services/SAMLService');
+      idpConfig = SAMLService.parseIdPMetadata(body.metadataXml);
+    } catch (err: any) {
+      return c.json({ error: `Invalid metadata XML: ${err.message}` }, 400);
+    }
+  } else if (body.entityId && body.ssoUrl && body.certificate) {
+    const cert = body.certificate.trim();
+    idpConfig = {
+      entityId: body.entityId.trim(),
+      ssoUrl: body.ssoUrl.trim(),
+      certificate: cert.startsWith('-----') ? cert
+        : `-----BEGIN CERTIFICATE-----\n${cert}\n-----END CERTIFICATE-----`,
+    };
+  } else if (body.enabled === false) {
+    // Disable SSO without changing config
+    await c.env.DB.prepare(
+      `INSERT INTO workspace_settings (workspaceId, ssoEnabled, dataRegion, retentionDays)
+       VALUES (?, 0, 'global', 90)
+       ON CONFLICT(workspaceId) DO UPDATE SET ssoEnabled = 0`
+    ).bind(ws.id).run();
+    return c.json({ ok: true, ssoEnabled: false });
+  } else {
+    return c.json({ error: 'Provide metadataXml or entityId+ssoUrl+certificate' }, 400);
+  }
+
+  const enabled = body.enabled !== false;
+  await c.env.DB.prepare(
+    `INSERT INTO workspace_settings (workspaceId, ssoEnabled, samlConfig, dataRegion, retentionDays)
+     VALUES (?, ?, ?, 'global', 90)
+     ON CONFLICT(workspaceId) DO UPDATE SET
+       ssoEnabled  = excluded.ssoEnabled,
+       samlConfig  = excluded.samlConfig,
+       updatedAt   = ${Date.now()}`
+  ).bind(ws.id, enabled ? 1 : 0, JSON.stringify(idpConfig)).run();
+
+  return c.json({ ok: true, ssoEnabled: enabled, entityId: idpConfig.entityId });
+});
+
 workspaces.route('/', wsRoutes);
 
 export default workspaces;
