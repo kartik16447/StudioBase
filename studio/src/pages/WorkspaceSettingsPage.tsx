@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { apiClient, type PendingInvite } from '../lib/apiClient';
 import { sessionManager } from '../lib/auth/sessionManager';
 import { useFeatureFlag, useFlag } from '../hooks/useFeatureFlag';
@@ -113,6 +113,69 @@ const Card: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }>
     {children}
   </div>
 );
+
+const InviteLinkBanner: React.FC<{
+  activeInvite: PendingInvite | undefined;
+  inviteUrl: string;
+  inviteRole: string;
+  copiedToken: boolean;
+  onCopy: (url: string) => void;
+  onRevoke: (id: string) => void;
+}> = ({ activeInvite, inviteUrl, inviteRole, copiedToken, onCopy, onRevoke }) => (
+  <div style={{ background: 'rgba(94,92,230,0.05)', border: '1px solid rgba(94,92,230,0.2)', borderRadius: 14, padding: 20, marginBottom: 20, display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+    <div style={{ width: 40, height: 40, borderRadius: 12, background: 'rgba(94,92,230,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      {Ic.link(18, '#5E5CE6')}
+    </div>
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#0B0B0F' }}>Invite link active</span>
+        <span style={{ fontSize: 11.5, fontWeight: 600, background: 'rgba(16,185,129,0.1)', color: '#059669', padding: '2px 8px', borderRadius: 999 }}>
+          {activeInvite?.expiresAt ? `Expires ${new Date(activeInvite.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'Expires in 7 days'}
+        </span>
+      </div>
+      <div style={{ fontSize: 13, color: '#8A8A95', marginBottom: 12 }}>
+        Anyone with this link can join as a {inviteRole}. Re-generate to revoke previous links.
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input readOnly value={inviteUrl} style={{ flex: 1, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 12, background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 8, padding: '8px 12px', color: '#4A4A55', outline: 'none', minWidth: 0 }} />
+        <button className="ws-btn-soft" onClick={() => onCopy(inviteUrl)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0, background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 600, color: copiedToken ? '#059669' : '#4A4A55', cursor: 'pointer' }}>
+          {copiedToken ? Ic.check(13, '#059669') : Ic.copy(13)}
+          {copiedToken ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+    </div>
+    {activeInvite && (
+      <button className="ws-revoke" onClick={() => onRevoke(activeInvite.id)} style={{ fontSize: 12, fontWeight: 600, color: '#8A8A95', cursor: 'pointer', background: 'none', border: 'none', flexShrink: 0, padding: '4px 0' }}>
+        Revoke link
+      </button>
+    )}
+  </div>
+);
+
+const CREDIT_COLORS: Record<string, string> = {
+  narration: '#5E5CE6', voiceover: '#8B5CF6', cinematic: '#EC4899',
+  demo: '#F59E0B', audio_tts: '#3B82F6', audio_narration: '#06B6D4', audio_swap: '#10B981',
+};
+const CreditBarChart: React.FC<{ rows: { actionType: string; creditsSpent: number }[] }> = ({ rows }) => {
+  const max = Math.max(...rows.map(r => r.creditsSpent), 1);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rows.map(row => (
+        <div key={row.actionType} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 100, fontSize: 12, color: '#0B0B0F', fontWeight: 500, textTransform: 'capitalize', flexShrink: 0 }}>
+            {row.actionType.replace(/_/g, ' ')}
+          </div>
+          <div style={{ flex: 1, background: '#ECECEF', borderRadius: 6, height: 20, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${(row.creditsSpent / max) * 100}%`, background: CREDIT_COLORS[row.actionType] ?? '#5E5CE6', borderRadius: 6, transition: 'width 0.4s ease' }} />
+          </div>
+          <div style={{ width: 40, fontSize: 12, fontWeight: 600, color: '#0B0B0F', textAlign: 'right', flexShrink: 0 }}>
+            {row.creditsSpent}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
@@ -483,6 +546,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
   );
 
   return (
+    <>
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: '#F5F5F7', fontFamily: font }}>
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -532,7 +596,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
                   {Ic.mail(14)} Bulk invite
                 </button>
               ) : (
-                <FeatureGate feature="workspace:bulk_invite" showUpgradeNudge />
+                <FeatureGate feature="workspace:bulk_invite" showUpgradeNudge>{null}</FeatureGate>
               )}
               <button className="ws-btn-pri" onClick={handleCreateInvite} disabled={inviteLoading} style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -579,68 +643,16 @@ export const WorkspaceSettingsPage: React.FC = () => {
         {activeTab === 'members' && (
           <>
             {/* Invite link banner */}
-            {(inviteResult || pendingInvites.length > 0) && (() => {
-              const activeInvite = pendingInvites[0];
-              const displayUrl = inviteResult?.url
-                ?? `${window.location.origin}${window.location.pathname}?join=${activeInvite?.token}`;
-              return (
-                <div style={{
-                  background: 'rgba(94,92,230,0.05)', border: '1px solid rgba(94,92,230,0.2)',
-                  borderRadius: 14, padding: 20, marginBottom: 20, display: 'flex', gap: 16, alignItems: 'flex-start',
-                }}>
-                  <div style={{
-                    width: 40, height: 40, borderRadius: 12, background: 'rgba(94,92,230,0.12)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                  }}>
-                    {Ic.link(18, '#5E5CE6')}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: '#0B0B0F' }}>Invite link active</span>
-                      <span style={{ fontSize: 11.5, fontWeight: 600, background: 'rgba(16,185,129,0.1)', color: '#059669', padding: '2px 8px', borderRadius: 999 }}>
-                        {activeInvite?.expiresAt ? `Expires ${new Date(activeInvite.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'Expires in 7 days'}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 13, color: '#8A8A95', marginBottom: 12 }}>
-                      Anyone with this link can join as a {inviteRole}. Re-generate to revoke previous links.
-                    </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <input
-                        readOnly
-                        value={displayUrl}
-                        style={{
-                          flex: 1, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 12,
-                          background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 8,
-                          padding: '8px 12px', color: '#4A4A55', outline: 'none', minWidth: 0,
-                        }}
-                      />
-                      <button
-                        className="ws-btn-soft"
-                        onClick={() => copyLink(displayUrl)}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
-                          background: '#FFFFFF', border: '1px solid #DEDEE3', borderRadius: 8,
-                          padding: '8px 14px', fontSize: 13, fontWeight: 600,
-                          color: copiedToken ? '#059669' : '#4A4A55', cursor: 'pointer',
-                        }}
-                      >
-                        {copiedToken ? Ic.check(13, '#059669') : Ic.copy(13)}
-                        {copiedToken ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-                  {activeInvite && (
-                    <button
-                      className="ws-revoke"
-                      onClick={() => handleRevoke(activeInvite.id)}
-                      style={{ fontSize: 12, fontWeight: 600, color: '#8A8A95', cursor: 'pointer', background: 'none', border: 'none', flexShrink: 0, padding: '4px 0' }}
-                    >
-                      Revoke link
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
+            {(inviteResult || pendingInvites.length > 0) && (
+              <InviteLinkBanner
+                activeInvite={pendingInvites[0]}
+                inviteUrl={inviteResult?.url ?? `${window.location.origin}${window.location.pathname}?join=${pendingInvites[0]?.token}`}
+                inviteRole={inviteRole}
+                copiedToken={copiedToken}
+                onCopy={copyLink}
+                onRevoke={handleRevoke}
+              />
+            )}
 
             {/* Invite role selector (shown when no banner yet) */}
             {!inviteResult && pendingInvites.length === 0 && (
@@ -948,28 +960,24 @@ export const WorkspaceSettingsPage: React.FC = () => {
                 </div>
 
                 {/* SAML SP fields — show real backend URLs */}
-                {(() => {
-                  const backendBase = 'https://studiobase-backend.karthik-upadhyay98.workers.dev';
-                  const wid = settings?.workspaceId || '';
-                  return (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
-                      {[
-                        { label: 'SP Entity ID', value: wid ? `${backendBase}/saml/${wid}` : 'Not configured' },
-                        { label: 'ACS URL (Reply URL)', value: wid ? `${backendBase}/saml/${wid}/acs` : 'Not configured' },
-                      ].map(f => (
-                        <div key={f.label}>
-                          <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>{f.label}</label>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <input readOnly value={f.value} style={{ flex: 1, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 11.5, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, padding: '8px 12px', color: '#4A4A55', outline: 'none', minWidth: 0 }} />
-                            <button onClick={() => navigator.clipboard.writeText(f.value)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, cursor: 'pointer', flexShrink: 0 }} title="Copy">
-                              {Ic.copy(13, '#8A8A95')}
-                            </button>
-                          </div>
+                {settings?.workspaceId && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                    {[
+                      { label: 'SP Entity ID', value: `https://studiobase-backend.karthik-upadhyay98.workers.dev/saml/${settings.workspaceId}` },
+                      { label: 'ACS URL (Reply URL)', value: `https://studiobase-backend.karthik-upadhyay98.workers.dev/saml/${settings.workspaceId}/acs` },
+                    ].map(f => (
+                      <div key={f.label}>
+                        <label style={{ fontSize: 11.5, fontWeight: 600, color: '#8A8A95', textTransform: 'uppercase', letterSpacing: '0.06em', display: 'block', marginBottom: 6 }}>{f.label}</label>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input readOnly value={f.value} style={{ flex: 1, fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize: 11.5, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, padding: '8px 12px', color: '#4A4A55', outline: 'none', minWidth: 0 }} />
+                          <button onClick={() => navigator.clipboard.writeText(f.value)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 36, height: 36, background: '#F5F5F7', border: '1px solid #ECECEF', borderRadius: 8, cursor: 'pointer', flexShrink: 0 }} title="Copy">
+                            {Ic.copy(13, '#8A8A95')}
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                  );
-                })()}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Editable: Allowed Domains + Data Region */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
@@ -1065,7 +1073,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
                       </div>
                     )}
                   </div>
-                  <Toggle on={reauthEnabled && canSessionPolicy} onChange={v => canSessionPolicy && setReauthEnabled(v)} />
+                  <Toggle on={reauthEnabled && canSessionPolicy} onChange={() => { if (canSessionPolicy) setReauthEnabled(e => !e); }} />
                 </div>
 
                 {/* MFA row */}
@@ -1093,7 +1101,7 @@ export const WorkspaceSettingsPage: React.FC = () => {
                       </button>
                     )}
                   </div>
-                  <Toggle on={mfaEnabled && canMfaEnforce} onChange={v => canMfaEnforce && setMfaEnabled(v)} />
+                  <Toggle on={mfaEnabled && canMfaEnforce} onChange={() => { if (canMfaEnforce) setMfaEnabled(e => !e); }} />
                 </div>
 
                 {/* Security Save button */}
@@ -1160,36 +1168,9 @@ export const WorkspaceSettingsPage: React.FC = () => {
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0B0B0F', marginBottom: 14 }}>Credits spent by category</div>
                   {creditData.byActionType.length === 0 ? (
                     <div style={{ color: '#8A8A95', fontSize: 13 }}>No credit spend this billing period.</div>
-                  ) : (() => {
-                    const max = Math.max(...creditData.byActionType.map(r => r.creditsSpent), 1);
-                    const colors: Record<string, string> = {
-                      narration: '#5E5CE6', voiceover: '#8B5CF6', cinematic: '#EC4899',
-                      demo: '#F59E0B', audio_tts: '#3B82F6', audio_narration: '#06B6D4', audio_swap: '#10B981',
-                    };
-                    return (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        {creditData.byActionType.map(row => (
-                          <div key={row.actionType} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div style={{ width: 100, fontSize: 12, color: '#0B0B0F', fontWeight: 500, textTransform: 'capitalize', flexShrink: 0 }}>
-                              {row.actionType.replace(/_/g, ' ')}
-                            </div>
-                            <div style={{ flex: 1, background: '#ECECEF', borderRadius: 6, height: 20, overflow: 'hidden' }}>
-                              <div style={{
-                                height: '100%',
-                                width: `${(row.creditsSpent / max) * 100}%`,
-                                background: colors[row.actionType] ?? '#5E5CE6',
-                                borderRadius: 6,
-                                transition: 'width 0.4s ease',
-                              }} />
-                            </div>
-                            <div style={{ width: 40, fontSize: 12, fontWeight: 600, color: '#0B0B0F', textAlign: 'right', flexShrink: 0 }}>
-                              {row.creditsSpent}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
+                  ) : (
+                    <CreditBarChart rows={creditData.byActionType} />
+                  )}
                 </div>
 
                 {/* Per-member breakdown */}
@@ -1425,5 +1406,6 @@ export const WorkspaceSettingsPage: React.FC = () => {
         </div>
       </div>
     )}
+    </>
   );
 };
