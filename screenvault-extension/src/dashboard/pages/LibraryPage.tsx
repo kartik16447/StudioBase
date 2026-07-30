@@ -8,7 +8,6 @@ import {
   StorageSchema,
   BackendVideo,
 } from "../../types";
-import { deleteFile, getFileMetadata, renameFile } from "../../google-drive";
 import { safeFetch } from "../../utils/api";
 import { svLog } from "../../logger";
 
@@ -543,51 +542,12 @@ export function LibraryPage() {
 
     const storage = (await chrome.storage.local.get([
       "sv_sessions",
-      "sv_accounts",
-      "sv_user",
     ])) as StorageSchema;
     const sv_sessions = storage.sv_sessions || {};
-    const accounts = storage.sv_accounts || [];
-    const sv_user = storage.sv_user;
 
-    // Only perform local Drive metadata checks if the account is actually linked locally
-    // Collaborative videos should rely on backendSynced playerUrls instead
-    const account = accounts.find(
-      (a) =>
-        a.email === video.accountEmail &&
-        video.accountEmail !== "External Account",
-    );
-
-    if (account) {
-      console.log(
-        `[SV][LOCAL_AUTHORITY] Performing Drive check for local video: ${fileId}`,
-      );
-      try {
-        const metadata = await getFileMetadata(fileId, account.accessToken);
-        if (!metadata) {
-          alert(
-            "This video was not found in Google Drive and will be removed from your library.",
-          );
-          setFiles((prev) => prev.filter((f) => f.id !== video.id));
-          if (video.backendId && sv_user?.accessToken) {
-            safeFetch(
-              `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${video.backendId}`,
-              { method: "DELETE" },
-            ).catch((err) =>
-              console.warn("Auto-clean backend sync failed:", err),
-            );
-          }
-          return;
-        }
-      } catch (err) {
-        console.warn("Drive check failed, proceeding anyway:", err);
-      }
-    } else {
-      console.log(
-        `[SV][COLLABORATION] Opening external video without local Drive check: ${fileId}`,
-      );
-    }
-
+    // Legacy fallback path — new videos always carry a canonical playerUrl
+    // from the backend (see the early return above), so this only runs for
+    // very old rows created before that field existed.
     const session = Object.values(sv_sessions).find(
       (s: SessionMetadata) => s.fileId === fileId,
     );
@@ -697,20 +657,14 @@ export function LibraryPage() {
     setEditingId(null);
 
     const storage = (await chrome.storage.local.get([
-      "sv_accounts",
       "sv_user",
     ])) as StorageSchema;
-    const rawAccounts = storage.sv_accounts;
-    const accounts: StorageAccount[] = Array.isArray(rawAccounts)
-      ? rawAccounts
-      : [];
     const sv_user = storage.sv_user;
-
-    const account = accounts.find((a) => a.email === file.accountEmail);
 
     setIsRenaming(true);
     try {
-      // 1. Sync with Backend API
+      // 1. Sync with Backend API (the title is metadata-only — the R2 key
+      // never reflects the display name, so there's no storage-side rename)
       if (file.backendId && sv_user?.accessToken) {
         await fetch(
           `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${file.backendId}`,
@@ -725,15 +679,7 @@ export function LibraryPage() {
         ).catch((err) => console.warn("Backend rename sync failed:", err));
       }
 
-      // 2. Sync with Google Drive (Async)
-      if (account) {
-        if (!file.fileId) throw new Error("Missing fileId for rename");
-        renameFile(file.fileId, account.accessToken, `${newTitle}.webm`).catch(
-          (err) => console.warn("Drive rename failed:", err),
-        );
-      }
-
-      // 3. Update metadata in sv_sessions using fileId as primary key
+      // 2. Update metadata in sv_sessions using fileId as primary key
       // We send a message to the service worker to handle this via the queue
       const metaStorage = (await chrome.storage.local.get(
         "sv_sessions",
@@ -779,13 +725,9 @@ export function LibraryPage() {
       try {
         if (typeof chrome === "undefined" || !chrome.storage?.local) return;
         const storage = (await chrome.storage.local.get([
-          "sv_accounts",
           "sv_user",
         ])) as StorageSchema;
-        const accounts = storage.sv_accounts || [];
         const sv_user = storage.sv_user;
-
-        const account = accounts.find((a) => a.email === file.accountEmail);
 
         // Backend sync (async) - Use backendId OR file.id if it looks like a UUID
         const deleteTargetId =
@@ -796,7 +738,6 @@ export function LibraryPage() {
             {
               method: "DELETE",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ driveToken: account?.accessToken }),
             },
           )
             .then((res) => {
@@ -2341,15 +2282,7 @@ export function LibraryPage() {
                         marginTop: "0.25rem",
                       }}
                     >
-                      {(account.quotaTotal - account.quotaUsed) /
-                        (1024 * 1024 * 1024) >
-                      0
-                        ? (
-                            (account.quotaTotal - account.quotaUsed) /
-                            (1024 * 1024 * 1024)
-                          ).toFixed(1)
-                        : "0"}{" "}
-                      GB free
+                      Connected
                     </div>
                   </div>
                   <div
@@ -2371,8 +2304,8 @@ export function LibraryPage() {
                 fontStyle: "italic",
               }}
             >
-              * These are your personal Google Drive accounts. Videos recorded
-              with these accounts are shared with the team workspace.
+              * This is your signed-in Google account, used for identity only.
+              Recordings are saved to your team's shared storage.
             </p>
           </div>
         </>

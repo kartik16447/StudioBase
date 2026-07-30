@@ -1,19 +1,15 @@
 import { OffscreenMessage, StorageAccount, SessionMetadata, BackendUser } from './types';
 import {
-  preAllocateDriveFile,
-  uploadDataToExistingFile,
-  isFileReady,
-  getFileMetadata,
-  initResumableUploadPost,
-  uploadResumableChunk,
-  getUploadStatus,
-  makeFilePublic,
-  deleteFile,
-  ensureWorkspaceMapping,
-  uploadFileSimple
-} from './google-drive';
+  initUpload,
+  uploadPart,
+  completeUpload,
+  UploadedPart,
+} from './r2-upload';
 import { saveChunk, recoverSession, deleteSession, getChunks, deleteChunks } from './db';
 import { svLog } from './logger';
+
+const BACKEND_URL = 'https://screenvault-backend.karthik-upadhyay98.workers.dev';
+const PLAYER_BASE_URL = 'https://screenvault.karthik-upadhyay98.workers.dev';
 
 let recorder: MediaRecorder | null = null;
 let activeSessionId: string | null = null;
@@ -21,7 +17,8 @@ let activeAccount: StorageAccount | null = null;
 let activeCaptureStream: MediaStream | null = null;
 let activeMicStream: MediaStream | null = null;
 let activeAudioContext: AudioContext | null = null;
-let activeFileId: string | null = null;
+let activeUploadKey: string | null = null;
+let activeUploadId: string | null = null;
 const processingSessions = new Set<string>();
 let previewChunks: Blob[] = [];
 let previewCaptured = false;
@@ -34,7 +31,6 @@ let recordingStartTime: number = 0;
 let offscreenUser: BackendUser | null = null;
 let offscreenAccounts: StorageAccount[] = [];
 let sessionTitle: string = "Screen Recording";
-let activeFolderId: string | null = null;
 let activeBackendVideoId: string | null = null;
 let activePlayerUrl: string | null = null;
 let activeEncryptedFileId: string | null = null;
@@ -42,25 +38,24 @@ let tokenPrefetched = false;
 
 const ENABLE_PROGRESSIVE_UPLOAD = true;
 
-
 // Progressive Upload State
-let resumableUploadUrl: string | null = null;
-let uploadedBytes = 0;      // confirmed-uploaded bytes (advances on success only)
-let expectedOffset = 0;     // next chunk's byte offset (advances immediately on enqueue)
+let uploadedBytes = 0;
+let nextPartNumber = 1;
+let uploadParts: UploadedPart[] = [];
 let uploadQueue: Promise<void> = Promise.resolve();
 let progressiveEnabled = false;
 let consecutiveFailures = 0;
-// Drive requires non-final chunks to be multiples of 256 KB.
+// R2 multipart requires non-final parts to be >=5MiB.
 // Buffer MediaRecorder chunks until we hit that threshold before uploading.
-const MIN_UPLOAD_CHUNK = 256 * 1024;
+const MIN_UPLOAD_CHUNK = 5 * 1024 * 1024;
 let uploadChunkBuffer: Blob[] = [];
 let uploadChunkBufferSize = 0;
 
 async function getFreshToken(accountId?: string, interactive: boolean = false): Promise<string> {
-  const response = await chrome.runtime.sendMessage({ 
-    type: 'GET_TOKEN', 
+  const response = await chrome.runtime.sendMessage({
+    type: 'GET_TOKEN',
     accountId: accountId || activeAccount?.id,
-    interactive 
+    interactive
   });
   if (response && response.error) {
     throw new Error(response.error);
@@ -77,14 +72,14 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
       console.warn('Recording already in progress, ignoring START_SCREEN');
       return;
     }
-    activeFileId = message.fileId;
+    activeUploadKey = message.fileId;
+    activeUploadId = message.uploadId;
     activeSessionId = message.sessionId;
     activeAccount = message.account;
     offscreenUser = message.sv_user || null;
     offscreenAccounts = message.sv_accounts || [];
     sessionTitle = message.title || "Screen Recording";
-    activeFolderId = message.folderId || null;
-    
+
     // Sync the new sessionId to the service worker to preserve title/context
     chrome.runtime.sendMessage({
       type: 'SAVE_SESSION_METADATA',
@@ -92,6 +87,7 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
       metadata: {
         status: 'recording',
         fileId: message.fileId,
+        uploadId: message.uploadId,
         accountId: message.account.id,
         accountEmail: message.account.email,
         startedAt: Date.now(),
@@ -104,7 +100,8 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
     activeAccount = message.account;
     stopRecording();
   } else if (message.type === 'RECOVER_AND_UPLOAD') {
-    activeFileId = message.fileId;
+    activeUploadKey = message.fileId;
+    activeUploadId = message.uploadId || null;
     offscreenUser = message.sv_user || null;
     offscreenAccounts = message.sv_accounts || [];
     processingSessions.add(message.sessionId);
@@ -174,105 +171,82 @@ async function mixMicAndStart(stream: MediaStream, includeMic: boolean) {
   }
 }
 
-async function uploadWithFallback(
+// Uploads the whole blob as a single R2 part. Used for the standard
+// fallback path (progressive upload never started, or failed mid-recording).
+async function uploadWholeBlob(
   blob: Blob,
-  accounts: StorageAccount[],
+  account: StorageAccount,
   onProgress: (n: number) => void
 ): Promise<{ url: string; accountEmail: string }> {
-  // Task 1: Hard Account Pinning - ONLY use the provided account
-  const targetAccount = accounts.find(a => a.isActive);
-  if (!targetAccount) throw new Error('No active account pinned to this session.');
-
-  // We no longer loop through all accounts. We stick to the pinned one.
-  const account = targetAccount;
   try {
-    let fileId = activeFileId;
-      
-      // If we are on a fallback account OR if activeFileId was never set, create a new file
-      if (account.id !== activeAccount?.id || !fileId) {
-        const token = await getFreshToken(account.id, false);
-        
+    let key = activeUploadKey;
+    let uploadId = activeUploadId;
 
-        // Task 4, 5: Folder Logic per Account
-        let workspaceFolderId: string | undefined;
-        if (offscreenUser?.workspaceId) {
-          const mapping = await ensureWorkspaceMapping(
-            offscreenUser.workspaceId, 
-            token, 
-            account.driveRootFolderId
-          );
-          
-          workspaceFolderId = mapping.workspaceFolderId;
-
-          // Sync Root ID to backend if new
-          if (account.driveRootFolderId !== mapping.rootId) {
-            syncAccountRootFolder(account.id, mapping.rootId);
-            account.driveRootFolderId = mapping.rootId; 
-            chrome.runtime.sendMessage({ type: 'SYNC_ACCOUNTS', accounts: offscreenAccounts });
-          }
-        }
-
-        const newFile = await preAllocateDriveFile(account, token, { folderId: workspaceFolderId });
-        fileId = newFile.id;
-      }
-      
+    if (!key || !uploadId) {
+      // No pre-allocated upload session (e.g. recovery from an older session) — start one now.
       const token = await getFreshToken(account.id, false);
-      await uploadDataToExistingFile(fileId, blob, account, onProgress, token);
-      
-      let meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
-      let url = meta?.playerUrl;
+      const init = await initUpload(token, offscreenUser?.workspaceId || '');
+      key = init.key;
+      uploadId = init.uploadId;
+    }
 
-      // If syncBackend failed during recording, the video record and encrypted ID won't exist yet.
-      // Try to create it now that the file content is actually uploaded.
-      if (!meta?.encryptedFileId && fileId && offscreenUser?.workspaceId) {
-        try {
-          const syncToken = await getFreshToken(account.id, false).catch(() => offscreenUser?.accessToken || '');
-          const res = await fetch('https://screenvault-backend.karthik-upadhyay98.workers.dev/videos', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${syncToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              fileId,
-              workspaceId: offscreenUser.workspaceId,
-              title: meta?.title || sessionTitle || 'Recording',
-              accountEmail: account.email,
-              sessionId: activeSessionId
-            })
+    const token = await getFreshToken(account.id, false);
+    const part = await uploadPart(token, key, uploadId, 1, blob, onProgress);
+    await completeUpload(token, key, uploadId, [part]);
+
+    let meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId });
+    let url = meta?.playerUrl;
+
+    // If syncBackend failed during recording, the video record and encrypted ID won't exist yet.
+    // Try to create it now that the file content is actually uploaded.
+    if (!meta?.encryptedFileId && key && offscreenUser?.workspaceId) {
+      try {
+        const syncToken = await getFreshToken(account.id, false).catch(() => offscreenUser?.accessToken || '');
+        const res = await fetch(`${BACKEND_URL}/videos`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${syncToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileId: key,
+            workspaceId: offscreenUser.workspaceId,
+            title: meta?.title || sessionTitle || 'Recording',
+            accountEmail: account.email,
+            sessionId: activeSessionId
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          activeBackendVideoId = data.id;
+          activePlayerUrl = data.playerUrl;
+          activeEncryptedFileId = data.encryptedFileId;
+
+          await chrome.runtime.sendMessage({
+            type: 'SAVE_SESSION_METADATA',
+            sessionId: activeSessionId,
+            metadata: {
+              backendVideoId: data.id,
+              playerUrl: data.playerUrl,
+              encryptedFileId: data.encryptedFileId,
+              backendSynced: true
+            }
           });
-          if (res.ok) {
-            const data = await res.json();
-            activeBackendVideoId = data.id;
-            activePlayerUrl = data.playerUrl;
-            activeEncryptedFileId = data.encryptedFileId;
-
-            await chrome.runtime.sendMessage({
-              type: 'SAVE_SESSION_METADATA',
-              sessionId: activeSessionId,
-              metadata: {
-                backendVideoId: data.id,
-                playerUrl: data.playerUrl,
-                encryptedFileId: data.encryptedFileId,
-                backendSynced: true
-              }
-            });
-            url = data.playerUrl;
-            meta = { ...meta, encryptedFileId: data.encryptedFileId };
-            svLog("FALLBACK_BACKEND_SYNC_SUCCESS", { sessionId: activeSessionId, videoId: data.id, timestamp: Date.now() });
-          }
-        } catch (e) {
-          svLog("FALLBACK_BACKEND_SYNC_FAILED", { sessionId: activeSessionId, error: String(e), timestamp: Date.now() });
+          url = data.playerUrl;
+          meta = { ...meta, encryptedFileId: data.encryptedFileId };
+          svLog("FALLBACK_BACKEND_SYNC_SUCCESS", { sessionId: activeSessionId, videoId: data.id, timestamp: Date.now() });
         }
+      } catch (e) {
+        svLog("FALLBACK_BACKEND_SYNC_FAILED", { sessionId: activeSessionId, error: String(e), timestamp: Date.now() });
       }
+    }
 
-      if (!url) {
-        const idToUse = meta?.encryptedFileId || fileId;
-        const titleToUse = meta?.title || sessionTitle || 'Recording';
-        const PLAYER_BASE_URL = 'https://screenvault.karthik-upadhyay98.workers.dev';
-        url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
-      }
+    if (!url) {
+      const idToUse = meta?.encryptedFileId || key;
+      const titleToUse = meta?.title || sessionTitle || 'Recording';
+      url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
+    }
 
     svLog("UPLOAD_FINAL_COMPLETE", {
       sessionId: activeSessionId,
-      fileId,
+      key,
       url,
       method: 'standard_pinned',
       timestamp: Date.now()
@@ -302,30 +276,33 @@ async function uploadWithRetry(
     timestamp: Date.now()
   });
 
+  const account = accounts[0];
+  if (!account) throw new Error('No account pinned to this session.');
+
   let lastError: Error | null = null;
-  
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
       // Task 2: Exponential backoff (1s, 2s, 4s, 8s)
-      const delay = Math.pow(2, attempt - 1) * 1000; 
+      const delay = Math.pow(2, attempt - 1) * 1000;
       await new Promise(resolve => setTimeout(resolve, delay));
       chrome.runtime.sendMessage({ type: 'UPLOAD_PROGRESS', progress: 0 }); // reset progress bar
     }
-    
+
     try {
-      return await uploadWithFallback(blob, accounts, onProgress);
+      return await uploadWholeBlob(blob, account, onProgress);
     } catch (err: any) {
       lastError = err;
       const message = err.message || '';
-      
+
       // Task 3: Failure detection
       // Check for 4xx errors - do NOT retry (except 408 timeout)
       const statusMatch = message.match(/failed: (\d+)/);
       const status = statusMatch ? parseInt(statusMatch[1]) : null;
-      
-      const isRetriable = 
-        message.includes('Network error') || 
-        message.includes('timeout') || 
+
+      const isRetriable =
+        message.includes('Network error') ||
+        message.includes('timeout') ||
         (status && status >= 500) ||
         status === 408;
 
@@ -337,51 +314,35 @@ async function uploadWithRetry(
       console.warn(`Upload attempt ${attempt + 1} failed: ${message}`);
     }
   }
-  
+
   // Task 4: Final failure state handled by throwing the error
   throw lastError || new Error('Upload failed after multiple attempts');
 }
 
-async function uploadChunkWithRetry(url: string, chunk: Blob, offset: number, isFinal: boolean, maxRetries = 3): Promise<{ done: boolean; fileId?: string }> {
+async function uploadPartWithRetry(
+  token: string,
+  key: string,
+  uploadId: string,
+  partNumber: number,
+  chunk: Blob,
+  maxRetries = 3
+): Promise<UploadedPart> {
+  let lastErr: any;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const result = await uploadResumableChunk(url, chunk, offset, isFinal);
+      const result = await uploadPart(token, key, uploadId, partNumber, chunk);
       consecutiveFailures = 0;
 
-      svLog("UPLOAD_CHUNK_PROGRESS", {
+      svLog("UPLOAD_PART_PROGRESS", {
         sessionId: activeSessionId,
-        offset,
+        partNumber,
         size: chunk.size,
-        isFinal,
-        done: result.done,
         timestamp: Date.now()
       });
 
       return result;
     } catch (err: any) {
-      const is503 = err?.message?.includes('503');
-
-      if (is503) {
-        // Drive returned 503 but may have persisted the bytes server-side.
-        // Query status before retrying to avoid re-sending bytes Drive already has.
-        try {
-          // +1 so Drive treats this as incomplete and returns 308 (not 200/finalize)
-          const probedTotal = offset + chunk.size + 1;
-          const statusRes = await fetch(url, {
-            method: 'PUT',
-            headers: { 'Content-Range': `bytes */${probedTotal}` }
-          });
-          if (statusRes.status === 308) {
-            const range = statusRes.headers.get('Range');
-            const received = range ? parseInt(range.match(/bytes=0-(\d+)/)?.[1] ?? '-1', 10) + 1 : 0;
-            if (received >= offset + chunk.size) {
-              consecutiveFailures = 0;
-              return { done: false }; // Drive has all bytes — no retry needed
-            }
-          }
-        } catch {}
-      }
-
+      lastErr = err;
       if (attempt === maxRetries) {
         consecutiveFailures++;
         throw err;
@@ -389,10 +350,10 @@ async function uploadChunkWithRetry(url: string, chunk: Blob, offset: number, is
       // Exponential backoff: 1s, 2s, 4s
       const delay = 1000 * Math.pow(2, attempt);
       await new Promise(r => setTimeout(r, delay));
-      console.warn(`[SV] Chunk retry ${attempt + 1} at offset ${offset}`);
+      console.warn(`[SV] Part retry ${attempt + 1} at partNumber ${partNumber}`);
     }
   }
-  return { done: false };
+  throw lastErr;
 }
 
 async function generateThumbnail(blob: Blob, retry = true): Promise<string | null> {
@@ -401,7 +362,7 @@ async function generateThumbnail(blob: Blob, retry = true): Promise<string | nul
       const video = document.createElement('video');
       video.muted = true;
       video.src = URL.createObjectURL(blob);
-      
+
       const timeout = setTimeout(() => {
         video.onerror = null;
         video.onseeked = null;
@@ -471,7 +432,7 @@ function startMediaRecorder(stream: MediaStream) {
 
   recorder = new MediaRecorder(stream, {
     mimeType,
-    videoBitsPerSecond: 2_500_000, 
+    videoBitsPerSecond: 2_500_000,
     audioBitsPerSecond: 128_000
   });
 
@@ -493,46 +454,27 @@ function startMediaRecorder(stream: MediaStream) {
   });
 
   // Reset progressive state
-  resumableUploadUrl = null;
   uploadedBytes = 0;
-  expectedOffset = 0;
+  nextPartNumber = 1;
+  uploadParts = [];
   uploadQueue = Promise.resolve();
   progressiveEnabled = false;
   consecutiveFailures = 0;
   uploadChunkBuffer = [];
   uploadChunkBufferSize = 0;
 
-  if (activeFileId && activeAccount) {
+  if (activeUploadKey && activeUploadId && activeAccount) {
     chrome.runtime.sendMessage({
       type: "SAVE_SESSION_METADATA",
       sessionId: activeSessionId!,
       metadata: { accountEmail: activeAccount.email }
     });
 
+    // The upload session (key + uploadId) was already created during
+    // pre-allocation, so progressive upload can start immediately —
+    // no async init step needed here, unlike the old Drive flow.
     if (ENABLE_PROGRESSIVE_UPLOAD) {
-      const now = new Date().toISOString().slice(0, 10);
-      const fileName = `screenvault-${now}.webm`;
-      getFreshToken(activeAccount.id, false)
-        .then(token => initResumableUploadPost(token, fileName, activeFolderId || undefined))
-        .then(async (url) => {
-          resumableUploadUrl = url;
-          progressiveEnabled = true;
-          if (activeSessionId) {
-            await chrome.runtime.sendMessage({
-              type: 'SAVE_SESSION_METADATA',
-              sessionId: activeSessionId,
-              metadata: {
-                uploadUrl: url,
-                uploadedBytes: 0,
-                accountEmail: activeAccount?.email || offscreenUser?.email
-              }
-            });
-          }
-        })
-        .catch(e => {
-          console.error('Failed to init progressive upload:', e);
-          progressiveEnabled = false;
-        });
+      progressiveEnabled = true;
     }
   }
 
@@ -560,10 +502,10 @@ function startMediaRecorder(stream: MediaStream) {
 
       // Basic deduplication check - though MediaRecorder rarely emits identical blobs
       if (lastChunkData && lastChunkData.size === e.data.size) {
-         // Potential duplicate, but blobs are unique references. 
+         // Potential duplicate, but blobs are unique references.
          // We'll trust the size check and stream state for now.
       }
-      
+
       const chunk = e.data;
       const currentSession = activeSessionId;
       const currentIndex = chunkCount++;
@@ -573,8 +515,8 @@ function startMediaRecorder(stream: MediaStream) {
         console.error('Failed to save chunk to IndexedDB:', err);
       });
 
-      if (progressiveEnabled && resumableUploadUrl) {
-        // Buffer until we have ≥ 256 KB — Drive rejects non-final chunks smaller than that
+      if (progressiveEnabled && activeUploadKey && activeUploadId) {
+        // Buffer until we have ≥ 5MiB — R2 rejects non-final multipart parts smaller than that
         uploadChunkBuffer.push(chunk);
         uploadChunkBufferSize += chunk.size;
 
@@ -583,33 +525,31 @@ function startMediaRecorder(stream: MediaStream) {
           uploadChunkBuffer = [];
           uploadChunkBufferSize = 0;
 
-          const offset = expectedOffset;
-          expectedOffset += blobToUpload.size;
+          const partNumber = nextPartNumber++;
+          const key = activeUploadKey;
+          const uploadId = activeUploadId;
 
           uploadQueue = uploadQueue
             .then(async () => {
-              if (!progressiveEnabled || !resumableUploadUrl || consecutiveFailures >= 3) {
+              if (!progressiveEnabled || consecutiveFailures >= 3) {
                 progressiveEnabled = false;
                 return;
               }
-              const result = await uploadChunkWithRetry(resumableUploadUrl!, blobToUpload, offset, false);
+              const token = await getFreshToken(activeAccount!.id, false);
+              const part = await uploadPartWithRetry(token, key!, uploadId!, partNumber, blobToUpload);
+              uploadParts.push(part);
               uploadedBytes += blobToUpload.size;
               if (activeSessionId) {
                 await chrome.runtime.sendMessage({
                   type: 'SAVE_SESSION_METADATA',
                   sessionId: activeSessionId,
-                  metadata: { uploadedBytes: offset + blobToUpload.size }
+                  metadata: { uploadedBytes }
                 });
-              }
-              if (result.done) {
-                // Drive closed the session early (returned 200/201) — all data committed
-                progressiveEnabled = false;
               }
             })
             .catch(err => {
-              console.error('[SV][PROGRESSIVE_CHUNK_FAIL]', err?.message, { offset, size: blobToUpload.size });
+              console.error('[SV][PROGRESSIVE_PART_FAIL]', err?.message, { partNumber, size: blobToUpload.size });
               progressiveEnabled = false;
-              resumableUploadUrl = null;
             });
         }
       }
@@ -643,26 +583,26 @@ function startMediaRecorder(stream: MediaStream) {
 
       svLog("OFFSCREEN_ONSTOP_TRIGGERED", {
         sessionId: activeSessionId,
-        fileId: activeFileId,
+        key: activeUploadKey,
         actualDurationMs,
         timestamp: Date.now()
       });
 
       if (activeSessionId) {
-        await chrome.runtime.sendMessage({ 
-          type: 'SET_SESSION_STATUS', 
-          sessionId: activeSessionId, 
-          status: 'finalizing' 
+        await chrome.runtime.sendMessage({
+          type: 'SET_SESSION_STATUS',
+          sessionId: activeSessionId,
+          status: 'finalizing'
         });
-        await chrome.runtime.sendMessage({ 
-          type: 'SAVE_SESSION_METADATA', 
-          sessionId: activeSessionId, 
-          metadata: { 
+        await chrome.runtime.sendMessage({
+          type: 'SAVE_SESSION_METADATA',
+          sessionId: activeSessionId,
+          metadata: {
             stoppedAt: Date.now(),
             actualDurationMs,
             duration: durationSeconds,
-            processingStartedAt: Date.now() 
-          } 
+            processingStartedAt: Date.now()
+          }
         });
       }
 
@@ -674,10 +614,10 @@ function startMediaRecorder(stream: MediaStream) {
     // Step 2: Critical Path (Duration calculation + Final Blob preparation)
     const chunks = await getChunks(activeSessionId!);
     const blob = new Blob(chunks, { type: 'video/webm' });
-    
+
     // Captured chunks for preview generation (moved to enrichment)
     const previewBlobForEnrichment = previewChunks.length > 0 ? new Blob(previewChunks, { type: 'video/webm' }) : null;
-    previewChunks = []; 
+    previewChunks = [];
     previewCaptured = false;
 
     // Task 5 & 6: Clean up all tracks safely
@@ -693,7 +633,7 @@ function startMediaRecorder(stream: MediaStream) {
     if (activeAudioContext) {
       activeAudioContext.close().catch(() => {});
     }
-    
+
     activeCaptureStream = null;
     activeMicStream = null;
     activeAudioContext = null;
@@ -702,69 +642,50 @@ function startMediaRecorder(stream: MediaStream) {
     const currentSessionId = activeSessionId;
 
     try {
-      let finalResult: { url: string; accountEmail: string } | null = null;
       const stopTimePerf = performance.now();
       const actualDurationMs = Math.floor(stopTimePerf - recordingStartTime);
 
       // 1. Critical Path: Finalize progressive upload
       await uploadQueue;
 
-      if (progressiveEnabled && resumableUploadUrl && activeAccount) {
+      if (progressiveEnabled && activeUploadKey && activeUploadId && activeAccount) {
         try {
-          let newFileId: string | undefined;
-
           if (uploadChunkBuffer.length > 0) {
-            // Send tail as the FINAL chunk — Drive returns new file ID in the 200/201 body
+            // Send tail as the final part — R2 allows the last part to be any size.
             const tail = new Blob(uploadChunkBuffer, { type: 'video/webm' });
             uploadChunkBuffer = [];
             uploadChunkBufferSize = 0;
-            const offset = expectedOffset;
-            expectedOffset += tail.size;
-            const result = await uploadChunkWithRetry(resumableUploadUrl, tail, offset, true /* FINAL */);
-            uploadedBytes = expectedOffset;
-            newFileId = result.fileId;
-          } else if (uploadedBytes > 0) {
-            // All data already uploaded as non-final chunks — finalize via status query.
-            // Drive returns 200/201 with file body when all bytes are present.
-            const status = await getUploadStatus(resumableUploadUrl, uploadedBytes);
-            if (status.received < uploadedBytes) {
-              throw new Error(`Upload incomplete: server has ${status.received}/${uploadedBytes} bytes`);
-            }
-            newFileId = status.fileId;
-          } else {
+            const partNumber = nextPartNumber++;
+            const tailToken = await getFreshToken(activeAccount.id, false);
+            const part = await uploadPartWithRetry(tailToken, activeUploadKey, activeUploadId, partNumber, tail);
+            uploadParts.push(part);
+            uploadedBytes += tail.size;
+          }
+
+          if (uploadParts.length === 0) {
             throw new Error('No progressive data to finalize');
           }
 
-          if (!newFileId) {
-            throw new Error('Drive did not return new file ID after upload');
-          }
-
-          const uploadCompleteAt = Date.now();
           const duration = durationSeconds;
           const finalActualDurationMs = actualDurationMs;
 
+          const finalToken = await getFreshToken(activeAccount.id, false).catch(() => offscreenUser?.accessToken || '');
+          const completed = await completeUpload(finalToken, activeUploadKey, activeUploadId, uploadParts);
+          const uploadCompleteAt = Date.now();
+
           svLog("PROGRESSIVE_UPLOAD_COMPLETE", {
             sessionId: activeSessionId,
-            newFileId,
-            placeholderFileId: activeFileId,
-            uploadedBytes,
+            key: activeUploadKey,
+            uploadedBytes: completed.size,
             timestamp: uploadCompleteAt
           });
-
-          // Fetch fresh token for Drive + backend calls
-          let freshToken: string;
-          try {
-            freshToken = await getFreshToken(activeAccount.id, false);
-          } catch {
-            freshToken = offscreenUser?.accessToken || '';
-          }
 
           // STEP 4: Fire UPLOAD_COMPLETE immediately after token resolve
           let link = activePlayerUrl;
           if (!link) {
-            const idToUse = activeEncryptedFileId || activeFileId;
+            const idToUse = activeEncryptedFileId || activeUploadKey;
             const titleToUse = sessionTitle || 'Recording';
-            link = `https://screenvault.karthik-upadhyay98.workers.dev/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
+            link = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
           }
 
           chrome.runtime.sendMessage({
@@ -775,25 +696,22 @@ function startMediaRecorder(stream: MediaStream) {
 
           const linkReadyAt = Date.now();
 
-          // Update backend DB in background
-          if (activeBackendVideoId && freshToken) {
-            fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${activeBackendVideoId}`, {
+          // Update backend DB in background — the video row's fileId already
+          // points at this key since it was set at creation time, so no
+          // fileId swap is needed (unlike the old Drive placeholder flow).
+          if (activeBackendVideoId && finalToken) {
+            fetch(`${BACKEND_URL}/videos/${activeBackendVideoId}`, {
               method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${freshToken}` },
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${finalToken}` },
               body: JSON.stringify({
-                fileId: newFileId,
                 status: 'ready',
                 duration,
                 actualDurationMs: finalActualDurationMs,
                 sessionId: activeSessionId,
-                fileSizeBytes: uploadedBytes
+                fileSizeBytes: completed.size
               })
             }).then(() => {
                 svLog("BACKEND_FINALIZATION_COMPLETE", { sessionId: activeSessionId, timestamp: Date.now() });
-                // Delete placeholder ONLY after DB swap is confirmed
-                if (activeFileId && freshToken) {
-                  deleteFile(activeFileId, freshToken).catch(() => {});
-                }
             }).catch(e => {
                 svLog("BACKEND_FINALIZATION_FAILED", { sessionId: activeSessionId, error: String(e) });
             });
@@ -816,25 +734,23 @@ function startMediaRecorder(stream: MediaStream) {
           });
 
           // BACKGROUND: Start Enrichment
-          enrichSession(activeSessionId!, blob, previewBlobForEnrichment, activeAccount, duration, finalActualDurationMs);
+          enrichSession(activeSessionId!, blob, activeAccount, duration, finalActualDurationMs);
 
           await deleteSession(currentSessionId);
           await deleteChunks(currentSessionId);
           return;
         } catch (e) {
           console.debug('[SV][PROGRESSIVE_FINALIZE_FAIL] Switching to fallback:', e);
-          resumableUploadUrl = null;
+          progressiveEnabled = false;
         }
       }
 
       // 2. Standard Fallback: Full blob upload
       // This is reached if progressive was never enabled or failed during finalization
-      if (!finalResult) {
-        const allAccounts = await chrome.runtime.sendMessage({ type: 'GET_ACCOUNTS' });
-        const primary = activeAccount || allAccounts[0];
-        if (primary) {
-          await processSession(currentSessionId, blob, primary, allAccounts);
-        }
+      const allAccounts = await chrome.runtime.sendMessage({ type: 'GET_ACCOUNTS' });
+      const primary = activeAccount || allAccounts[0];
+      if (primary) {
+        await processSession(currentSessionId, blob, primary, allAccounts);
       }
     } catch (e: any) {
       handleError(e);
@@ -876,9 +792,9 @@ function stopRecording() {
 
 function handleError(error: any) {
   isRecording = false;
-  chrome.runtime.sendMessage({ 
-    type: 'RECORDING_ERROR', 
-    message: error?.message || 'Recording failed' 
+  chrome.runtime.sendMessage({
+    type: 'RECORDING_ERROR',
+    message: error?.message || 'Recording failed'
   });
 }
 
@@ -929,22 +845,22 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
     console.warn(`Session ${sessionId} is already being uploaded. Ignoring duplicate request.`);
     return null;
   }
-  
+
   processingSessions.add(sessionId);
 
   try {
     const blobUrl = URL.createObjectURL(blob);
-    
+
     // Notify service worker that we have a file for download
-    chrome.runtime.sendMessage({ 
-      type: 'RECORDING_FINISHED', 
-      blobUrl 
+    chrome.runtime.sendMessage({
+      type: 'RECORDING_FINISHED',
+      blobUrl
     } as OffscreenMessage);
 
     // Task 6: Hard Account Pinning - only use the specified account
     const retryAccounts = [account];
 
-    // Task 3 & 4: Drive upload and validation
+    // Task 3 & 4: R2 upload and validation
     const result = await uploadWithRetry(blob, retryAccounts, (progress) => {
       chrome.runtime.sendMessage({ type: 'UPLOAD_PROGRESS', progress } as OffscreenMessage);
     });
@@ -954,8 +870,8 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
     }
 
     // INSTANT FEEDBACK: Send completion immediately once upload completes (before polling/sync)
-    chrome.runtime.sendMessage({ 
-      type: 'UPLOAD_COMPLETE', 
+    chrome.runtime.sendMessage({
+      type: 'UPLOAD_COMPLETE',
       url: result.url,
       account: result.accountEmail
     } as OffscreenMessage);
@@ -965,7 +881,7 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
     // NEW: Update backend on success
     chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId }).then(async (meta) => {
       if (!meta) return;
-      
+
       const user = offscreenUser;
       if (!user?.accessToken) {
         console.warn("Backend sync skipped: Missing offscreenUser session data");
@@ -998,7 +914,7 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
             timestamp: Date.now()
           });
 
-          await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${activeBackendVideoId}`, {
+          await fetch(`${BACKEND_URL}/videos/${activeBackendVideoId}`, {
             method: 'PATCH',
             headers: {
               'Content-Type': 'application/json',
@@ -1022,7 +938,7 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
 
         // 2. Track Usage Stats
         if (meta && !meta.usageSynced && user.workspaceId) {
-          await fetch('https://screenvault-backend.karthik-upadhyay98.workers.dev/usage/update', {
+          await fetch(`${BACKEND_URL}/usage/update`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1035,7 +951,7 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
               sessionId
             })
           });
-          
+
           await chrome.runtime.sendMessage({
             type: "SAVE_SESSION_METADATA",
             sessionId,
@@ -1048,11 +964,11 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
     }).catch(e => console.warn('Backend meta fetch failed:', e));
 
     const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
-    const fileId = meta?.fileId || activeFileId;
+    const fileId = meta?.fileId || activeUploadKey;
 
     if (fileId) {
-      // BACKGROUND: Enrichment (Thumbnail + Preview + Metadata)
-      enrichSession(sessionId, blob, null, account, meta?.duration || 0, meta?.actualDurationMs || 0);
+      // BACKGROUND: Enrichment (Thumbnail + Metadata)
+      enrichSession(sessionId, blob, account, meta?.duration || 0, meta?.actualDurationMs || 0);
     }
 
     return result;
@@ -1064,13 +980,13 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
     chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId }).then(async (meta) => {
       if (meta?.backendVideoId && offscreenUser?.accessToken) {
         try {
-          await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${meta.backendVideoId}`, {
+          await fetch(`${BACKEND_URL}/videos/${meta.backendVideoId}`, {
             method: 'PATCH',
-            headers: { 
+            headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${offscreenUser.accessToken}`
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
               status: 'failed',
               error: errorMsg,
               sessionId
@@ -1090,50 +1006,13 @@ async function processSession(sessionId: string, blob: Blob, account: StorageAcc
   }
 }
 
-async function syncWorkspaceFolder(workspaceId: string, driveFolderId: string) {
-  try {
-    if (!offscreenUser?.accessToken) return;
-    
-    await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/workspaces/${workspaceId}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${offscreenUser.accessToken}`
-      },
-      body: JSON.stringify({ driveFolderId })
-    });
-    
-  } catch (err) {
-    console.warn('Failed to sync workspace folder to backend:', err);
-  }
-}
-
-async function syncAccountRootFolder(accountId: string, driveRootFolderId: string) {
-  try {
-    if (!offscreenUser?.accessToken) return;
-    
-    await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/accounts/${accountId}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${offscreenUser.accessToken}`
-      },
-      body: JSON.stringify({ driveRootFolderId })
-    });
-    
-  } catch (err) {
-    console.warn('Failed to sync account root folder to backend:', err);
-  }
-}
-
 /**
  * BACKGROUND ENRICHMENT
  * Non-blocking tasks to enhance video metadata after it's confirmed playable.
  */
 async function enrichSession(
-  sessionId: string, 
-  blob: Blob, 
-  previewBlob: Blob | null, 
+  sessionId: string,
+  blob: Blob,
   account: StorageAccount,
   duration: number,
   actualDurationMs: number
@@ -1157,21 +1036,8 @@ async function enrichSession(
     } catch (err) {
       console.warn('[ENRICH] Thumbnail failed:', err);
     }
-    
-    // 2. Upload Preview Clip
-    let previewUrl: string | undefined;
-    if (previewBlob) {
-      try {
-        const driveRootFolderId = await chrome.runtime.sendMessage({ type: 'GET_WORKSPACE_FOLDER' });
-        const previewFileId = await uploadFileSimple(previewBlob, `preview-${Date.now()}.webm`, account, driveRootFolderId);
-        previewUrl = `https://drive.google.com/file/d/${previewFileId}/preview`;
-      } catch (err) {
-        console.warn('[ENRICH] Preview failed:', err);
-      }
-    }
 
-    // 3. Final Backend Patch (Polish)
-    const meta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
+    // 2. Final Backend Patch (Polish)
     if (activeBackendVideoId) {
       let enrichToken: string;
       try {
@@ -1186,11 +1052,10 @@ async function enrichSession(
         actualDurationMs
       };
       if (thumbnailUrl) updateBody.thumbnailUrl = thumbnailUrl;
-      if (previewUrl) updateBody.previewUrl = previewUrl;
       if (sessionTitle) updateBody.title = sessionTitle;
 
       const patchBackend = async () => {
-        const res = await fetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${activeBackendVideoId}`, {
+        const res = await fetch(`${BACKEND_URL}/videos/${activeBackendVideoId}`, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -1217,18 +1082,17 @@ async function enrichSession(
     enrichmentFinished = true;
     clearTimeout(watchdog);
 
-    await chrome.runtime.sendMessage({ 
-      type: 'SAVE_SESSION_METADATA', 
-      sessionId, 
-      metadata: { 
+    await chrome.runtime.sendMessage({
+      type: 'SAVE_SESSION_METADATA',
+      sessionId,
+      metadata: {
         thumbnailUrl,
-        previewUrl,
         status: 'ready',
         enrichmentFinishedAt: Date.now()
-      } 
+      }
     });
-    
-    // 4. Latency Auditing
+
+    // 3. Latency Auditing
     const finalMeta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId });
     const latency = {
       stopToUploadComplete: (finalMeta.uploadCompleteAt || 0) - (finalMeta.stoppedAt || 0),
@@ -1238,12 +1102,12 @@ async function enrichSession(
       totalDuration: finalMeta.actualDurationMs || 0
     };
 
-    svLog("ENRICHMENT_SUCCESS", { 
-      sessionId, 
+    svLog("ENRICHMENT_SUCCESS", {
+      sessionId,
       latency,
-      timestamp: Date.now() 
+      timestamp: Date.now()
     });
-    
+
     // Cleanup local chunks now that everything is synced
     await deleteChunks(sessionId).catch(() => {});
     chrome.runtime.sendMessage({ type: 'DELETE_SESSION', sessionId });

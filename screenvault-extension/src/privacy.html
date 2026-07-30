@@ -66,13 +66,13 @@
 
       <div class="card">
         <h2>Summary</h2>
-        <p>ScreenVault records your screen and uploads videos to <strong>your own Google Drive</strong>. We never store your video content. We only store the metadata needed to share and manage your recordings.</p>
+        <p>ScreenVault records your screen and uploads videos to our own Cloudflare storage, scoped to your workspace. We use Google Sign-In only to verify who you are — not to access your Google Drive or any other Google data.</p>
       </div>
 
       <h2>What we collect</h2>
       <ul>
         <li><strong>Google account info</strong> — your email address and display name, used to identify you and link your recordings to your workspace.</li>
-        <li><strong>Video metadata</strong> — title, duration, and workspace association. The video file itself lives in your Google Drive, not on our servers.</li>
+        <li><strong>Video metadata</strong> — title, duration, and workspace association.</li>
         <li><strong>Usage stats</strong> — recording counts and timestamps, used to enforce fair-use limits (e.g. 100 recordings/day).</li>
         <li><strong>Playback events</strong> — anonymous events (play started, play failed) for product reliability. No viewer identity is recorded.</li>
         <li><strong>Debug logs</strong> — technical error logs to help us fix bugs.</li>
@@ -80,17 +80,14 @@
 
       <h2>What we do NOT collect</h2>
       <ul>
-        <li>Your video content — it goes directly to your Google Drive.</li>
-        <li>Your full Google Drive contents — we only access files that ScreenVault creates (<code>drive.file</code> scope).</li>
+        <li>Your Google Drive contents, or any other Google data beyond your email and display name.</li>
         <li>Browsing history or tab content.</li>
         <li>Payment information.</li>
       </ul>
 
-      <h2>Google Drive access</h2>
+      <h2>Google account access</h2>
       <p>We request the following Google OAuth scopes:</p>
       <ul>
-        <li><code>drive.file</code> — create and read files that ScreenVault creates. We cannot access any other files in your Drive.</li>
-        <li><code>drive.metadata.readonly</code> — read your Drive storage quota to show how much space is available.</li>
         <li><code>userinfo.email</code> and <code>userinfo.profile</code> — identify you by email and display name.</li>
       </ul>
 
@@ -103,20 +100,19 @@
       </ul>
 
       <h2>Data storage & infrastructure</h2>
-      <p>Video files are stored in your Google Drive account. Metadata is stored in a Cloudflare D1 database (USA). Auth tokens are temporarily cached in Cloudflare KV with a 10-minute TTL.</p>
+      <p>Video files and metadata are stored in Cloudflare R2 and D1. Auth tokens are temporarily cached in Cloudflare KV with a 10-minute TTL.</p>
 
       <h2>Sharing</h2>
-      <p>When you share a recording link, it becomes viewable by anyone with that link. The link contains an encrypted file identifier — it cannot be guessed. You can revoke access at any time by deleting the file from your Google Drive or deleting the recording from your ScreenVault library.</p>
+      <p>When you share a recording link, it becomes viewable by anyone with that link. The link contains an encrypted file identifier — it cannot be guessed. You can revoke access at any time by deleting the recording from your ScreenVault library.</p>
 
       <h2>Third-party services</h2>
       <ul>
-        <li><strong>Google Drive API</strong> — for video storage and sharing.</li>
-        <li><strong>Cloudflare Workers & D1</strong> — for our backend API and metadata storage.</li>
+        <li><strong>Cloudflare Workers, R2 & D1</strong> — for our backend API, video storage, and metadata storage.</li>
       </ul>
 
       <h2>Your rights</h2>
       <ul>
-        <li>Delete any recording from your library at any time — this removes it from our database and from Google Drive.</li>
+        <li>Delete any recording from your library at any time — this removes it from our database and storage.</li>
         <li>Disconnect your Google account from the extension at any time.</li>
         <li>Request deletion of all your data by emailing us.</li>
       </ul>

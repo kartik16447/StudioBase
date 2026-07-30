@@ -1,4 +1,4 @@
-import { AppState, StorageAccount, BackendUser } from "./types";
+import { AppState, StorageAccount } from "./types";
 import { svLog } from "./logger";
 
 let state: AppState;
@@ -203,7 +203,7 @@ function renderState(newState: AppState) {
         progressFill.style.width = "100%";
         progressPct.textContent = "100%";
       } else {
-        uploadAccountLabel.textContent = `Uploading to ${state.uploadAccount || "Drive"}...`;
+        uploadAccountLabel.textContent = `Uploading...`;
         const realProgress = Math.floor(state.uploadProgress || 0);
         progressFill.style.width = `${realProgress}%`;
         progressPct.textContent = `${realProgress}%`;
@@ -245,11 +245,6 @@ function renderState(newState: AppState) {
 
 async function renderAccounts(accs: StorageAccount[]) {
   accounts = accs;
-  
-  const { sv_user } = (await chrome.storage.local.get("sv_user")) as {
-    sv_user?: BackendUser;
-  };
-  const primaryEmail = sv_user?.email;
 
   if (accounts.length === 0 && !isConnectingAccount) {
     noAccounts.style.display = "block";
@@ -266,47 +261,19 @@ async function renderAccounts(accs: StorageAccount[]) {
       if (!child.classList.contains("section-label")) child.remove();
     });
 
-    accounts.forEach((acc) => {
-      const freeBytes = Math.max(0, acc.quotaTotal - acc.quotaUsed);
-      const freeGB = (freeBytes / (1024 * 1024 * 1024)).toFixed(1);
-
+    // Single-account model: just show who's signed in.
+    const acc = accounts[0];
+    if (acc) {
       const row = document.createElement("div");
       row.className = "account-card";
-      
-      const isPrimary = acc.isPrimary;
-      const isActive = acc.isActive;
-
       row.innerHTML = `
         <div class="account-row-1">
           <div class="account-avatar">${acc.displayName.charAt(0)}</div>
           <div class="account-email" title="${acc.email}">${acc.email}</div>
         </div>
-        <div class="account-row-2">
-          <div class="account-space">${freeGB} GB available</div>
-          <div class="account-actions" style="display: flex; gap: 4px; align-items: center;">
-            ${isPrimary ? '<span class="badge badge-primary">Main</span>' : ''}
-            ${isActive ? '<span class="badge badge-active">Saving</span>' : '<button class="set-active-btn" data-email="' + acc.email + '">Use</button>'}
-          </div>
-        </div>
       `;
-      
-      const useBtn = row.querySelector('.set-active-btn');
-      useBtn?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const email = (e.currentTarget as HTMLElement).dataset.email;
-        if (!email) return;
-
-        // Instant Feedback Loop: Use -> ✓ -> Saving
-        const container = (e.currentTarget as HTMLElement).parentElement;
-        if (container) {
-          container.innerHTML = '<span style="color: var(--green); font-weight: 600; margin-right: 8px;">✓</span>';
-        }
-
-        chrome.runtime.sendMessage({ type: "SWITCH_UPLOAD_ACCOUNT", email });
-      });
-
       accountsList.appendChild(row);
-    });
+    }
 
     if (isConnectingAccount) {
       renderAccountSkeletons(1);
@@ -374,7 +341,7 @@ btnNewRecording.addEventListener("click", () => {
   if (accounts.length > 0) {
     startRecordingNow({});
   } else {
-    alert("Please connect a Google Drive account first.");
+    alert("Please sign in with Google first.");
   }
 });
 

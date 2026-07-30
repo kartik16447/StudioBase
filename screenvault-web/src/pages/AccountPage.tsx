@@ -35,9 +35,9 @@ export function AccountPage() {
         </div>
 
         <div style={{ background: '#09090B', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '1.25rem', padding: '1.5rem' }}>
-          <p style={{ fontSize: '0.7rem', color: '#52525B', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: '1rem' }}>Google Drive Storage</p>
+          <p style={{ fontSize: '0.7rem', color: '#52525B', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: '1rem' }}>Storage</p>
           <p style={{ color: '#A1A1AA', fontSize: '0.875rem', lineHeight: 1.6 }}>
-            Google Drive accounts are managed through the Chrome extension. Open the extension to add or switch storage accounts.
+            Recordings are saved to your team's shared storage automatically — there's no account to connect or switch.
           </p>
         </div>
 

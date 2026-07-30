@@ -8,46 +8,12 @@ import {
   PreAllocationResult,
   BackendUser,
 } from "./types";
-import {
-  preAllocateDriveFile,
-  isFileReady,
-  getQuota,
-  deleteFile,
-  ensureWorkspaceMapping,
-} from "./google-drive";
+import { initUpload } from "./r2-upload";
 import { getPendingSessions, recoverSession, deleteSession } from "./db";
 import { svLog } from "./logger";
 
-/**
- * Helper to ensure the workspace folder exists for an account and return its ID.
- * Persists the folder IDs in the StorageAccount state.
- */
-async function getWorkspaceFolderId(account: StorageAccount, workspaceId: string): Promise<string> {
-  const mapping = account.workspaceMappings?.[workspaceId];
-  if (mapping) return mapping;
-
-  const token = account.accessToken;
-  const { rootId, workspaceFolderId } = await ensureWorkspaceMapping(
-    workspaceId,
-    token,
-    account.driveRootFolderId
-  );
-
-  // Update account in memory and storage
-  const updatedAccount = {
-    ...account,
-    driveRootFolderId: rootId,
-    workspaceMappings: {
-      ...(account.workspaceMappings || {}),
-      [workspaceId]: workspaceFolderId
-    }
-  };
-
-  accounts = accounts.map(a => a.id === account.id ? updatedAccount : a);
-  await chrome.storage.local.set({ sv_accounts: accounts });
-  
-  return workspaceFolderId;
-}
+const BACKEND_URL = "https://screenvault-backend.karthik-upadhyay98.workers.dev";
+const PLAYER_BASE_URL = "https://screenvault.karthik-upadhyay98.workers.dev";
 
 let state: AppState = {
   status: "idle",
@@ -71,7 +37,6 @@ let isStarting = false;
 const processingSessions = new Set<string>();
 const preAllocationMap = new Map<string, Promise<PreAllocationResult>>();
 
-const lastCheckedAt = new Map<string, number>();
 let lastPreAllocateTime = 0;
 
 async function validateToken(account: StorageAccount): Promise<string> {
@@ -182,70 +147,22 @@ async function trySilentRefresh(account: StorageAccount): Promise<StorageAccount
   return refreshPromise;
 }
 
+// Single-account model: there's exactly one signed-in identity, used for
+// every recording. This just makes sure its token is fresh before use.
 async function selectBestAccount(): Promise<StorageAccount | null> {
   if (accounts.length === 0) return null;
-
+  let candidate = accounts[0];
   const now = Date.now();
-  const FIVE_MINUTES = 5 * 60 * 1000;
 
-  // Refresh stale quotas (older than 5 mins)
-  for (let i = 0; i < accounts.length; i++) {
-    const acc = accounts[i];
-    if (!acc.lastQuotaUpdate || now - acc.lastQuotaUpdate > FIVE_MINUTES) {
-      try {
-        const token = acc.accessToken;
-        // Only try quota if not obviously expired to prevent unnecessary 401s
-        if (!acc.invalid && acc.expiresAt > now) {
-          const quota = await getQuota(token);
-          accounts[i] = {
-            ...acc,
-            quotaTotal: quota.limit,
-            quotaUsed: quota.usage,
-            lastQuotaUpdate: now,
-          };
-        }
-      } catch (err) {
-        console.warn(`Quota refresh failed for ${acc.email}:`, err);
-      }
+  if (candidate.invalid || candidate.expiresAt < now + 60000) {
+    try {
+      candidate = await trySilentRefresh(candidate);
+    } catch (e) {
+      svLog("SELECTED_ACCOUNT_REFRESH_FAILED", { accountEmail: candidate.email, error: String(e) });
+      candidate.invalid = true;
+      candidate.invalidReason = "refresh_failed";
+      throw new Error(`Account ${candidate.email} needs reconnection.`);
     }
-  }
-
-  // Persist if any quotas were updated
-  const data_accounts = { sv_accounts: accounts };
-  await chrome.storage.local.set(data_accounts);
-
-  // Filter for valid accounts only, unless we have no choice
-  let validAccounts = accounts.filter(a => !a.invalid);
-  let pool = validAccounts.length > 0 ? validAccounts : accounts;
-
-  let candidate = pool.find((a) => a.isActive);
-  if (!candidate && pool.length > 0) {
-    candidate = [...pool].sort((a, b) => {
-      const aSpace = (a.quotaTotal || 1) - (a.quotaUsed || 0);
-      const bSpace = (b.quotaTotal || 1) - (b.quotaUsed || 0);
-      const aRatio = aSpace / (a.quotaTotal || 1);
-      const bRatio = bSpace / (b.quotaTotal || 1);
-      if (Math.abs(aRatio - bRatio) < 0.02) {
-        return (a.uploadSuccessCount || 0) - (b.uploadSuccessCount || 0);
-      }
-      return bRatio - aRatio;
-    })[0];
-  }
-
-  if (candidate) {
-    if (candidate.invalid || (candidate.expiresAt < now + 60000)) {
-      try {
-        candidate = await trySilentRefresh(candidate);
-      } catch (e) {
-        svLog("SELECTED_ACCOUNT_REFRESH_FAILED", { accountEmail: candidate.email, error: String(e) });
-        candidate.invalid = true;
-        candidate.invalidReason = "refresh_failed";
-        throw new Error(`Account ${candidate.email} needs reconnection.`);
-      }
-    }
-  }
-
-  if (candidate) {
   }
   return candidate;
 }
@@ -335,7 +252,7 @@ async function cleanupOldSessions() {
           const user = await getCurrentUser();
           if (session.backendVideoId) {
             await fetch(
-              `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${session.backendVideoId}`,
+              `${BACKEND_URL}/videos/${session.backendVideoId}`,
               {
                 method: "PATCH",
                 headers: {
@@ -507,6 +424,42 @@ function stopBadgeTimer() {
   chrome.action.setBadgeText({ text: "" });
 }
 
+// Reserves an R2 upload session and registers the video row immediately so
+// there's a real, working share link before recording even starts. Unlike
+// the old Drive flow, no folder resolution is needed — every recording
+// lands in the same shared bucket.
+async function preAllocateUpload(account: StorageAccount, title?: string): Promise<PreAllocationResult> {
+  const user = await getCurrentUser();
+  if (!user.workspaceId) throw new Error("No workspace found for this account.");
+
+  const { key, uploadId } = await initUpload(account.accessToken, user.workspaceId);
+
+  const fileName = `screenvault-${new Date().toISOString().slice(0, 10)}.webm`;
+  const finalTitle = title || fileName.replace(".webm", "");
+
+  let url = `${PLAYER_BASE_URL}/?title=${encodeURIComponent(finalTitle)}`;
+  try {
+    const videoRes = await fetch(`${BACKEND_URL}/videos`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${account.accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileId: key,
+        workspaceId: user.workspaceId,
+        title: finalTitle,
+        accountEmail: account.email,
+      }),
+    });
+    if (videoRes.ok) {
+      const data = await videoRes.json();
+      url = data.playerUrl;
+    }
+  } catch (err) {
+    console.warn("Pre-allocation video registration failed, will retry during syncBackend:", err);
+  }
+
+  return { id: key, uploadId, url, fileName, account };
+}
+
 chrome.runtime.onMessage.addListener(
   (msg: PopupMessage | any, sender, sendResponse) => {
     if (msg.type === "GET_STATE") {
@@ -574,7 +527,7 @@ chrome.runtime.onMessage.addListener(
         url: msg.url,
         timestamp: Date.now()
       });
-      // Increment success count for fairness logic
+      // Increment success count
       const accountIdx = accounts.findIndex((a) => a.email === msg.account);
       if (accountIdx !== -1) {
         accounts[accountIdx].uploadSuccessCount =
@@ -619,26 +572,6 @@ chrome.runtime.onMessage.addListener(
     } else if (msg.type === "SET_STATUS") {
       // Allow popup to switch UI state
       updateState({ status: msg.status });
-    } else if (msg.type === "SWITCH_PRIMARY_ACCOUNT") {
-      const updated = accounts.map(a => ({
-        ...a,
-        isPrimary: a.email === msg.email
-      }));
-      accounts = updated;
-      chrome.storage.local.set({ sv_accounts: updated }).then(() => {
-        const account = updated.find(a => a.isPrimary);
-        if (account) syncPrimaryAccount(account.accessToken, true);
-      });
-    } else if (msg.type === "SWITCH_UPLOAD_ACCOUNT") {
-      const updated = accounts.map(a => ({
-        ...a,
-        isActive: a.email === msg.email
-      }));
-      accounts = updated;
-      chrome.storage.local.set({ sv_accounts: updated }).then(() => {
-        const account = updated.find(a => a.isActive);
-        if (account) updateState({ uploadAccount: account.email });
-      });
     } else if (msg.type === "MIC_PERMISSION_REQUIRED") {
       // Preserve active recording sessions; only reset if session never initialized.
       if (!(state?.sessionId && state?.startedAt)) {
@@ -660,34 +593,21 @@ chrome.runtime.onMessage.addListener(
         return;
       }
       lastPreAllocateTime = now;
-      
+
       // PRE-WARM: Start offscreen document during the countdown to save ~500ms later
       startOffscreenDocument().catch(() => {});
 
       selectBestAccount()
         .then(async (bestAccount) => {
           if (bestAccount) {
-            const doAllocate = async (account: StorageAccount) => {
-              let folderId: string | undefined;
-              try {
-                const user = await getCurrentUser();
-                if (user.workspaceId) {
-                  folderId = await getWorkspaceFolderId(account, user.workspaceId);
-                }
-              } catch (err) {
-                console.warn("Failed to resolve workspace folder for pre-allocation:", err);
-              }
-              return preAllocateDriveFile(account, account.accessToken, { folderId });
-            };
-
-            let prom = doAllocate(bestAccount).catch(async (err) => {
+            let prom = preAllocateUpload(bestAccount).catch(async (err) => {
               if (err.message.includes("401") || err.message.includes("Token expired")) {
                 svLog("PREALLOCATION_RETRY", { accountEmail: bestAccount.email });
                 updateState({ errorMessage: "Restoring your account..." });
                 try {
                   const refreshed = await trySilentRefresh(bestAccount);
                   updateState({ errorMessage: null });
-                  return await doAllocate(refreshed);
+                  return await preAllocateUpload(refreshed);
                 } catch (refreshErr) {
                   await validateToken(bestAccount).catch(() => {});
                   throw err;
@@ -730,7 +650,7 @@ chrome.runtime.onMessage.addListener(
     } else if (msg.type === "SET_SESSION_STATUS") {
       const metaUpdate: Partial<SessionMetadata> = { status: msg.status };
       saveSessionMetadata(msg.sessionId, metaUpdate);
-      
+
       // Keep in processing set during all active processing states
       const activeStates = ["uploading", "finalizing", "enriching"];
       if (activeStates.includes(msg.status)) {
@@ -738,10 +658,10 @@ chrome.runtime.onMessage.addListener(
       } else {
         processingSessions.delete(msg.sessionId);
       }
-      
+
       // Update global app state if this is the active session
       if (state.sessionId === msg.sessionId) {
-        updateState({ status: msg.status as AppStatus });
+        updateState({ status: msg.status as AppState["status"] });
       }
     } else if (msg.type === "SAVE_SESSION_METADATA") {
       saveSessionMetadata(msg.sessionId, msg.metadata);
@@ -749,31 +669,6 @@ chrome.runtime.onMessage.addListener(
       removeSessionMetadata(msg.sessionId);
     } else if (msg.type === "GET_SESSION_METADATA") {
       getSessionMetadata(msg.sessionId).then(async (meta) => {
-        const now = Date.now();
-        const last = lastCheckedAt.get(msg.sessionId) || 0;
-        if (
-          meta &&
-          meta.status === "uploading" &&
-          meta.fileId &&
-          accounts.length > 0 &&
-          now - last > 5000
-        ) {
-          lastCheckedAt.set(msg.sessionId, now);
-          try {
-            const account = accounts.find((a) => a.id === meta.accountId);
-            if (!account) throw new Error("Account not found");
-
-            const token = account.accessToken;
-            const ready = await isFileReady(meta.fileId, token);
-            if (ready) {
-              await saveSessionMetadata(msg.sessionId, { status: "ready" });
-              meta.status = "ready";
-            }
-          } catch (e) {
-            console.error("Background readiness re-check failed:", e);
-          }
-        }
-
         // Check for long processing delay
         if (meta && meta.status === "uploading") {
           const now = Date.now();
@@ -812,25 +707,16 @@ async function recoverSessionHelper(sessionId: string) {
     const meta = await getSessionMetadata(sessionId);
     if (!meta) throw new Error("Session not found");
 
-    const account = accounts.find((a) => a.id === meta.accountId);
+    const account = accounts.find((a) => a.id === meta.accountId) || accounts[0];
     if (!account) {
       svLog("RECOVERY_ACCOUNT_MISSING", { sessionId, accountId: meta.accountId });
       await saveSessionMetadata(sessionId, { status: "failed" });
-      throw new Error(`Account pinned to this session (${meta.accountId}) is no longer available. Please reconnect the account to recover.`);
+      throw new Error(`No connected account available. Please sign in again to recover.`);
     }
 
-    let fileId = meta.fileId;
-
-    if (!fileId) {
-      try {
-        const token = account.accessToken;
-        const preAlloc = await preAllocateDriveFile(account, token);
-        fileId = preAlloc.id;
-      } catch (err) {
-        await validateToken(account).catch(() => {});
-        throw err;
-      }
-    }
+    // No pre-allocation step needed here: if meta.fileId/uploadId are
+    // missing (very old session), offscreen.ts's uploadWholeBlob will
+    // start a fresh R2 upload session on its own before uploading.
 
     let offscreenReadyTriggered = false;
     const readyListener = (msg: any) => {
@@ -849,7 +735,8 @@ async function recoverSessionHelper(sessionId: string) {
       chrome.runtime.sendMessage({
         type: "RECOVER_AND_UPLOAD",
         sessionId,
-        fileId,
+        fileId: meta.fileId,
+        uploadId: meta.uploadId,
         account,
         sv_user: storage.sv_user,
         sv_accounts: storage.sv_accounts,
@@ -917,56 +804,24 @@ async function connectAccount() {
       throw new Error("Failed to retrieve user identity from Google.");
     }
 
-    // Fetch quota details
-    const quotaReq = await fetch(
-      "https://www.googleapis.com/drive/v3/about?fields=storageQuota",
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      },
-    );
-    const quota = await quotaReq.json();
-
     const account: StorageAccount = {
       id: user.id,
       email: user.email,
       displayName: user.name,
       accessToken: token,
       expiresAt: Date.now() + 3500 * 1000,
-      quotaTotal: parseInt(quota.storageQuota?.limit || "0", 10),
-      quotaUsed: parseInt(quota.storageQuota?.usage || "0", 10),
       uploadSuccessCount: 0,
       uploadFailureCount: 0,
-      isPrimary: false,
-      isActive: false
+      isPrimary: true,
+      isActive: true,
     };
 
-    // Persist the new account, replacing any existing entry for the same user
-    const stored = await chrome.storage.local.get("sv_accounts");
-    let existingAccounts = (stored.sv_accounts || []) as StorageAccount[];
+    // Sync identity with backend (creates/links the user + workspace)
+    await syncPrimaryAccount(token, true);
 
-    // 1. Sync with backend (Always call to link/update)
-    // Force update if this is our first account or we have no session
-    const shouldForce = existingAccounts.length === 0;
-    await syncPrimaryAccount(token, shouldForce);
-
-    existingAccounts = existingAccounts.filter((a) => a.id !== account.id);
-    
-    // Safety: If first account, make it primary and active
-    if (existingAccounts.length === 0) {
-      account.isPrimary = true;
-      account.isActive = true;
-    } else {
-      // If we are connecting a new account, it becomes the active upload account by default
-      existingAccounts = existingAccounts.map(a => ({ ...a, isActive: false }));
-      account.isActive = true;
-    }
-    
-    existingAccounts.push(account);
-    accounts = existingAccounts;
-
-    await chrome.storage.local.set({
-      sv_accounts: accounts
-    });
+    // Single-account model: signing in replaces any previous account.
+    accounts = [account];
+    await chrome.storage.local.set({ sv_accounts: accounts });
 
     // Broadcast the update to the UI
     chrome.runtime
@@ -993,7 +848,7 @@ async function syncPrimaryAccount(token: string, forceUpdate = false) {
 
   try {
     const authRes = await fetch(
-      "https://screenvault-backend.karthik-upadhyay98.workers.dev/auth/google",
+      `${BACKEND_URL}/auth/google`,
       {
         method: "POST",
         headers: authHeaders,
@@ -1033,12 +888,13 @@ async function startRecording(target: AppState["target"]) {
   if (!target) return;
   isStarting = true;
 
-  // 1. Ensure we have an account to pre-allocate with
+  // 1. Ensure we have a signed-in account
   if (accounts.length === 0) {
     updateState({
       status: "error",
-      errorMessage: "No connected accounts. Please connect Google Drive.",
+      errorMessage: "Not signed in. Please sign in with Google.",
     });
+    isStarting = false;
     return;
   }
 
@@ -1060,27 +916,16 @@ async function startRecording(target: AppState["target"]) {
         throw new Error("No valid account available for recording.");
       }
 
-      const doAllocate = async (account: StorageAccount) => {
-        let folderId: string | undefined;
-        try {
-          const user = await getCurrentUser();
-          if (user.workspaceId) {
-            folderId = await getWorkspaceFolderId(account, user.workspaceId);
-          }
-        } catch (err) {
-          console.warn("Failed to resolve workspace folder:", err);
-        }
-        return preAllocateDriveFile(account, account.accessToken, { folderId });
-      };
+      const title = (target as any).userTitle || target.tabTitle || "";
 
-      allocationProm = doAllocate(activeAccount).catch(async (err) => {
+      allocationProm = preAllocateUpload(activeAccount, title).catch(async (err) => {
         if (err.message.includes('Token expired') || err.message.includes('401')) {
           svLog("PREALLOCATION_RETRY", { accountEmail: activeAccount!.email });
           updateState({ errorMessage: "Restoring your account..." });
           try {
             activeAccount = await trySilentRefresh(activeAccount!);
             updateState({ errorMessage: null });
-            return await doAllocate(activeAccount!);
+            return await preAllocateUpload(activeAccount!, title);
           } catch (refreshErr) {
             await validateToken(activeAccount!).catch(() => {});
             throw err;
@@ -1098,6 +943,8 @@ async function startRecording(target: AppState["target"]) {
     }
 
     // 3. BACKGROUND: Backend video creation (Do NOT await here to speed up picker)
+    // createVideo is idempotent per fileId, so this is a safety net in case
+    // preAllocateUpload's own registration call failed.
     const syncBackend = async () => {
       try {
         const { sv_user } = (await chrome.storage.local.get("sv_user")) as { sv_user: BackendUser };
@@ -1119,7 +966,7 @@ async function startRecording(target: AppState["target"]) {
         const title = (target as any).userTitle || target.tabTitle || (allocation.fileName?.replace(".webm", "") ?? "");
 
         const postVideo = async (token: string) => {
-          return fetch("https://screenvault-backend.karthik-upadhyay98.workers.dev/videos", {
+          return fetch(`${BACKEND_URL}/videos`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${token}`,
@@ -1160,6 +1007,7 @@ async function startRecording(target: AppState["target"]) {
             playerUrl,
             encryptedFileId,
             fileId: allocation.id,
+            uploadId: allocation.uploadId,
             accountEmail: allocation.account.email,
             backendSynced: true,
           });
@@ -1180,6 +1028,7 @@ async function startRecording(target: AppState["target"]) {
     // 4. Critical UI State Update
     const startedAt = Date.now();
     const fileId = allocation.id;
+    const uploadId = allocation.uploadId;
     const account = allocation.account;
     const title = (target as any).userTitle || target.tabTitle || (allocation.fileName?.replace(".webm", "") ?? "Untitled Recording");
 
@@ -1187,6 +1036,7 @@ async function startRecording(target: AppState["target"]) {
     const metaSaveProm = saveSessionMetadata(sessionId, {
       sessionId,
       fileId,
+      uploadId,
       title,
       accountId: allocation.account.id,
       accountEmail: allocation.account.email,
@@ -1221,13 +1071,13 @@ async function startRecording(target: AppState["target"]) {
       chrome.runtime.sendMessage({
         type: "START_SCREEN",
         fileId,
+        uploadId,
         sessionId,
         includeMic: target.includeMic !== false,
         account,
         sv_user: storage.sv_user,
         sv_accounts: storage.sv_accounts,
         title,
-        folderId: allocation.folderId,
       } as OffscreenMessage);
 
       // Add timeout fallback for CAPTURE_STARTED
@@ -1283,7 +1133,7 @@ function stopRecording() {
   });
 
   stopBadgeTimer();
-  
+
   // Transition to processing state immediately
   updateState({ status: "uploading", uploadProgress: 0 });
 
@@ -1329,7 +1179,7 @@ function stopRecording() {
       let url = sessionMeta?.playerUrl;
       if (!url) {
         let encryptedId = sessionMeta?.encryptedFileId;
-        
+
         if (!encryptedId) {
           // Wait up to 3s for syncBackend to write encryptedFileId
           for (let i = 0; i < 6; i++) {
@@ -1343,7 +1193,6 @@ function stopRecording() {
           }
         }
 
-        const PLAYER_BASE_URL = 'https://screenvault.karthik-upadhyay98.workers.dev';
         url = `${PLAYER_BASE_URL}/?title=${encodeURIComponent(title)}`;
         if (encryptedId) {
           url += `&id=${encryptedId}`;
@@ -1361,19 +1210,17 @@ function stopRecording() {
   }
 }
 
-// handleRecordingComplete function removed since upload is handled in offscreen.ts
-
 // Migration and Cleanup Logic
 async function runIdentityMigration() {
-  
+
   try {
     const res = await chrome.storage.local.get(["sv_sessions", "sv_accounts"]);
     const sv_sessions = (res.sv_sessions || {}) as Record<string, SessionMetadata>;
     const sv_accounts = (res.sv_accounts || []) as StorageAccount[];
-    
+
     let cleanedCount = 0;
     let staleRemovedCount = 0;
-    
+
     const updatedSessions: Record<string, SessionMetadata> = {};
     const accountEmails = new Set(sv_accounts.map(a => a.email));
 
@@ -1385,7 +1232,7 @@ async function runIdentityMigration() {
       }
 
       // 2. Identify stale/orphaned sessions
-      // If it's ready and older than 7 days, we can remove the local optimistic record 
+      // If it's ready and older than 7 days, we can remove the local optimistic record
       // as it should be in the backend now.
       const isOld = session.startedAt && (Date.now() - session.startedAt > 7 * 24 * 60 * 60 * 1000);
       const isSynced = session.backendSynced || session.status === 'ready';
@@ -1399,7 +1246,7 @@ async function runIdentityMigration() {
     }
 
     await chrome.storage.local.set({ sv_sessions: updatedSessions });
-    
+
   } catch (err) {
     console.error("[SV][SESSION_MIGRATION] Failed:", err);
   }

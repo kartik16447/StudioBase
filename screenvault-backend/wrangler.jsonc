@@ -54,6 +54,12 @@
 			"id": "5f680a41aa05491fa51fffb09052e019"
 		}
 	],
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "screenvault-videos"
+		}
+	],
 	"triggers": {
 		"crons": ["0 0 * * *"]
 	}

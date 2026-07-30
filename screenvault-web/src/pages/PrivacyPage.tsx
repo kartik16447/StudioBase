@@ -14,7 +14,7 @@ export function PrivacyPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', fontSize: '0.9375rem' }}>
           <section>
             <h2 style={{ fontSize: '1.0625rem', fontWeight: 500, color: '#fff', marginBottom: '0.5rem' }}>What we collect</h2>
-            <p>RecVault collects your Google account email and name for authentication. We store a reference to your Google Drive file IDs so we can generate shareable playback links. We do <strong>not</strong> store the video content itself — all recordings live exclusively in your own Google Drive.</p>
+            <p>RecVault collects your Google account email and name for authentication. Recordings are stored in our own Cloudflare R2 storage, associated with your workspace.</p>
           </section>
 
           <section>
@@ -28,13 +28,13 @@ export function PrivacyPage() {
           </section>
 
           <section>
-            <h2 style={{ fontSize: '1.0625rem', fontWeight: 500, color: '#fff', marginBottom: '0.5rem' }}>Your Google Drive data</h2>
-            <p>RecVault uses Google Drive only to upload recordings on your behalf, into a folder you choose. We request the <code style={{ color: '#93c5fd', fontSize: '0.875rem' }}>drive.file</code> scope — meaning we can only access files that RecVault itself creates, not your broader Drive.</p>
+            <h2 style={{ fontSize: '1.0625rem', fontWeight: 500, color: '#fff', marginBottom: '0.5rem' }}>Your Google account data</h2>
+            <p>RecVault uses Google Sign-In only to verify your identity — we request the <code style={{ color: '#93c5fd', fontSize: '0.875rem' }}>email</code> and <code style={{ color: '#93c5fd', fontSize: '0.875rem' }}>profile</code> scopes only, and do not access your Google Drive or any other Google data.</p>
           </section>
 
           <section>
             <h2 style={{ fontSize: '1.0625rem', fontWeight: 500, color: '#fff', marginBottom: '0.5rem' }}>Data retention</h2>
-            <p>You can delete recordings from your dashboard at any time. Deleting a recording removes our database reference; the file in Google Drive is also permanently deleted. Waitlist emails are retained until the waitlist is closed or you request removal.</p>
+            <p>You can delete recordings from your dashboard at any time. Deleting a recording removes our database reference and permanently deletes the underlying file from our storage. Waitlist emails are retained until the waitlist is closed or you request removal.</p>
           </section>
 
           <section>

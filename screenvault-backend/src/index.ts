@@ -22,6 +22,7 @@ interface Env {
 	DB: D1Database;
 	TOKEN_CACHE: KVNamespace;
 	ADMIN_EMAIL: string;
+	BUCKET: R2Bucket;
 }
 
 export default {
@@ -47,6 +48,14 @@ export default {
 			else if (method === 'DELETE') response = await deleteVideo(request, env);
 			else if (method === 'GET') response = await getVideo(request, env);
 			else response = jsonError('Method Not Allowed', 'METHOD_NOT_ALLOWED', 405);
+		} else if (pathname === '/uploads/init' && method === 'POST') {
+			response = await initUpload(request, env);
+		} else if (pathname === '/uploads/part' && method === 'PUT') {
+			response = await uploadPart(request, env);
+		} else if (pathname === '/uploads/complete' && method === 'POST') {
+			response = await completeUpload(request, env);
+		} else if (pathname === '/uploads/abort' && method === 'POST') {
+			response = await abortUpload(request, env);
 		} else if (pathname === '/usage/update' && method === 'POST') {
 			response = await updateUsage(request, env);
 		} else if (pathname === '/workspace/invite' && method === 'POST') {
@@ -482,12 +491,104 @@ async function createVideo(request: Request, env: any) {
 		// Fire and forget (don't block main flow)
 		recordEvent(env, { type: 'recording_started', userId: user.id, workspaceId, videoId: id, sessionId, metadata: { title } }).catch(() => {});
 
-		return Response.json({ 
-			id, 
+		return Response.json({
+			id,
 			encryptedFileId,
 			accountEmail,
 			playerUrl: `${PLAYER_BASE_URL}/?id=${encryptedFileId}&title=${encodeURIComponent(title || 'Recording')}${sessionId ? '&sid=' + sessionId : ''}`
 		});
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+// Starts an R2 multipart upload for a new recording. The returned `key`
+// is the final R2 object key for the whole recording's lifetime — unlike
+// the old Drive flow there's no separate "placeholder" file to swap later.
+async function initUpload(request: Request, env: any) {
+	try {
+		const user = await getUserFromToken(request, env);
+		const body = (await request.json()) as any;
+		const { workspaceId } = body;
+
+		if (!workspaceId) return jsonError('workspaceId is required', 'VALIDATION_ERROR');
+
+		const membership = await env.DB.prepare('SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?')
+			.bind(workspaceId, user.id)
+			.first();
+		if (!membership) return jsonError('Unauthorized workspace access', 'FORBIDDEN', 403);
+
+		const key = `videos/${workspaceId}/${crypto.randomUUID()}.webm`;
+		const multipartUpload = await env.BUCKET.createMultipartUpload(key, {
+			httpMetadata: { contentType: 'video/webm' },
+		});
+
+		return Response.json({ key, uploadId: multipartUpload.uploadId });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+// Proxies one multipart part into R2. Body is the raw chunk bytes.
+// R2 requires parts to be >=5MiB except the final one.
+async function uploadPart(request: Request, env: any) {
+	try {
+		await getUserFromToken(request, env);
+		const url = new URL(request.url);
+		const key = url.searchParams.get('key');
+		const uploadId = url.searchParams.get('uploadId');
+		const partNumber = parseInt(url.searchParams.get('partNumber') || '', 10);
+
+		if (!key || !uploadId || !partNumber) {
+			return jsonError('key, uploadId and partNumber are required', 'VALIDATION_ERROR');
+		}
+		if (!request.body) return jsonError('Missing request body', 'VALIDATION_ERROR');
+
+		const multipartUpload = env.BUCKET.resumeMultipartUpload(key, uploadId);
+		const uploadedPart = await multipartUpload.uploadPart(partNumber, request.body);
+
+		return Response.json({ partNumber: uploadedPart.partNumber, etag: uploadedPart.etag });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+// Finalizes the R2 multipart upload. Metadata registration (the `videos`
+// row) still happens via the existing POST /videos -> createVideo, with
+// `fileId` set to this same `key` — reuses createVideo's usage-limit and
+// workspace-membership checks instead of duplicating them here.
+async function completeUpload(request: Request, env: any) {
+	try {
+		await getUserFromToken(request, env);
+		const body = (await request.json()) as any;
+		const { key, uploadId, parts } = body;
+
+		if (!key || !uploadId || !Array.isArray(parts)) {
+			return jsonError('key, uploadId and parts are required', 'VALIDATION_ERROR');
+		}
+
+		const multipartUpload = env.BUCKET.resumeMultipartUpload(key, uploadId);
+		const object = await multipartUpload.complete(parts);
+
+		return Response.json({ key, size: object.size });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+// Cleans up an in-progress multipart upload that's being abandoned
+// (e.g. the recording was discarded before finishing).
+async function abortUpload(request: Request, env: any) {
+	try {
+		await getUserFromToken(request, env);
+		const body = (await request.json()) as any;
+		const { key, uploadId } = body;
+		if (!key || !uploadId) return jsonError('key and uploadId are required', 'VALIDATION_ERROR');
+
+		const multipartUpload = env.BUCKET.resumeMultipartUpload(key, uploadId);
+		await multipartUpload.abort();
+
+		return Response.json({ success: true });
 	} catch (err: any) {
 		return jsonError(err.message);
 	}
@@ -716,14 +817,12 @@ async function deleteVideo(request: Request, env: any) {
 		const user = await getUserFromToken(request, env);
 		const url = new URL(request.url);
 		const id = url.pathname.split('/').filter(Boolean).pop();
-		const body = await request.json().catch(() => ({})) as any;
-		const driveToken = body.driveToken;
 
 		console.log(`[SV][DELETE_VIDEO] Attempting to delete video: ${id} by user: ${user.email}`);
 
 		if (!id) return jsonError('Video ID is required', 'VALIDATION_ERROR');
 
-		const video = (await env.DB.prepare('SELECT ownerId, workspaceId, title, fileId, fileSizeBytes FROM videos WHERE id = ?').bind(id).first()) as any;
+		const video = (await env.DB.prepare('SELECT ownerId, workspaceId, title, fileId, fileSizeBytes, storageProvider FROM videos WHERE id = ?').bind(id).first()) as any;
 
 		if (!video) {
 			console.warn(`[SV][DELETE_VIDEO] Video not found: ${id}`);
@@ -740,12 +839,9 @@ async function deleteVideo(request: Request, env: any) {
 			return jsonError('Only the video owner or workspace owner can delete it', 'FORBIDDEN', 403);
 		}
 
-		if (driveToken && video.fileId) {
-			console.log(`[SV][DELETE_VIDEO] Performing internal Drive deletion for fileId`);
-			fetch(`https://www.googleapis.com/drive/v3/files/${video.fileId}`, {
-				method: 'DELETE',
-				headers: { Authorization: `Bearer ${driveToken}` }
-			}).catch(err => console.error("[SV][DELETE_VIDEO] Internal Drive delete failed:", err));
+		if (video.fileId && video.storageProvider === 'r2') {
+			console.log(`[SV][DELETE_VIDEO] Performing R2 deletion for key`);
+			env.BUCKET.delete(video.fileId).catch((err: any) => console.error("[SV][DELETE_VIDEO] R2 delete failed:", err));
 		}
 
 		await env.DB.prepare('UPDATE videos SET deletedAt = ? WHERE id = ?').bind(Date.now(), id).run();

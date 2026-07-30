@@ -27,7 +27,7 @@ export function LoginPage() {
       window.google.accounts.oauth2
         .initTokenClient({
           client_id: GOOGLE_CLIENT_ID,
-          scope: 'email profile https://www.googleapis.com/auth/drive',
+          scope: 'email profile',
           callback: async (resp: any) => {
             if (resp.error) {
               setError('Google sign-in was cancelled or failed.');
@@ -100,7 +100,7 @@ export function LoginPage() {
       window.google.accounts.oauth2
         .initTokenClient({
           client_id: GOOGLE_CLIENT_ID,
-          scope: 'email profile https://www.googleapis.com/auth/drive',
+          scope: 'email profile',
           callback: async (resp: any) => {
             if (resp.error) {
               setError('Google sign-in was cancelled or failed.');

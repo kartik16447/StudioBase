@@ -13,15 +13,16 @@ export type AppStatus =
   
 export interface PreAllocationResult {
   id: string;
+  uploadId: string;
   url: string;
   fileName: string;
   account: StorageAccount;
-  folderId?: string;
 }
 
 export interface SessionMetadata {
   sessionId: string;
   fileId: string;
+  uploadId?: string;
   title?: string;
   accountId: string;
   
@@ -74,17 +75,12 @@ export interface StorageAccount {
   displayName: string;
   accessToken: string;
   expiresAt: number;
-  quotaTotal: number;
-  quotaUsed: number;
-  lastQuotaUpdate?: number;
   uploadSuccessCount?: number;
   uploadFailureCount?: number;
   invalid?: boolean;
   invalidReason?: string;
   isPrimary: boolean;
   isActive: boolean;
-  driveRootFolderId?: string;
-  workspaceMappings?: Record<string, string>; // workspaceId -> folderId
 }
 
 export interface BackendUser {
@@ -146,13 +142,13 @@ export type OffscreenMessage =
   | {
       type: 'START_SCREEN';
       fileId: string;
+      uploadId: string;
       sessionId: string;
       includeMic?: boolean;
       account: StorageAccount;
       sv_user?: BackendUser;
       sv_accounts?: StorageAccount[];
       title?: string;
-      folderId?: string;
     }
   | { type: 'STOP'; account: StorageAccount | null }
   | { type: 'CAPTURE_STARTED' }
@@ -161,10 +157,11 @@ export type OffscreenMessage =
   | { type: 'UPLOAD_COMPLETE'; url: string; account: string }
   | { type: 'RECORDING_FINISHED'; blobUrl: string }
   | { type: 'MIC_PERMISSION_REQUIRED' }
-  | { 
-      type: 'RECOVER_AND_UPLOAD'; 
-      sessionId: string; 
-      fileId: string; 
+  | {
+      type: 'RECOVER_AND_UPLOAD';
+      sessionId: string;
+      fileId: string;
+      uploadId?: string;
       account: StorageAccount;
       sv_user?: BackendUser;
       sv_accounts?: StorageAccount[];
