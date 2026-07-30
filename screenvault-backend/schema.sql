@@ -6,7 +6,8 @@ CREATE TABLE users (
   picture TEXT,
   createdAt INTEGER,
   updatedAt INTEGER,
-  lastLoginAt INTEGER
+  lastLoginAt INTEGER,
+  storageUsedBytes INTEGER DEFAULT 0
 );
 
 -- LINKED ACCOUNTS
@@ -55,7 +56,8 @@ CREATE TABLE videos (
   previewUrl TEXT,
   encryptedFileId TEXT,
   sessionId TEXT,
-  deletedAt INTEGER
+  deletedAt INTEGER,
+  fileSizeBytes INTEGER DEFAULT 0
 );
 
 -- USAGE STATS

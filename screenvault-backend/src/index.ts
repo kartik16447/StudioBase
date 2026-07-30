@@ -63,6 +63,10 @@ export default {
 			response = await getMetricsSummary(request, env);
 		} else if (pathname === '/admin' && method === 'GET') {
 			response = await handleAdmin(request, env);
+		} else if (pathname === '/admin/waitlist' && method === 'GET') {
+			response = await adminGetWaitlist(request, env);
+		} else if (pathname === '/admin/waitlist/approve' && method === 'POST') {
+			response = await adminApproveWaitlist(request, env);
 		} else if (pathname === '/workspace/members' && method === 'GET') {
 			response = await listWorkspaceMembers(request, env);
 		} else if (pathname === '/workspace/invites' && method === 'GET') {
@@ -75,6 +79,10 @@ export default {
 			response = await logInviteCopy(request, env);
 		} else if (pathname.startsWith('/accounts/') && method === 'PATCH') {
 			response = await updateAccount(request, env);
+		} else if (pathname === '/waitlist' && method === 'POST') {
+			response = await joinWaitlist(request, env);
+		} else if (pathname === '/account' && method === 'GET') {
+			response = await getAccount(request, env);
 		} else if (pathname === '/logs' && method === 'POST') {
 			response = await handleExtensionLogs(request, env);
 		} else if (pathname === '/admin/migrate-file-ids' && method === 'POST') {
@@ -122,10 +130,41 @@ async function runMaintenance(env: any) {
 	}
 }
 
+function isAdmin(email: string, env: Env): boolean {
+	const admins = [env.ADMIN_EMAIL, 'kartik.upadhyay@foyr.com'].filter(Boolean);
+	return admins.includes(email);
+}
+
+async function adminGetWaitlist(request: Request, env: Env) {
+	try {
+		const user = await getUserFromToken(request, env);
+		if (!isAdmin(user.email, env)) return jsonError('Unauthorized', 'UNAUTHORIZED', 401);
+		const { results } = await env.DB.prepare(
+			'SELECT id, email, createdAt, approvedAt FROM waitlist ORDER BY createdAt DESC'
+		).all();
+		return Response.json({ waitlist: results || [] });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+async function adminApproveWaitlist(request: Request, env: Env) {
+	try {
+		const user = await getUserFromToken(request, env);
+		if (!isAdmin(user.email, env)) return jsonError('Unauthorized', 'UNAUTHORIZED', 401);
+		const { id } = (await request.json()) as any;
+		if (!id) return jsonError('id required', 'VALIDATION_ERROR');
+		await env.DB.prepare('UPDATE waitlist SET approvedAt = ? WHERE id = ?').bind(Date.now(), id).run();
+		return Response.json({ success: true });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
 async function handleAdmin(request: Request, env: Env) {
 	try {
 		const user = await getUserFromToken(request, env);
-		if (user.email !== env.ADMIN_EMAIL) {
+		if (!isAdmin(user.email, env)) {
 			return jsonError('Unauthorized', 'UNAUTHORIZED', 401);
 		}
 
@@ -356,6 +395,13 @@ async function createVideo(request: Request, env: any) {
 			return jsonError('fileId and workspaceId are required', 'VALIDATION_ERROR');
 		}
 
+		// Enforce 500MB storage limit per user
+		const STORAGE_LIMIT_BYTES = 500 * 1024 * 1024;
+		const storageRow = (await env.DB.prepare('SELECT storageUsedBytes FROM users WHERE id = ?').bind(user.id).first()) as any;
+		if ((storageRow?.storageUsedBytes || 0) >= STORAGE_LIMIT_BYTES) {
+			return jsonError('Storage limit reached (500MB). Delete old recordings to free space.', 'STORAGE_LIMIT', 429);
+		}
+
 		// Validate workspace membership
 		const membership = await env.DB.prepare('SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?')
 			.bind(workspaceId, user.id)
@@ -564,7 +610,7 @@ async function updateVideo(request: Request, env: any) {
 
 		if (!id || id === 'videos') return jsonError('Video ID is required');
 
-		const video = (await env.DB.prepare('SELECT ownerId, workspaceId FROM videos WHERE id = ? AND deletedAt IS NULL')
+		const video = (await env.DB.prepare('SELECT ownerId, workspaceId, fileSizeBytes FROM videos WHERE id = ? AND deletedAt IS NULL')
 			.bind(id)
 			.first()) as any;
 
@@ -620,6 +666,10 @@ async function updateVideo(request: Request, env: any) {
 			sets.push('actualDurationMs = ?');
 			params.push(body.actualDurationMs);
 		}
+		if (body.fileSizeBytes) {
+			sets.push('fileSizeBytes = ?');
+			params.push(body.fileSizeBytes);
+		}
 		if (body.delete === true) {
 			sets.push('deletedAt = ?');
 			params.push(now);
@@ -635,6 +685,12 @@ async function updateVideo(request: Request, env: any) {
 			.run();
 
 		if (body.status === 'ready') {
+			// Only increment storage on first transition to ready (fileSizeBytes not yet set)
+			if (body.fileSizeBytes > 0 && !video.fileSizeBytes) {
+				await env.DB.prepare('UPDATE users SET storageUsedBytes = storageUsedBytes + ? WHERE id = ?')
+					.bind(body.fileSizeBytes, user.id)
+					.run();
+			}
 			console.log(JSON.stringify({ type: 'upload_success', userId: user.id, workspaceId: video.workspaceId, videoId: id, sessionId }));
 			recordEvent(env, { type: 'upload_success', userId: user.id, workspaceId: video.workspaceId, videoId: id, sessionId }).catch(() => {});
 		} else if (body.status === 'failed') {
@@ -667,7 +723,7 @@ async function deleteVideo(request: Request, env: any) {
 
 		if (!id) return jsonError('Video ID is required', 'VALIDATION_ERROR');
 
-		const video = (await env.DB.prepare('SELECT ownerId, workspaceId, title, fileId FROM videos WHERE id = ?').bind(id).first()) as any;
+		const video = (await env.DB.prepare('SELECT ownerId, workspaceId, title, fileId, fileSizeBytes FROM videos WHERE id = ?').bind(id).first()) as any;
 
 		if (!video) {
 			console.warn(`[SV][DELETE_VIDEO] Video not found: ${id}`);
@@ -692,7 +748,12 @@ async function deleteVideo(request: Request, env: any) {
 			}).catch(err => console.error("[SV][DELETE_VIDEO] Internal Drive delete failed:", err));
 		}
 
-		const result = await env.DB.prepare('UPDATE videos SET deletedAt = ? WHERE id = ?').bind(Date.now(), id).run();
+		await env.DB.prepare('UPDATE videos SET deletedAt = ? WHERE id = ?').bind(Date.now(), id).run();
+		if (video.fileSizeBytes > 0) {
+			await env.DB.prepare('UPDATE users SET storageUsedBytes = MAX(0, storageUsedBytes - ?) WHERE id = ?')
+				.bind(video.fileSizeBytes, user.id)
+				.run();
+		}
 		console.log(`[SV][DELETE_VIDEO] Successfully soft-deleted video: ${video.title} (${id})`);
 
 		return Response.json({ success: true });
@@ -1278,6 +1339,40 @@ async function getUserFromToken(request: Request, env: Env) {
 	return userInfo;
 }
 
+async function joinWaitlist(request: Request, env: any) {
+	try {
+		const body = (await request.json()) as any;
+		const email = (body.email || '').trim().toLowerCase();
+		if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+			return jsonError('Valid email required', 'VALIDATION_ERROR');
+		}
+		const now = Date.now();
+		await env.DB.prepare(
+			'INSERT OR IGNORE INTO waitlist (id, email, createdAt) VALUES (?, ?, ?)'
+		).bind(crypto.randomUUID(), email, now).run();
+		console.log(`[SV][WAITLIST] ${email}`);
+		return Response.json({ success: true });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+async function getAccount(request: Request, env: any) {
+	try {
+		const user = await getUserFromToken(request, env);
+		const row = (await env.DB.prepare('SELECT storageUsedBytes FROM users WHERE id = ?').bind(user.id).first()) as any;
+		const storageUsedBytes = row?.storageUsedBytes || 0;
+		const storageLimitBytes = 500 * 1024 * 1024;
+		return Response.json({
+			storageUsedBytes,
+			storageLimitBytes,
+			storageRemainingBytes: Math.max(0, storageLimitBytes - storageUsedBytes),
+		});
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
 async function getMetricsSummary(request: Request, env: any) {
 	try {
 		const user = await getUserFromToken(request, env);
@@ -1494,7 +1589,7 @@ async function migrateFileIds(request: Request, env: Env) {
 	try {
 		const user = await getUserFromToken(request, env);
 		// Admin only
-		if (user.email !== env.ADMIN_EMAIL) {
+		if (!isAdmin(user.email, env)) {
 			return jsonError('Unauthorized', 'UNAUTHORIZED', 401);
 		}
 

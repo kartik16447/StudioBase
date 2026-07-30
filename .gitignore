@@ -12,3 +12,4 @@ graphify-out
 .graphifyignore
 *.pem
 *.crx
+*.zip

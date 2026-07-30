@@ -195,7 +195,7 @@ export function LibraryPage() {
         body: JSON.stringify({ workspaceId: user.workspaceId }),
       });
       const data = await res.json();
-      const fullUrl = data.joinUrl || `${VIEWER_BASE}/#/invite/${data.token}`;
+      const fullUrl = data.joinUrl || `https://screenvault-web.pages.dev/invite/${data.token}`;
       setInviteUrl(fullUrl);
       await navigator.clipboard.writeText(fullUrl);
       fetchInvites();

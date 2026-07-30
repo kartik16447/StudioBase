@@ -46,7 +46,19 @@
       "Bash(git checkout *)",
       "Bash(npx wrangler *)",
       "Bash(git merge *)",
-      "Bash(git commit -m 'chore: update Claude settings *)"
+      "Bash(git commit -m 'chore: update Claude settings *)",
+      "Bash(git branch *)",
+      "Bash(grep -v \"\\\\.zip$\")",
+      "Bash(node_modules/typescript/bin/tsc --noEmit)",
+      "Read(//private/tmp/**)",
+      "Bash(unzip -o \"/Users/kartikupadhyay/Downloads/recvault beta landing page-handoff \\(1\\).zip\" -d recvault_landing)",
+      "Bash(/Users/kartikupadhyay/Downloads/Screnvaultmaster/screenvault-backend/node_modules/.bin/wrangler pages *)",
+      "Bash(zip -r /Users/kartikupadhyay/Downloads/recvault-beta-v1.1.0-cws.zip dist/ -x \"*.DS_Store\")",
+      "Bash(ls -lh ~/Downloads/recvault-beta-v1.1.0-cws.zip 2>/dev/null || echo \"not found\")",
+      "Bash(curl -sL \"https://screenvault.karthik-upadhyay98.workers.dev/?id=test123&title=test\" -o /private/tmp/claude-501/-Users-kartikupadhyay-Downloads-Screnvaultmaster/3a670837-6c64-4aa8-8354-4613bcb7d16f/scratchpad/player.html -w \"HTTP_STATUS:%{http_code} CONTENT_TYPE:%{content_type} SIZE:%{size_download}\\\\n\")",
+      "Bash(curl -sI \"https://screenvault-proxy.karthik-upadhyay98.workers.dev/?id=test123\")",
+      "Bash(curl -s \"https://screenvault-proxy.karthik-upadhyay98.workers.dev/meta?id=test123\" -w \"\\\\nSTATUS:%{http_code}\\\\n\")",
+      "Bash(curl -sI \"https://screenvault.karthik-upadhyay98.workers.dev/\")"
     ]
   }
 }

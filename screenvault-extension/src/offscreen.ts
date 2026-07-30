@@ -785,7 +785,8 @@ function startMediaRecorder(stream: MediaStream) {
                 status: 'ready',
                 duration,
                 actualDurationMs: finalActualDurationMs,
-                sessionId: activeSessionId
+                sessionId: activeSessionId,
+                fileSizeBytes: uploadedBytes
               })
             }).then(() => {
                 svLog("BACKEND_FINALIZATION_COMPLETE", { sessionId: activeSessionId, timestamp: Date.now() });

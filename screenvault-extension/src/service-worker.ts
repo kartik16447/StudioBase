@@ -475,13 +475,20 @@ async function removeSessionMetadata(sessionId: string) {
   return metadataQueue;
 }
 
+let _offscreenCreatePromise: Promise<void> | null = null;
+
 async function startOffscreenDocument() {
   if (await chrome.offscreen.hasDocument()) return;
-  await chrome.offscreen.createDocument({
+  if (_offscreenCreatePromise) return _offscreenCreatePromise;
+  _offscreenCreatePromise = chrome.offscreen.createDocument({
     url: "offscreen.html",
     reasons: [chrome.offscreen.Reason.USER_MEDIA],
     justification: "Recording screen and microphone",
-  });
+  }).catch(err => {
+    // Another call may have already created it — swallow the duplicate error
+    if (!String(err).includes("single offscreen document")) throw err;
+  }).finally(() => { _offscreenCreatePromise = null; });
+  return _offscreenCreatePromise;
 }
 
 function startBadgeTimer(startedAt: number) {
@@ -589,6 +596,10 @@ chrome.runtime.onMessage.addListener(
         });
       }
       stopBadgeTimer();
+
+      if (msg.url) {
+        chrome.tabs.create({ url: msg.url });
+      }
     } else if (msg.type === "RECORDING_ERROR") {
       stopBadgeTimer();
       if (

@@ -430,6 +430,6 @@ btnTryAgain.addEventListener("click", () => {
 
 document.getElementById("dashboardBtn")?.addEventListener("click", () => {
   chrome.tabs.create({
-    url: "https://screenvault-web.pages.dev",
+    url: "https://screenvault-web.pages.dev/library",
   });
 });

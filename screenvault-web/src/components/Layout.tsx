@@ -13,7 +13,10 @@ interface Workspace {
 
 export function Layout() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinLink, setJoinLink] = useState('');
   const navigate = useNavigate();
   const user = getUser();
 
@@ -23,8 +26,8 @@ export function Layout() {
 
     safeFetch(`${API_BASE}/workspaces`)
       .then(r => r.json())
-      .then(data => setWorkspaces(data.workspaces || []))
-      .catch(() => {});
+      .then(data => { setWorkspaces(data.workspaces || []); setWorkspacesLoaded(true); })
+      .catch(() => setWorkspacesLoaded(true));
   }, []);
 
   const switchWorkspace = async (workspaceId: string) => {
@@ -47,6 +50,17 @@ export function Layout() {
     navigate('/login');
   };
 
+  const handleJoinSubmit = () => {
+    const raw = joinLink.trim();
+    if (!raw) return;
+    // extract UUID token from any invite URL format
+    const match = raw.match(/invite\/([a-f0-9-]{36})/i);
+    const token = match ? match[1] : raw;
+    setShowJoinModal(false);
+    setJoinLink('');
+    navigate(`/invite/${token}`);
+  };
+
   const navStyle = ({ isActive }: { isActive: boolean }) => ({
     display: 'flex', alignItems: 'center', gap: '0.75rem',
     padding: '0.75rem 1rem', borderRadius: '12px', textDecoration: 'none',
@@ -58,6 +72,68 @@ export function Layout() {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
+      {/* Join workspace modal */}
+      {showJoinModal && (
+        <div
+          onClick={() => setShowJoinModal(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1000, padding: '1rem',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#09090B', border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '1.25rem', padding: '2rem', width: '100%', maxWidth: '420px',
+            }}
+          >
+            <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', marginBottom: '0.5rem' }}>
+              Join a workspace
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: '#71717A', marginBottom: '1.25rem' }}>
+              Paste an invite link you received (any format works).
+            </p>
+            <input
+              autoFocus
+              value={joinLink}
+              onChange={e => setJoinLink(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleJoinSubmit()}
+              placeholder="https://screenvault-web.pages.dev/invite/..."
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#fff', padding: '0.75rem 1rem', borderRadius: '10px',
+                fontSize: '0.875rem', outline: 'none', marginBottom: '1rem',
+              }}
+            />
+            <div style={{ display: 'flex', gap: '0.75rem' }}>
+              <button
+                onClick={() => { setShowJoinModal(false); setJoinLink(''); }}
+                style={{
+                  flex: 1, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+                  color: '#A1A1AA', padding: '0.75rem', borderRadius: '9999px',
+                  fontWeight: 600, cursor: 'pointer', fontSize: '0.875rem',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleJoinSubmit}
+                disabled={!joinLink.trim()}
+                style={{
+                  flex: 1, background: joinLink.trim() ? '#3b82f6' : 'rgba(59,130,246,0.3)',
+                  border: 'none', color: '#fff', padding: '0.75rem', borderRadius: '9999px',
+                  fontWeight: 600, cursor: joinLink.trim() ? 'pointer' : 'default', fontSize: '0.875rem',
+                }}
+              >
+                Continue →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <aside style={{
         width: '260px', flexShrink: 0,
         background: '#050505',
@@ -73,20 +149,42 @@ export function Layout() {
 
         <div style={{ marginBottom: '2rem' }}>
           <p style={{ fontSize: '0.65rem', color: '#71717A', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, paddingLeft: '0.5rem', marginBottom: '0.75rem' }}>Workspace</p>
-          <select
-            value={activeWorkspaceId || ''}
-            onChange={e => switchWorkspace(e.target.value)}
+          {workspacesLoaded && workspaces.length === 0 ? (
+            <div style={{ padding: '0.75rem 1rem', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.05)', fontSize: '0.75rem', color: '#ef4444', lineHeight: 1.5 }}>
+              Session expired.{' '}
+              <button onClick={signOut} style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', padding: 0, fontSize: '0.75rem', fontWeight: 600 }}>
+                Sign in again
+              </button>
+            </div>
+          ) : (
+            <select
+              value={activeWorkspaceId || ''}
+              onChange={e => switchWorkspace(e.target.value)}
+              style={{
+                width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#fff', padding: '0.75rem 1rem', borderRadius: '12px', fontSize: '0.875rem', outline: 'none', cursor: 'pointer',
+              }}
+            >
+              {workspaces.map(w => (
+                <option key={w.id} value={w.id} style={{ background: '#050505' }}>
+                  {w.name} {w.role === 'owner' ? '(Personal)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={() => setShowJoinModal(true)}
             style={{
-              width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-              color: '#fff', padding: '0.75rem 1rem', borderRadius: '12px', fontSize: '0.875rem', outline: 'none', cursor: 'pointer',
+              marginTop: '0.5rem', width: '100%', background: 'transparent',
+              border: '1px dashed rgba(255,255,255,0.1)', color: '#52525B',
+              padding: '0.5rem 1rem', borderRadius: '10px', fontSize: '0.75rem',
+              cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s',
             }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'; e.currentTarget.style.color = '#A1A1AA'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#52525B'; }}
           >
-            {workspaces.map(w => (
-              <option key={w.id} value={w.id} style={{ background: '#050505' }}>
-                {w.name} {w.role === 'owner' ? '(Personal)' : ''}
-              </option>
-            ))}
-          </select>
+            + Join a workspace
+          </button>
         </div>
 
         <NavLink to="/library" style={navStyle}>
@@ -96,7 +194,7 @@ export function Layout() {
           <span>⚙</span> Account
         </NavLink>
 
-        {user?.email === 'karthik.upadhyay98@gmail.com' && (
+        {['karthik.upadhyay98@gmail.com', 'kartik.upadhyay@foyr.com'].includes(user?.email ?? '') && (
           <NavLink to="/admin" style={({ isActive }) => ({
             ...navStyle({ isActive }),
             marginTop: '0.5rem',
