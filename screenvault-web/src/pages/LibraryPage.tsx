@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { getUser } from '../auth';
 import { safeFetch } from '../api';
-import { API_BASE, VIEWER_BASE } from '../config';
+import { API_BASE, VIEWER_BASE, STREAM_BASE } from '../config';
 import { BackendVideo, WorkspaceMember, WorkspaceVideo } from '../types';
 
 const getDeterministicColor = (email: string) => {
@@ -9,6 +9,18 @@ const getDeterministicColor = (email: string) => {
   let hash = 0;
   for (let i = 0; i < email.length; i++) hash = email.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
+};
+
+// The player URL already carries the encrypted stream id as ?id= — reuse
+// it to hit the streaming worker directly for the hover preview, no
+// separate preview clip/upload needed.
+const extractStreamId = (playerUrl?: string | null) => {
+  if (!playerUrl) return null;
+  try {
+    return new URL(playerUrl).searchParams.get('id');
+  } catch {
+    return null;
+  }
 };
 
 export function LibraryPage() {
@@ -476,6 +488,20 @@ export function LibraryPage() {
                             <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>
                           </svg>
                         </div>
+                      )}
+                      {hoveredId === file.id && extractStreamId(file.playerUrl) && (
+                        <video
+                          key={file.id}
+                          src={`${STREAM_BASE}/?id=${extractStreamId(file.playerUrl)}`}
+                          autoPlay
+                          muted
+                          loop={false}
+                          playsInline
+                          onTimeUpdate={e => {
+                            if (e.currentTarget.currentTime >= 4) e.currentTarget.currentTime = 0;
+                          }}
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
                       )}
                       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: hoveredId === file.id ? 'rgba(0,0,0,0.2)' : 'transparent', transition: 'background 0.2s' }}>
                         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: hoveredId === file.id ? 1 : 0, transform: hoveredId === file.id ? 'scale(1)' : 'scale(0.8)', transition: 'all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)' }}>

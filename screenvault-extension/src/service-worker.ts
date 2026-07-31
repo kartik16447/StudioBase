@@ -1088,6 +1088,7 @@ async function startRecording(target: AppState["target"]) {
         sv_user: storage.sv_user,
         sv_accounts: storage.sv_accounts,
         title,
+        hasUserTitle: !!(target as any).userTitle,
       } as OffscreenMessage);
 
       // Add timeout fallback for CAPTURE_STARTED

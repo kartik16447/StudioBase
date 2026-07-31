@@ -31,6 +31,7 @@ let recordingStartTime: number = 0;
 let offscreenUser: BackendUser | null = null;
 let offscreenAccounts: StorageAccount[] = [];
 let sessionTitle: string = "Screen Recording";
+let hasUserTitle = false;
 let activeBackendVideoId: string | null = null;
 let activePlayerUrl: string | null = null;
 let activeEncryptedFileId: string | null = null;
@@ -79,6 +80,7 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
     offscreenUser = message.sv_user || null;
     offscreenAccounts = message.sv_accounts || [];
     sessionTitle = message.title || "Screen Recording";
+    hasUserTitle = !!message.hasUserTitle;
     // Seeded from pre-allocation (already has the encrypted link) so the
     // finalize step never has to fall back to the raw R2 key, which the
     // proxy worker rejects by design (unlike Drive's raw file IDs, R2 keys
@@ -121,6 +123,17 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
 
 
 
+// getDisplayMedia's video track label often carries the actual captured
+// window/tab/screen name on supported platforms. Filter out the generic,
+// non-descriptive forms Chrome falls back to (e.g. "screen:0:0") so we
+// don't replace one generic title with another.
+function deriveTitleFromStream(stream: MediaStream): string | null {
+  const label = stream.getVideoTracks()[0]?.label?.trim();
+  if (!label) return null;
+  if (/^(screen|window|tab):\d+(:\d+)?$/i.test(label)) return null;
+  return label;
+}
+
 async function startScreenRecording(includeMic: boolean) {
   if (isRecording) return;
   isStopping = false;
@@ -134,6 +147,13 @@ async function startScreenRecording(includeMic: boolean) {
       selfBrowserSurface: 'include'
     } as any)
   } as any);
+
+  // Only override with the captured source's own name if the user didn't
+  // type a custom title themselves — never clobber an explicit choice.
+  if (!hasUserTitle) {
+    const derived = deriveTitleFromStream(stream);
+    if (derived) sessionTitle = derived;
+  }
 
   await mixMicAndStart(stream, includeMic);
 }

@@ -154,6 +154,7 @@ export type OffscreenMessage =
       sv_user?: BackendUser;
       sv_accounts?: StorageAccount[];
       title?: string;
+      hasUserTitle?: boolean;
     }
   | { type: 'STOP'; account: StorageAccount | null }
   | { type: 'CAPTURE_STARTED' }
