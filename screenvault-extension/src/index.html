@@ -546,12 +546,16 @@
           }
         });
 
-        // Auto-hide controls during playback after 3s of no mouse movement
+        // Auto-hide controls (including the center play/pause button) during
+        // playback after ~2.5s of no mouse movement, even while the cursor
+        // is still resting over the player.
         let hideControlsTimer = null;
         const controlsBar = document.getElementById("controls-bar");
+        const IDLE_HIDE_MS = 2500;
 
         function showControls() {
           videoWrapper.classList.add("controls-visible");
+          videoWrapper.classList.remove("controls-idle");
           if (hideControlsTimer) clearTimeout(hideControlsTimer);
           hideControlsTimer = null;
         }
@@ -559,8 +563,11 @@
         function scheduleHide() {
           if (hideControlsTimer) clearTimeout(hideControlsTimer);
           hideControlsTimer = setTimeout(() => {
-            if (!video.paused) videoWrapper.classList.remove("controls-visible");
-          }, 3000);
+            if (!video.paused) {
+              videoWrapper.classList.remove("controls-visible");
+              videoWrapper.classList.add("controls-idle");
+            }
+          }, IDLE_HIDE_MS);
         }
 
         videoWrapper.addEventListener("mousemove", () => {
@@ -572,6 +579,7 @@
           if (!video.paused) {
             if (hideControlsTimer) clearTimeout(hideControlsTimer);
             videoWrapper.classList.remove("controls-visible");
+            videoWrapper.classList.add("controls-idle");
           }
         });
 
@@ -581,6 +589,7 @@
 
         video.addEventListener("pause", () => {
           if (hideControlsTimer) clearTimeout(hideControlsTimer);
+          videoWrapper.classList.remove("controls-idle");
           videoWrapper.classList.add("controls-visible");
         });
 
@@ -630,6 +639,15 @@
       #video-wrapper.controls-visible #controls-bar {
         opacity: 1 !important;
         pointer-events: auto !important;
+      }
+
+      /* Force-hide the center play/pause button and control bar after
+         mouse inactivity, even while the cursor is still resting over the
+         player — group-hover alone can't express "idle", only "hovering". */
+      #video-wrapper.controls-idle:not(.preview) #center-play-btn,
+      #video-wrapper.controls-idle:not(.preview) #controls-bar {
+        opacity: 0 !important;
+        pointer-events: none !important;
       }
 
       /* Hide cursor when controls are hidden during playback */
