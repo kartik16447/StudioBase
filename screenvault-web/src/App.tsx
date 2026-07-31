@@ -16,11 +16,19 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Signed-in visitors landing on "/" should go straight to their library,
+// not the public marketing page - only logged-out visitors see that.
+function RootRoute() {
+  const user = getUser();
+  if (user) return <Navigate to="/library" replace />;
+  return <LandingPage />;
+}
+
 export function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<RootRoute />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/invite/:token" element={<JoinPage />} />
