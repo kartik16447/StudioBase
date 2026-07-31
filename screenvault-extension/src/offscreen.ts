@@ -79,6 +79,13 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
     offscreenUser = message.sv_user || null;
     offscreenAccounts = message.sv_accounts || [];
     sessionTitle = message.title || "Screen Recording";
+    // Seeded from pre-allocation (already has the encrypted link) so the
+    // finalize step never has to fall back to the raw R2 key, which the
+    // proxy worker rejects by design (unlike Drive's raw file IDs, R2 keys
+    // are never valid as a passthrough identifier).
+    activePlayerUrl = message.playerUrl || null;
+    activeEncryptedFileId = message.encryptedFileId || null;
+    activeBackendVideoId = message.videoId || null;
 
     // Sync the new sessionId to the service worker to preserve title/context
     chrome.runtime.sendMessage({
@@ -102,6 +109,9 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
   } else if (message.type === 'RECOVER_AND_UPLOAD') {
     activeUploadKey = message.fileId;
     activeUploadId = message.uploadId || null;
+    activePlayerUrl = message.playerUrl || null;
+    activeEncryptedFileId = message.encryptedFileId || null;
+    activeBackendVideoId = message.videoId || null;
     offscreenUser = message.sv_user || null;
     offscreenAccounts = message.sv_accounts || [];
     processingSessions.add(message.sessionId);
@@ -239,9 +249,14 @@ async function uploadWholeBlob(
     }
 
     if (!url) {
-      const idToUse = meta?.encryptedFileId || key;
+      // Last resort: backend registration never succeeded, so there's no
+      // encrypted ID. Never fall back to the raw R2 key here — unlike
+      // Drive's file IDs, the proxy worker only accepts encrypted IDs, so
+      // a raw key would just 403. Degrade to a session-only link instead;
+      // the dashboard can still resolve the recording via sessionId.
       const titleToUse = meta?.title || sessionTitle || 'Recording';
-      url = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
+      url = `${PLAYER_BASE_URL}/?title=${encodeURIComponent(titleToUse)}${activeSessionId ? `&sid=${activeSessionId}` : ''}`;
+      svLog("UPLOAD_LINK_MISSING_ENCRYPTED_ID", { sessionId: activeSessionId, timestamp: Date.now() });
     }
 
     svLog("UPLOAD_FINAL_COMPLETE", {
@@ -683,9 +698,12 @@ function startMediaRecorder(stream: MediaStream) {
           // STEP 4: Fire UPLOAD_COMPLETE immediately after token resolve
           let link = activePlayerUrl;
           if (!link) {
-            const idToUse = activeEncryptedFileId || activeUploadKey;
+            // Last resort: pre-allocation never got an encrypted ID back.
+            // Never fall back to the raw R2 key — the proxy worker only
+            // accepts encrypted IDs. Degrade to a session-only link instead.
             const titleToUse = sessionTitle || 'Recording';
-            link = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(titleToUse)}`;
+            link = `${PLAYER_BASE_URL}/?title=${encodeURIComponent(titleToUse)}${activeSessionId ? `&sid=${activeSessionId}` : ''}`;
+            svLog("UPLOAD_LINK_MISSING_ENCRYPTED_ID", { sessionId: activeSessionId, timestamp: Date.now() });
           }
 
           chrome.runtime.sendMessage({
@@ -759,9 +777,10 @@ function startMediaRecorder(stream: MediaStream) {
 
   chrome.runtime.sendMessage({ type: 'CAPTURE_STARTED' } as OffscreenMessage);
   recordingStartTime = performance.now();
-  activeBackendVideoId = null;
-  activePlayerUrl = null;
-  activeEncryptedFileId = null;
+  // Note: activeBackendVideoId/activePlayerUrl/activeEncryptedFileId are
+  // already seeded (or cleared) by the START_SCREEN/RECOVER_AND_UPLOAD
+  // handler above — do not reset them here, that would wipe out the
+  // pre-allocated player link before it's ever used.
   tokenPrefetched = false;
   recorder.start(1000); // 1s chunks
 }

@@ -17,6 +17,8 @@ export interface PreAllocationResult {
   url: string;
   fileName: string;
   account: StorageAccount;
+  videoId?: string;
+  encryptedFileId?: string;
 }
 
 export interface SessionMetadata {
@@ -143,6 +145,9 @@ export type OffscreenMessage =
       type: 'START_SCREEN';
       fileId: string;
       uploadId: string;
+      playerUrl?: string;
+      videoId?: string;
+      encryptedFileId?: string;
       sessionId: string;
       includeMic?: boolean;
       account: StorageAccount;
@@ -162,6 +167,9 @@ export type OffscreenMessage =
       sessionId: string;
       fileId: string;
       uploadId?: string;
+      playerUrl?: string;
+      videoId?: string;
+      encryptedFileId?: string;
       account: StorageAccount;
       sv_user?: BackendUser;
       sv_accounts?: StorageAccount[];

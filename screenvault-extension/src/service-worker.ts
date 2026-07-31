@@ -438,6 +438,8 @@ async function preAllocateUpload(account: StorageAccount, title?: string): Promi
   const finalTitle = title || fileName.replace(".webm", "");
 
   let url = `${PLAYER_BASE_URL}/?title=${encodeURIComponent(finalTitle)}`;
+  let videoId: string | undefined;
+  let encryptedFileId: string | undefined;
   try {
     const videoRes = await fetch(`${BACKEND_URL}/videos`, {
       method: "POST",
@@ -452,12 +454,14 @@ async function preAllocateUpload(account: StorageAccount, title?: string): Promi
     if (videoRes.ok) {
       const data = await videoRes.json();
       url = data.playerUrl;
+      videoId = data.id;
+      encryptedFileId = data.encryptedFileId;
     }
   } catch (err) {
     console.warn("Pre-allocation video registration failed, will retry during syncBackend:", err);
   }
 
-  return { id: key, uploadId, url, fileName, account };
+  return { id: key, uploadId, url, fileName, account, videoId, encryptedFileId };
 }
 
 chrome.runtime.onMessage.addListener(
@@ -737,6 +741,9 @@ async function recoverSessionHelper(sessionId: string) {
         sessionId,
         fileId: meta.fileId,
         uploadId: meta.uploadId,
+        playerUrl: meta.playerUrl,
+        videoId: meta.backendVideoId,
+        encryptedFileId: meta.encryptedFileId,
         account,
         sv_user: storage.sv_user,
         sv_accounts: storage.sv_accounts,
@@ -1072,6 +1079,9 @@ async function startRecording(target: AppState["target"]) {
         type: "START_SCREEN",
         fileId,
         uploadId,
+        playerUrl: allocation.url,
+        videoId: allocation.videoId,
+        encryptedFileId: allocation.encryptedFileId,
         sessionId,
         includeMic: target.includeMic !== false,
         account,
