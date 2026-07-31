@@ -695,8 +695,16 @@ function startMediaRecorder(stream: MediaStream) {
             timestamp: uploadCompleteAt
           });
 
-          // STEP 4: Fire UPLOAD_COMPLETE immediately after token resolve
-          let link = activePlayerUrl;
+          // STEP 4: Fire UPLOAD_COMPLETE immediately after token resolve.
+          // activePlayerUrl was seeded once at recording start from
+          // preAllocateUpload's own registration attempt — if THAT attempt
+          // failed but syncBackend's later background retry (in
+          // service-worker.ts) succeeded, the corrected playerUrl only ever
+          // lands in session metadata, never back into this in-memory var.
+          // Re-check metadata here so we don't ship a stale id-less link
+          // when a good one was written moments after recording started.
+          const latestMeta = await chrome.runtime.sendMessage({ type: 'GET_SESSION_METADATA', sessionId: activeSessionId }).catch(() => null);
+          let link = latestMeta?.playerUrl || activePlayerUrl;
           if (!link) {
             // Last resort: pre-allocation never got an encrypted ID back.
             // Never fall back to the raw R2 key — the proxy worker only
