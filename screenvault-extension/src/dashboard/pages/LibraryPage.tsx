@@ -11,7 +11,7 @@ import {
 import { safeFetch } from "../../utils/api";
 import { svLog } from "../../logger";
 
-const VIEWER_BASE_URL = "https://screenvault.karthik-upadhyay98.workers.dev";
+const VIEWER_BASE_URL = "https://screenvault.tushar-abf.workers.dev";
 
 interface WorkspaceMember {
   userId: string;
@@ -140,7 +140,7 @@ export function LibraryPage() {
     const { workspaceId, accessToken } = sv_user;
 
     try {
-      let url = `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos?workspaceId=${workspaceId}&limit=12`;
+      let url = `https://screenvault-backend.tushar-abf.workers.dev/videos?workspaceId=${workspaceId}&limit=12`;
       if (cursor) url += `&cursor=${cursor}`;
 
       const res = await safeFetch(url);
@@ -269,7 +269,7 @@ export function LibraryPage() {
     setLoadingMembers(true);
     try {
       const res = await safeFetch(
-        `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/members?workspaceId=${workspaceId}`,
+        `https://screenvault-backend.tushar-abf.workers.dev/workspace/members?workspaceId=${workspaceId}`,
       );
       const data = await res.json();
       setMembers(data);
@@ -286,7 +286,7 @@ export function LibraryPage() {
     setLoadingInvites(true);
     try {
       const res = await safeFetch(
-        `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/invites?workspaceId=${workspaceId}`,
+        `https://screenvault-backend.tushar-abf.workers.dev/workspace/invites?workspaceId=${workspaceId}`,
       );
       const data = await res.json();
       setInvites(data);
@@ -313,7 +313,7 @@ export function LibraryPage() {
       return;
     try {
       await safeFetch(
-        `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/invite/revoke`,
+        `https://screenvault-backend.tushar-abf.workers.dev/workspace/invite/revoke`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -330,7 +330,7 @@ export function LibraryPage() {
     if (!confirm("Are you sure you want to remove this member?")) return;
     try {
       await safeFetch(
-        `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/member/${userIdToRemove}?workspaceId=${user?.workspaceId}`,
+        `https://screenvault-backend.tushar-abf.workers.dev/workspace/member/${userIdToRemove}?workspaceId=${user?.workspaceId}`,
         {
           method: "DELETE",
         },
@@ -362,7 +362,7 @@ export function LibraryPage() {
       if (!sv_user?.workspaceId || !sv_user?.accessToken) return;
 
       const res = await safeFetch(
-        `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/invite`,
+        `https://screenvault-backend.tushar-abf.workers.dev/workspace/invite`,
         {
           method: "POST",
           headers: {
@@ -399,7 +399,7 @@ export function LibraryPage() {
       if (!sv_user?.workspaceId || !sv_user?.accessToken) return;
 
       const res = await safeFetch(
-        `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/leave`,
+        `https://screenvault-backend.tushar-abf.workers.dev/workspace/leave`,
         {
           method: "POST",
           headers: {
@@ -667,7 +667,7 @@ export function LibraryPage() {
       // never reflects the display name, so there's no storage-side rename)
       if (file.backendId && sv_user?.accessToken) {
         await fetch(
-          `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${file.backendId}`,
+          `https://screenvault-backend.tushar-abf.workers.dev/videos/${file.backendId}`,
           {
             method: "PATCH",
             headers: {
@@ -734,7 +734,7 @@ export function LibraryPage() {
           file.backendId || (file.id?.length > 20 ? file.id : null);
         if (deleteTargetId && sv_user?.accessToken) {
           safeFetch(
-            `https://screenvault-backend.karthik-upadhyay98.workers.dev/videos/${deleteTargetId}`,
+            `https://screenvault-backend.tushar-abf.workers.dev/videos/${deleteTargetId}`,
             {
               method: "DELETE",
               headers: { "Content-Type": "application/json" },
@@ -1453,7 +1453,7 @@ export function LibraryPage() {
 
                               // Telemetry
                               safeFetch(
-                                `https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/invite/log-copy`,
+                                `https://screenvault-backend.tushar-abf.workers.dev/workspace/invite/log-copy`,
                                 {
                                   method: "POST",
                                   headers: {

@@ -8,8 +8,8 @@ import {
 import { saveChunk, recoverSession, deleteSession, getChunks, deleteChunks } from './db';
 import { svLog } from './logger';
 
-const BACKEND_URL = 'https://screenvault-backend.karthik-upadhyay98.workers.dev';
-const PLAYER_BASE_URL = 'https://screenvault.karthik-upadhyay98.workers.dev';
+const BACKEND_URL = 'https://screenvault-backend.tushar-abf.workers.dev';
+const PLAYER_BASE_URL = 'https://screenvault.tushar-abf.workers.dev';
 
 let recorder: MediaRecorder | null = null;
 let activeSessionId: string | null = null;

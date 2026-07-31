@@ -46,7 +46,7 @@ export async function svLog(tag: string, data: any) {
     const activeToken = freshAccount?.accessToken ?? sv_user?.accessToken;
 
     if (activeToken) {
-      await fetch('https://screenvault-backend.karthik-upadhyay98.workers.dev/logs', {
+      await fetch('https://screenvault-backend.tushar-abf.workers.dev/logs', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,4 +1,4 @@
-const BACKEND_URL = 'https://screenvault-backend.karthik-upadhyay98.workers.dev';
+const BACKEND_URL = 'https://screenvault-backend.tushar-abf.workers.dev';
 
 export interface UploadedPart {
   partNumber: number;

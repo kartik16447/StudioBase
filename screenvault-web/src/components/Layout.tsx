@@ -100,7 +100,7 @@ export function Layout() {
               value={joinLink}
               onChange={e => setJoinLink(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleJoinSubmit()}
-              placeholder="https://screenvault-web.pages.dev/invite/..."
+              placeholder="https://screenvault-web-7r9.pages.dev/invite/..."
               style={{
                 width: '100%', boxSizing: 'border-box',
                 background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',

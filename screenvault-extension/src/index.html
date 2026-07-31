@@ -58,7 +58,7 @@
     <nav
       class="w-full bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm z-10"
     >
-      <a href="https://screenvault-web.pages.dev/library" class="flex items-center gap-2 no-underline">
+      <a href="https://screenvault-web-7r9.pages.dev/library" class="flex items-center gap-2 no-underline">
         <div
           class="w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-md"
         >
@@ -422,7 +422,7 @@
             videoWrapper.classList.remove("hidden");
 
             // 1. Fetch Metadata
-            let metaUrl = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/meta?id=${fileId}&sid=${sessionId}`;
+            let metaUrl = `https://screenvault-proxy.tushar-abf.workers.dev/meta?id=${fileId}&sid=${sessionId}`;
             const metaRes = await fetch(metaUrl).catch(() => null);
             if (metaRes && metaRes.ok) {
               const data = await metaRes.json();
@@ -435,7 +435,7 @@
             if (window.SV && typeof window.SV.getPlayableUrl === "function") {
               streamUrl = await window.SV.getPlayableUrl(fileId, sessionId);
             } else {
-              streamUrl = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/?id=${fileId}&sid=${sessionId}`;
+              streamUrl = `https://screenvault-proxy.tushar-abf.workers.dev/?id=${fileId}&sid=${sessionId}`;
             }
             video.src = streamUrl;
             video.load();
@@ -623,7 +623,7 @@
             setTimeout(() => { video.load(); }, 1000);
             return;
           }
-          fetch('https://screenvault-proxy.karthik-upadhyay98.workers.dev/event', {
+          fetch('https://screenvault-proxy.tushar-abf.workers.dev/event', {
             method: 'POST',
             body: JSON.stringify({ type: 'browser_video_error', sessionId, metadata: { code: video.error?.code } })
           }).catch(() => {});

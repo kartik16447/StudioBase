@@ -11,7 +11,7 @@ let refreshPromise: Promise<string | null> | null = null;
  */
 async function probeToken(token: string): Promise<boolean> {
   try {
-    const res = await fetch("https://screenvault-backend.karthik-upadhyay98.workers.dev/videos?limit=0", {
+    const res = await fetch("https://screenvault-backend.tushar-abf.workers.dev/videos?limit=0", {
       headers: { Authorization: `Bearer ${token}` }
     });
     return res.status !== 401;

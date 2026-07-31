@@ -16,7 +16,7 @@ export function AdminPage({ session }: { session: any }) {
       if (query) setIsSearching(true);
       else setLoading(true);
 
-      let url = `https://screenvault-backend.karthik-upadhyay98.workers.dev/admin`;
+      let url = `https://screenvault-backend.tushar-abf.workers.dev/admin`;
       
       if (query) {
         if (query.includes('@')) {

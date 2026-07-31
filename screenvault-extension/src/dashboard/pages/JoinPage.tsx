@@ -22,7 +22,7 @@ export function JoinPage() {
         const storage = await chrome.storage.local.get(['sv_user']);
         const sv_user = storage.sv_user;
 
-        const res = await safeFetch(`https://screenvault-backend.karthik-upadhyay98.workers.dev/workspace/join`, {
+        const res = await safeFetch(`https://screenvault-backend.tushar-abf.workers.dev/workspace/join`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json'

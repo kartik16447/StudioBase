@@ -16,7 +16,7 @@
 		{
 			"binding": "DB",
 			"database_name": "screenvault-db",
-			"database_id": "80df44f9-5aa6-44bd-9c5f-42f98023b285",
+			"database_id": "a316da5a-2f9b-4a4a-9320-93333036328c",
 		},
 	],
 
@@ -51,7 +51,7 @@
 	"kv_namespaces": [
 		{
 			"binding": "TOKEN_CACHE",
-			"id": "5f680a41aa05491fa51fffb09052e019"
+			"id": "e7e8d85c637d4e67aa81cf3b2261c921"
 		}
 	],
 	"r2_buckets": [

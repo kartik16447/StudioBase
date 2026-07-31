@@ -23,7 +23,7 @@ export function Layout({ session }: { session: any }) {
       setActiveWorkspaceId(storage.sv_user.workspaceId);
 
       try {
-        const res = await safeFetch('https://screenvault-backend.karthik-upadhyay98.workers.dev/workspaces');
+        const res = await safeFetch('https://screenvault-backend.tushar-abf.workers.dev/workspaces');
         if (!res.ok) return;
         const data = await res.json();
         setWorkspaces(data.workspaces || []);
@@ -71,7 +71,7 @@ export function Layout({ session }: { session: any }) {
         borderRight: '1px solid rgba(255,255,255,0.04)', 
         padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' 
       }}>
-        <a href="https://screenvault.karthik-upadhyay98.workers.dev" target="_blank" rel="noreferrer" style={{ fontWeight: 700, fontSize: '1.25rem', color: '#fff', marginBottom: '2rem', paddingLeft: '0.5rem', letterSpacing: '-0.025em', textDecoration: 'none', display: 'block' }}>
+        <a href="https://screenvault.tushar-abf.workers.dev" target="_blank" rel="noreferrer" style={{ fontWeight: 700, fontSize: '1.25rem', color: '#fff', marginBottom: '2rem', paddingLeft: '0.5rem', letterSpacing: '-0.025em', textDecoration: 'none', display: 'block' }}>
           ScreenVault
         </a>
 

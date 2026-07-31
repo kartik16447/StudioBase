@@ -3,7 +3,7 @@ async function getPlayableUrl(fileId: string, sessionId?: string) {
         throw new Error("Invalid fileId: Playback cannot start without a target ID.");
     }
 
-    let workerUrl = `https://screenvault-proxy.karthik-upadhyay98.workers.dev/?id=${fileId}`;
+    let workerUrl = `https://screenvault-proxy.tushar-abf.workers.dev/?id=${fileId}`;
     if (sessionId) {
         workerUrl += `&sid=${sessionId}`;
     }
