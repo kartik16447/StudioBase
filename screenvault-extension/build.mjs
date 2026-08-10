@@ -52,9 +52,23 @@ for (const [src, dest] of staticFiles) {
   }
 }
 
+// Icons referenced by manifest.json's `action.default_icon`
+fs.mkdirSync('dist/icons', { recursive: true });
+for (const file of fs.readdirSync('icons')) {
+  fs.copyFileSync(`icons/${file}`, `dist/icons/${file}`);
+}
+
 // Privacy page served at /privacy
 fs.mkdirSync('dist/privacy', { recursive: true });
 fs.copyFileSync('src/privacy.html', 'dist/privacy/index.html');
+
+// Self-hosted Phosphor Icons (was CDN-loaded — MV3 forbids remotely hosted code)
+for (const weight of ['regular', 'fill']) {
+  fs.mkdirSync(`dist/vendor/phosphor/${weight}`, { recursive: true });
+  for (const file of fs.readdirSync(`src/vendor/phosphor/${weight}`)) {
+    fs.copyFileSync(`src/vendor/phosphor/${weight}/${file}`, `dist/vendor/phosphor/${weight}/${file}`);
+  }
+}
 
 // Generate Tailwind CSS for the player page (replaces CDN script)
 execSync('./node_modules/.bin/tailwindcss -i src/player.css -o dist/player.css --minify', { stdio: 'inherit' });
