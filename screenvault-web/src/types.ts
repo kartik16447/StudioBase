@@ -3,6 +3,7 @@ export interface BackendVideo {
   fileId: string;
   sessionId?: string;
   workspaceId: string;
+  folderId?: string | null;
   title: string;
   playerUrl?: string;
   thumbnailUrl?: string;
@@ -14,6 +15,12 @@ export interface BackendVideo {
   actualDurationMs?: number;
   ownerId: string;
   createdAt: number;
+}
+
+export interface Folder {
+  id: string;
+  workspaceId: string;
+  name: string;
 }
 
 export interface WorkspaceMember {
@@ -37,4 +44,5 @@ export interface WorkspaceVideo {
   status: string;
   ownerId?: string;
   workspaceId?: string;
+  folderId?: string | null;
 }

@@ -48,6 +48,14 @@ export default {
 			else if (method === 'DELETE') response = await deleteVideo(request, env);
 			else if (method === 'GET') response = await getVideo(request, env);
 			else response = jsonError('Method Not Allowed', 'METHOD_NOT_ALLOWED', 405);
+		} else if (pathname === '/folders') {
+			if (method === 'POST') response = await createFolder(request, env);
+			else if (method === 'GET') response = await listFolders(request, env);
+			else response = jsonError('Method Not Allowed', 'METHOD_NOT_ALLOWED', 405);
+		} else if (pathname.startsWith('/folders/')) {
+			if (method === 'PATCH') response = await renameFolder(request, env);
+			else if (method === 'DELETE') response = await deleteFolder(request, env);
+			else response = jsonError('Method Not Allowed', 'METHOD_NOT_ALLOWED', 405);
 		} else if (pathname === '/uploads/init' && method === 'POST') {
 			response = await initUpload(request, env);
 		} else if (pathname === '/uploads/part' && method === 'PUT') {
@@ -601,6 +609,7 @@ async function getVideos(request: Request, env: any) {
 		const workspaceId = url.searchParams.get('workspaceId');
 		const limit = parseInt(url.searchParams.get('limit') || '20');
 		const cursor = url.searchParams.get('cursor');
+		const folderId = url.searchParams.get('folderId');
 
 		if (!workspaceId) {
 			return jsonError('workspaceId is required', 'VALIDATION_ERROR');
@@ -615,11 +624,18 @@ async function getVideos(request: Request, env: any) {
 			return jsonError('Unauthorized workspace access', 'FORBIDDEN', 403);
 		}
 
-		// Updated query to handle identity migration: 
-		// While getVideos currently returns all videos in a workspace, 
+		// Updated query to handle identity migration:
+		// While getVideos currently returns all videos in a workspace,
 		// we ensure the membership check (above) correctly resolves the user.
 		let query = 'SELECT * FROM videos WHERE workspaceId = ? AND deletedAt IS NULL';
 		let params: any[] = [workspaceId];
+
+		if (folderId === 'unfiled') {
+			query += ' AND folderId IS NULL';
+		} else if (folderId) {
+			query += ' AND folderId = ?';
+			params.push(folderId);
+		}
 
 		if (cursor) {
 			const [cTime, cId] = cursor.split(':');
@@ -743,6 +759,43 @@ async function updateVideo(request: Request, env: any) {
 		let sets = ['updatedAt = ?'];
 		let params: any[] = [now];
 
+		// Moving a video to a different workspace requires membership in the
+		// target workspace too. The R2 object key isn't tied to workspaceId
+		// at read time (fileId is looked up verbatim), so no storage move is
+		// needed — only the DB row's workspaceId changes.
+		let targetWorkspaceId = video.workspaceId;
+		const isMovingWorkspace = body.workspaceId && body.workspaceId !== video.workspaceId;
+		if (isMovingWorkspace) {
+			const targetMembership = await env.DB.prepare('SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?')
+				.bind(body.workspaceId, user.id)
+				.first();
+			if (!targetMembership) return jsonError('You are not a member of the target workspace', 'FORBIDDEN', 403);
+
+			targetWorkspaceId = body.workspaceId;
+			sets.push('workspaceId = ?');
+			params.push(targetWorkspaceId);
+		}
+
+		// A folder always belongs to a single workspace. Moving workspaces
+		// without specifying a folder in the target workspace unfiles the video.
+		if ('folderId' in body) {
+			if (body.folderId) {
+				const folder = (await env.DB.prepare('SELECT workspaceId FROM folders WHERE id = ?')
+					.bind(body.folderId)
+					.first()) as any;
+				if (!folder) return jsonError('Folder not found', 'NOT_FOUND', 404);
+				if (folder.workspaceId !== targetWorkspaceId) {
+					return jsonError('Folder does not belong to the target workspace', 'VALIDATION_ERROR');
+				}
+				sets.push('folderId = ?');
+				params.push(body.folderId);
+			} else {
+				sets.push('folderId = NULL');
+			}
+		} else if (isMovingWorkspace) {
+			sets.push('folderId = NULL');
+		}
+
 		if (body.status) {
 			sets.push('status = ?');
 			params.push(body.status);
@@ -805,6 +858,110 @@ async function updateVideo(request: Request, env: any) {
 				metadata: { error: body.error },
 			}).catch(() => {});
 		}
+
+		return Response.json({ success: true });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+async function createFolder(request: Request, env: any) {
+	try {
+		const user = await getUserFromToken(request, env);
+		const body = (await request.json()) as any;
+		const workspaceId = body.workspaceId;
+		const name = body.name?.trim();
+
+		if (!workspaceId || !name) {
+			return jsonError('workspaceId and name are required', 'VALIDATION_ERROR');
+		}
+
+		const membership = await env.DB.prepare('SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?')
+			.bind(workspaceId, user.id)
+			.first();
+		if (!membership) return jsonError('Unauthorized workspace access', 'FORBIDDEN', 403);
+
+		const id = crypto.randomUUID();
+		const now = Date.now();
+		await env.DB.prepare('INSERT INTO folders (id, workspaceId, name, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)')
+			.bind(id, workspaceId, name, now, now)
+			.run();
+
+		return Response.json({ id, workspaceId, name, createdAt: now, updatedAt: now });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+async function listFolders(request: Request, env: any) {
+	try {
+		const user = await getUserFromToken(request, env);
+		const url = new URL(request.url);
+		const workspaceId = url.searchParams.get('workspaceId');
+		if (!workspaceId) return jsonError('workspaceId is required', 'VALIDATION_ERROR');
+
+		const membership = await env.DB.prepare('SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?')
+			.bind(workspaceId, user.id)
+			.first();
+		if (!membership) return jsonError('Unauthorized workspace access', 'FORBIDDEN', 403);
+
+		const { results } = await env.DB.prepare('SELECT * FROM folders WHERE workspaceId = ? ORDER BY name ASC')
+			.bind(workspaceId)
+			.all();
+
+		return Response.json({ folders: results });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+async function renameFolder(request: Request, env: any) {
+	try {
+		const user = await getUserFromToken(request, env);
+		const url = new URL(request.url);
+		const id = url.pathname.split('/').filter(Boolean).pop();
+		if (!id) return jsonError('Folder ID is required', 'VALIDATION_ERROR');
+
+		const folder = (await env.DB.prepare('SELECT * FROM folders WHERE id = ?').bind(id).first()) as any;
+		if (!folder) return jsonError('Folder not found', 'NOT_FOUND', 404);
+
+		const membership = await env.DB.prepare('SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?')
+			.bind(folder.workspaceId, user.id)
+			.first();
+		if (!membership) return jsonError('Unauthorized workspace access', 'FORBIDDEN', 403);
+
+		const body = (await request.json()) as any;
+		const name = body.name?.trim();
+		if (!name) return jsonError('name is required', 'VALIDATION_ERROR');
+
+		await env.DB.prepare('UPDATE folders SET name = ?, updatedAt = ? WHERE id = ?')
+			.bind(name, Date.now(), id)
+			.run();
+
+		return Response.json({ success: true });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+async function deleteFolder(request: Request, env: any) {
+	try {
+		const user = await getUserFromToken(request, env);
+		const url = new URL(request.url);
+		const id = url.pathname.split('/').filter(Boolean).pop();
+		if (!id) return jsonError('Folder ID is required', 'VALIDATION_ERROR');
+
+		const folder = (await env.DB.prepare('SELECT * FROM folders WHERE id = ?').bind(id).first()) as any;
+		if (!folder) return jsonError('Folder not found', 'NOT_FOUND', 404);
+
+		const membership = await env.DB.prepare('SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?')
+			.bind(folder.workspaceId, user.id)
+			.first();
+		if (!membership) return jsonError('Unauthorized workspace access', 'FORBIDDEN', 403);
+
+		// Videos in the folder aren't deleted — just unfiled
+		await env.DB.prepare('UPDATE videos SET folderId = NULL WHERE folderId = ?').bind(id).run();
+		await env.DB.prepare('DELETE FROM folders WHERE id = ?').bind(id).run();
 
 		return Response.json({ success: true });
 	} catch (err: any) {

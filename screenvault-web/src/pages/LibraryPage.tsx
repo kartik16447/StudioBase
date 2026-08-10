@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { getUser } from '../auth';
 import { safeFetch } from '../api';
 import { API_BASE, VIEWER_BASE, STREAM_BASE } from '../config';
-import { BackendVideo, WorkspaceMember, WorkspaceVideo } from '../types';
+import { BackendVideo, Folder, WorkspaceMember, WorkspaceVideo } from '../types';
 
 const getDeterministicColor = (email: string) => {
   const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
@@ -14,6 +15,11 @@ const getDeterministicColor = (email: string) => {
 // The player URL already carries the encrypted stream id as ?id= — reuse
 // it to hit the streaming worker directly for the hover preview, no
 // separate preview clip/upload needed.
+// Resting preview frame is grabbed a couple seconds in (avoids the often-blank
+// first frame); hovering resumes playback from there for a short loop.
+const PREVIEW_START = 2.5;
+const PREVIEW_LOOP_SECONDS = 4;
+
 const extractStreamId = (playerUrl?: string | null) => {
   if (!playerUrl) return null;
   try {
@@ -47,10 +53,17 @@ export function LibraryPage() {
   const [loadingInvites, setLoadingInvites] = useState(false);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [workspacesList, setWorkspacesList] = useState<{ id: string; name: string }[]>([]);
+  const [moveFolderTarget, setMoveFolderTarget] = useState<WorkspaceVideo | null>(null);
+  const [moveWorkspaceTarget, setMoveWorkspaceTarget] = useState<WorkspaceVideo | null>(null);
 
   const isFetching = useRef(false);
   const observerTarget = useRef<HTMLDivElement>(null);
+  const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const user = getUser();
+  const [searchParams] = useSearchParams();
+  const activeFolderId = searchParams.get('folder');
 
   const fetchData = useCallback(async (cursor?: any) => {
     const isInitial = !cursor;
@@ -69,6 +82,7 @@ export function LibraryPage() {
 
     try {
       let url = `${API_BASE}/videos?workspaceId=${user.workspaceId}&limit=12`;
+      if (activeFolderId) url += `&folderId=${activeFolderId}`;
       if (cursor) url += `&cursor=${cursor}`;
       const res = await safeFetch(url);
       const { videos, nextCursor: newCursor, hasMore: moreAvailable } = await res.json();
@@ -91,6 +105,7 @@ export function LibraryPage() {
         status: v.status || 'ready',
         ownerId: v.ownerId,
         workspaceId: v.workspaceId,
+        folderId: v.folderId,
       }));
 
       if (isInitial) setFiles(mapped);
@@ -102,7 +117,7 @@ export function LibraryPage() {
       setLoadingMore(false);
       isFetching.current = false;
     }
-  }, [user?.workspaceId]);
+  }, [user?.workspaceId, activeFolderId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -136,6 +151,52 @@ export function LibraryPage() {
   useEffect(() => {
     if (showMembersModal) { fetchMembers(); fetchInvites(); }
   }, [showMembersModal, fetchMembers, fetchInvites]);
+
+  const fetchFolders = useCallback(async () => {
+    if (!user?.workspaceId) return;
+    try {
+      const res = await safeFetch(`${API_BASE}/folders?workspaceId=${user.workspaceId}`);
+      const data = await res.json();
+      setFolders(data.folders || []);
+    } catch { }
+  }, [user?.workspaceId]);
+
+  useEffect(() => { fetchFolders(); }, [fetchFolders]);
+
+  useEffect(() => {
+    safeFetch(`${API_BASE}/workspaces`)
+      .then(r => r.json())
+      .then(data => setWorkspacesList(data.workspaces || []))
+      .catch(() => { });
+  }, [user?.workspaceId]);
+
+  const handleMoveToFolder = async (file: WorkspaceVideo, folderId: string | null) => {
+    try {
+      await safeFetch(`${API_BASE}/videos/${file.backendId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId }),
+      });
+      setMoveFolderTarget(null);
+      fetchData();
+    } catch (err: any) {
+      alert(`Failed to move recording: ${err.message}`);
+    }
+  };
+
+  const handleMoveToWorkspace = async (file: WorkspaceVideo, workspaceId: string) => {
+    try {
+      await safeFetch(`${API_BASE}/videos/${file.backendId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceId }),
+      });
+      setMoveWorkspaceTarget(null);
+      fetchData();
+    } catch (err: any) {
+      alert(`Failed to move recording: ${err.message}`);
+    }
+  };
 
   useEffect(() => {
     const timeout = setTimeout(() => setDebouncedQuery(searchQuery), 200);
@@ -292,7 +353,11 @@ export function LibraryPage() {
         <div>
           <p style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.2em', fontWeight: 600, color: '#A1A1AA', marginBottom: '0.5rem' }}>Library</p>
           <h1 style={{ fontSize: '2.5rem', fontWeight: 700, color: '#fff', letterSpacing: '-0.02em' }}>Team Workspace Library</h1>
-          <p style={{ color: '#A1A1AA', fontSize: '0.9rem', marginTop: '0.25rem' }}>All recordings in this workspace are shared with your team.</p>
+          <p style={{ color: '#A1A1AA', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+            {activeFolderId
+              ? `Library / ${folders.find(f => f.id === activeFolderId)?.name || 'Folder'}`
+              : 'All recordings in this workspace are shared with your team.'}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <button onClick={() => { setShowMembersModal(true); fetchMembers(); }} style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '0.6rem 1.2rem', borderRadius: '9999px', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -312,8 +377,8 @@ export function LibraryPage() {
 
       {/* Members Modal */}
       {showMembersModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
-          <div style={{ background: '#18181b', padding: '2rem', borderRadius: '1.5rem', maxWidth: '500px', width: '90%', border: '1px solid rgba(255,255,255,0.1)', position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="sv-modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+          <div className="sv-modal-panel" style={{ background: '#18181b', padding: '2rem', borderRadius: '1.5rem', maxWidth: '500px', width: '90%', border: '1px solid rgba(255,255,255,0.1)', position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
             <button onClick={() => setShowMembersModal(false)} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: '#71717A', cursor: 'pointer' }}>✕</button>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
               <div>
@@ -392,8 +457,8 @@ export function LibraryPage() {
 
       {/* Leave Confirm */}
       {showLeaveConfirm && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-          <div style={{ background: '#18181b', padding: '2rem', borderRadius: '12px', maxWidth: '400px', width: '90%', border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div className="sv-modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+          <div className="sv-modal-panel" style={{ background: '#18181b', padding: '2rem', borderRadius: '12px', maxWidth: '400px', width: '90%', border: '1px solid rgba(255,255,255,0.1)' }}>
             <h3 style={{ color: '#fff', fontSize: '1.25rem', marginBottom: '1rem' }}>Leave this workspace?</h3>
             <ul style={{ color: '#A1A1AA', marginBottom: '2rem', paddingLeft: '1.2rem', lineHeight: 1.6 }}>
               <li>You will lose access to shared videos.</li>
@@ -403,6 +468,96 @@ export function LibraryPage() {
               <button onClick={() => setShowLeaveConfirm(false)} style={{ padding: '0.5rem 1rem', background: 'transparent', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '6px', cursor: 'pointer' }}>Cancel</button>
               <button onClick={handleLeaveWorkspace} disabled={leaving} style={{ padding: '0.5rem 1rem', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '6px', cursor: leaving ? 'not-allowed' : 'pointer' }}>{leaving ? 'Leaving...' : 'Leave'}</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Move to Folder */}
+      {moveFolderTarget && (
+        <div className="sv-modal-backdrop" onClick={() => setMoveFolderTarget(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+          <div className="sv-modal-panel" onClick={e => e.stopPropagation()} style={{ background: '#18181b', padding: '1.5rem', borderRadius: '1.1rem', maxWidth: '360px', width: '90%', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 20px 40px -12px rgba(0,0,0,0.6)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '1.25rem' }}>
+              <div style={{ width: '34px', height: '34px', borderRadius: '9px', background: 'rgba(59,130,246,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+                </svg>
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <h3 style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 700 }}>Move recording</h3>
+                <p style={{ color: '#71717A', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{moveFolderTarget.title}</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '40vh', overflowY: 'auto' }}>
+              <button
+                className="sv-btn-ghost"
+                onClick={() => handleMoveToFolder(moveFolderTarget, null)}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', textAlign: 'left', padding: '0.6rem 0.75rem', background: 'transparent', border: '1px dashed rgba(255,255,255,0.14)', borderRadius: '9px', color: '#A1A1AA', cursor: 'pointer', fontSize: '0.85rem' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+                  <line x1="3" y1="21" x2="21" y2="3" />
+                </svg>
+                No folder
+              </button>
+              {folders.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '8px 0 2px' }}>
+                  <span style={{ fontSize: '0.65rem', color: '#52525B', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Folders</span>
+                  <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.06)' }} />
+                </div>
+              )}
+              {folders.map((f, i) => (
+                <button
+                  key={f.id}
+                  className="sv-btn-ghost sv-row-in"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', textAlign: 'left', padding: '0.6rem 0.75rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '9px', color: '#fff', cursor: 'pointer', fontSize: '0.85rem', animationDelay: `${i * 20}ms` }}
+                  onClick={() => handleMoveToFolder(moveFolderTarget, f.id)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+                  </svg>
+                  {f.name}
+                </button>
+              ))}
+              {!folders.length && <p style={{ color: '#71717A', fontSize: '0.8rem', padding: '0.5rem 0.1rem' }}>No folders yet — create one from the sidebar first.</p>}
+            </div>
+            <button className="sv-btn-ghost sv-btn-press" onClick={() => setMoveFolderTarget(null)} style={{ marginTop: '1rem', width: '100%', padding: '0.6rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '9px', color: '#A1A1AA', cursor: 'pointer', fontSize: '0.85rem' }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Move to Workspace */}
+      {moveWorkspaceTarget && (
+        <div className="sv-modal-backdrop" onClick={() => setMoveWorkspaceTarget(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
+          <div className="sv-modal-panel" onClick={e => e.stopPropagation()} style={{ background: '#18181b', padding: '1.5rem', borderRadius: '1.1rem', maxWidth: '360px', width: '90%', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 20px 40px -12px rgba(0,0,0,0.6)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '0.5rem' }}>
+              <div style={{ width: '34px', height: '34px', borderRadius: '9px', background: 'rgba(16,185,129,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />
+                </svg>
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <h3 style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 700 }}>Move to workspace</h3>
+                <p style={{ color: '#71717A', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{moveWorkspaceTarget.title}</p>
+              </div>
+            </div>
+            <p style={{ color: '#71717A', fontSize: '0.75rem', marginBottom: '1rem' }}>This unfiles the recording from its current folder.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '40vh', overflowY: 'auto' }}>
+              {workspacesList.filter(w => w.id !== user?.workspaceId).map((w, i) => (
+                <button
+                  key={w.id}
+                  className="sv-btn-ghost sv-row-in"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', textAlign: 'left', padding: '0.6rem 0.75rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '9px', color: '#fff', cursor: 'pointer', fontSize: '0.85rem', animationDelay: `${i * 20}ms` }}
+                  onClick={() => handleMoveToWorkspace(moveWorkspaceTarget, w.id)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />
+                  </svg>
+                  {w.name}
+                </button>
+              ))}
+              {workspacesList.filter(w => w.id !== user?.workspaceId).length === 0 && <p style={{ color: '#71717A', fontSize: '0.8rem', padding: '0.5rem 0.1rem' }}>You're not a member of any other workspace.</p>}
+            </div>
+            <button className="sv-btn-ghost sv-btn-press" onClick={() => setMoveWorkspaceTarget(null)} style={{ marginTop: '1rem', width: '100%', padding: '0.6rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '9px', color: '#A1A1AA', cursor: 'pointer', fontSize: '0.85rem' }}>Cancel</button>
           </div>
         </div>
       )}
@@ -440,23 +595,27 @@ export function LibraryPage() {
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
-              {filteredFiles.map(file => (
+              {filteredFiles.map((file, i) => (
                 <div
                   key={file.id}
-                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }}
+                  className="sv-card sv-row-in"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative', animationDelay: `${Math.min(i, 12) * 25}ms` }}
                   onMouseLeave={() => setMenuOpenId(null)}
                 >
                   {/* Actions Menu */}
                   <div style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 10 }}>
                     <button
+                      className="sv-icon-btn"
                       onClick={e => { e.stopPropagation(); setMenuOpenId(menuOpenId === file.id ? null : file.id); }}
                       style={{ background: 'rgba(0,0,0,0.4)', border: 'none', color: '#fff', width: '32px', height: '32px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', backdropFilter: 'blur(4px)' }}
                     >⋯</button>
                     {menuOpenId === file.id && (
-                      <div style={{ position: 'absolute', top: '40px', right: '0', background: '#18181B', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)', padding: '6px', minWidth: '140px', zIndex: 100 }}>
+                      <div className="sv-menu-panel" style={{ position: 'absolute', top: '40px', right: '0', background: '#18181B', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)', padding: '6px', minWidth: '140px', zIndex: 100 }}>
                         {[
                           { label: copiedId === file.id ? 'Copied!' : 'Copy Link', onClick: (e: React.MouseEvent) => { copyLink(e, file); setMenuOpenId(null); } },
                           { label: 'Rename', onClick: (e: React.MouseEvent) => { e.stopPropagation(); setEditingId(file.id); setEditingTitle(file.title); setMenuOpenId(null); } },
+                          { label: 'Move to Folder', onClick: (e: React.MouseEvent) => { e.stopPropagation(); setMoveFolderTarget(file); setMenuOpenId(null); } },
+                          { label: 'Move to Workspace', onClick: (e: React.MouseEvent) => { e.stopPropagation(); setMoveWorkspaceTarget(file); setMenuOpenId(null); } },
                         ].map(item => (
                           <button key={item.label} onClick={item.onClick} style={{ display: 'flex', alignItems: 'center', width: '100%', padding: '8px 12px', background: 'transparent', border: 'none', color: '#fff', fontSize: '0.875rem', cursor: 'pointer', borderRadius: '8px', textAlign: 'left' }}
                             onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
@@ -475,12 +634,39 @@ export function LibraryPage() {
                   {/* Thumbnail */}
                   <div
                     style={{ position: 'relative', cursor: 'pointer' }}
-                    onMouseEnter={() => setHoveredId(file.id)}
-                    onMouseLeave={() => setHoveredId(null)}
+                    onMouseEnter={() => {
+                      setHoveredId(file.id);
+                      videoRefs.current.get(file.id)?.play().catch(() => {});
+                    }}
+                    onMouseLeave={() => {
+                      setHoveredId(null);
+                      const v = videoRefs.current.get(file.id);
+                      if (v) { v.pause(); v.currentTime = PREVIEW_START; }
+                    }}
                     onClick={() => openVideo(file)}
                   >
                     <div style={{ aspectRatio: '16/9', background: '#050505', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                      {file.thumbnailLink ? (
+                      {extractStreamId(file.playerUrl) ? (
+                        <video
+                          key={file.id}
+                          ref={el => { if (el) videoRefs.current.set(file.id, el); else videoRefs.current.delete(file.id); }}
+                          src={`${STREAM_BASE}/?id=${extractStreamId(file.playerUrl)}`}
+                          muted
+                          loop={false}
+                          playsInline
+                          preload="metadata"
+                          onLoadedMetadata={e => {
+                            const dur = e.currentTarget.duration;
+                            e.currentTarget.currentTime = isFinite(dur) && dur > 0 ? Math.min(PREVIEW_START, dur / 2) : PREVIEW_START;
+                          }}
+                          onTimeUpdate={e => {
+                            if (e.currentTarget.currentTime >= PREVIEW_START + PREVIEW_LOOP_SECONDS) {
+                              e.currentTarget.currentTime = PREVIEW_START;
+                            }
+                          }}
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: hoveredId === file.id ? 0.85 : 1, transition: 'opacity 0.2s' }}
+                        />
+                      ) : file.thumbnailLink ? (
                         <img src={file.thumbnailLink} alt={file.title} style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: hoveredId === file.id ? 0.8 : 1, transition: 'opacity 0.2s' }} />
                       ) : (
                         <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(45deg, #18181B, #09090B)' }}>
@@ -488,20 +674,6 @@ export function LibraryPage() {
                             <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>
                           </svg>
                         </div>
-                      )}
-                      {hoveredId === file.id && extractStreamId(file.playerUrl) && (
-                        <video
-                          key={file.id}
-                          src={`${STREAM_BASE}/?id=${extractStreamId(file.playerUrl)}`}
-                          autoPlay
-                          muted
-                          loop={false}
-                          playsInline
-                          onTimeUpdate={e => {
-                            if (e.currentTarget.currentTime >= 4) e.currentTarget.currentTime = 0;
-                          }}
-                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
                       )}
                       <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: hoveredId === file.id ? 'rgba(0,0,0,0.2)' : 'transparent', transition: 'background 0.2s' }}>
                         <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: hoveredId === file.id ? 1 : 0, transform: hoveredId === file.id ? 'scale(1)' : 'scale(0.8)', transition: 'all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)' }}>

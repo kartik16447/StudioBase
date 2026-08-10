@@ -1,5 +1,6 @@
 /* global chrome */
 import React, { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { recoverSession } from "../../db";
 import {
   StorageAccount,
@@ -90,6 +91,14 @@ export function LibraryPage() {
   const [loadingInvites, setLoadingInvites] = useState(false);
   const [storageAccounts, setStorageAccounts] = useState<StorageAccount[]>([]);
 
+  // Folders / cross-workspace move state
+  const [searchParams] = useSearchParams();
+  const activeFolderId = searchParams.get("folder");
+  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [workspacesList, setWorkspacesList] = useState<{ id: string; name: string }[]>([]);
+  const [moveFolderTarget, setMoveFolderTarget] = useState<WorkspaceVideo | null>(null);
+  const [moveWorkspaceTarget, setMoveWorkspaceTarget] = useState<WorkspaceVideo | null>(null);
+
   const isFetching = React.useRef(false);
   const observerTarget = React.useRef<HTMLDivElement>(null);
 
@@ -141,6 +150,7 @@ export function LibraryPage() {
 
     try {
       let url = `https://screenvault-backend.tushar-abf.workers.dev/videos?workspaceId=${workspaceId}&limit=12`;
+      if (activeFolderId) url += `&folderId=${activeFolderId}`;
       if (cursor) url += `&cursor=${cursor}`;
 
       const res = await safeFetch(url);
@@ -242,7 +252,7 @@ export function LibraryPage() {
       isFetching.current = false;
       console.log("fetchData completed.");
     }
-  }, []); // Dependencies removed to prevent infinite loop
+  }, [activeFolderId]);
 
   useEffect(() => {
     if (!hasMore || loadingMore || loading) return;
@@ -303,6 +313,67 @@ export function LibraryPage() {
       fetchInvites();
     }
   }, [showMembersModal, fetchMembers, fetchInvites]);
+
+  const fetchFolders = React.useCallback(async () => {
+    const workspaceId = user?.workspaceId;
+    if (!workspaceId) return;
+    try {
+      const res = await safeFetch(
+        `https://screenvault-backend.tushar-abf.workers.dev/folders?workspaceId=${workspaceId}`,
+      );
+      const data = await res.json();
+      setFolders(data.folders || []);
+    } catch (err) {
+      console.error("Failed to fetch folders:", err);
+    }
+  }, [user?.workspaceId]);
+
+  useEffect(() => {
+    fetchFolders();
+  }, [fetchFolders]);
+
+  useEffect(() => {
+    safeFetch(`https://screenvault-backend.tushar-abf.workers.dev/workspaces`)
+      .then((res) => res.json())
+      .then((data) => setWorkspacesList(data.workspaces || []))
+      .catch(() => {});
+  }, [user?.workspaceId]);
+
+  const handleMoveToFolder = async (file: WorkspaceVideo, folderId: string | null) => {
+    const targetId = file.backendId || file.id;
+    try {
+      await safeFetch(
+        `https://screenvault-backend.tushar-abf.workers.dev/videos/${targetId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ folderId }),
+        },
+      );
+      setMoveFolderTarget(null);
+      fetchData();
+    } catch (err: any) {
+      alert(`Failed to move recording: ${err.message}`);
+    }
+  };
+
+  const handleMoveToWorkspace = async (file: WorkspaceVideo, workspaceId: string) => {
+    const targetId = file.backendId || file.id;
+    try {
+      await safeFetch(
+        `https://screenvault-backend.tushar-abf.workers.dev/videos/${targetId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspaceId }),
+        },
+      );
+      setMoveWorkspaceTarget(null);
+      fetchData();
+    } catch (err: any) {
+      alert(`Failed to move recording: ${err.message}`);
+    }
+  };
 
   const handleRevokeInvite = async (inviteId: string) => {
     if (
@@ -963,7 +1034,9 @@ export function LibraryPage() {
               marginTop: "0.25rem",
             }}
           >
-            All recordings in this workspace are shared with your team.
+            {activeFolderId
+              ? `Library / ${folders.find((f) => f.id === activeFolderId)?.name || "Folder"}`
+              : "All recordings in this workspace are shared with your team."}
           </p>
         </div>
         <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
@@ -1598,6 +1671,170 @@ export function LibraryPage() {
         </div>
       )}
 
+      {moveFolderTarget && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.8)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 60,
+          }}
+          onClick={() => setMoveFolderTarget(null)}
+        >
+          <div
+            style={{
+              background: "#18181b",
+              padding: "1.5rem",
+              borderRadius: "1rem",
+              maxWidth: "360px",
+              width: "90%",
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ color: "#fff", fontSize: "1.1rem", marginBottom: "1rem" }}>
+              Move "{moveFolderTarget.title}" to folder
+            </h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "40vh", overflowY: "auto" }}>
+              <button
+                onClick={() => handleMoveToFolder(moveFolderTarget, null)}
+                style={{
+                  textAlign: "left",
+                  padding: "0.6rem 0.9rem",
+                  background: "rgba(255,255,255,0.05)",
+                  border: "none",
+                  borderRadius: "8px",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: "0.875rem",
+                }}
+              >
+                Unfiled
+              </button>
+              {folders.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => handleMoveToFolder(moveFolderTarget, f.id)}
+                  style={{
+                    textAlign: "left",
+                    padding: "0.6rem 0.9rem",
+                    background: "rgba(255,255,255,0.05)",
+                    border: "none",
+                    borderRadius: "8px",
+                    color: "#fff",
+                    cursor: "pointer",
+                    fontSize: "0.875rem",
+                  }}
+                >
+                  📁 {f.name}
+                </button>
+              ))}
+              {!folders.length && (
+                <p style={{ color: "#71717A", fontSize: "0.8rem" }}>
+                  No folders yet — create one from the sidebar first.
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => setMoveFolderTarget(null)}
+              style={{
+                marginTop: "1rem",
+                width: "100%",
+                padding: "0.6rem",
+                background: "transparent",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: "8px",
+                color: "#A1A1AA",
+                cursor: "pointer",
+                fontSize: "0.85rem",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {moveWorkspaceTarget && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.8)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 60,
+          }}
+          onClick={() => setMoveWorkspaceTarget(null)}
+        >
+          <div
+            style={{
+              background: "#18181b",
+              padding: "1.5rem",
+              borderRadius: "1rem",
+              maxWidth: "360px",
+              width: "90%",
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ color: "#fff", fontSize: "1.1rem", marginBottom: "0.5rem" }}>
+              Move "{moveWorkspaceTarget.title}" to workspace
+            </h3>
+            <p style={{ color: "#71717A", fontSize: "0.8rem", marginBottom: "1rem" }}>
+              This unfiles the recording from its current folder.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "40vh", overflowY: "auto" }}>
+              {workspacesList
+                .filter((w) => w.id !== user?.workspaceId)
+                .map((w) => (
+                  <button
+                    key={w.id}
+                    onClick={() => handleMoveToWorkspace(moveWorkspaceTarget, w.id)}
+                    style={{
+                      textAlign: "left",
+                      padding: "0.6rem 0.9rem",
+                      background: "rgba(255,255,255,0.05)",
+                      border: "none",
+                      borderRadius: "8px",
+                      color: "#fff",
+                      cursor: "pointer",
+                      fontSize: "0.875rem",
+                    }}
+                  >
+                    {w.name}
+                  </button>
+                ))}
+              {workspacesList.filter((w) => w.id !== user?.workspaceId).length === 0 && (
+                <p style={{ color: "#71717A", fontSize: "0.8rem" }}>
+                  You're not a member of any other workspace.
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => setMoveWorkspaceTarget(null)}
+              style={{
+                marginTop: "1rem",
+                width: "100%",
+                padding: "0.6rem",
+                background: "transparent",
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: "8px",
+                color: "#A1A1AA",
+                cursor: "pointer",
+                fontSize: "0.85rem",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {!files.length ? (
         <div
           style={{ color: "#A1A1AA", textAlign: "center", padding: "4rem 0" }}
@@ -1866,6 +2103,70 @@ export function LibraryPage() {
                             <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                           </svg>
                           Rename
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMoveFolderTarget(file);
+                            setMenuOpenId(null);
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                            width: "100%",
+                            padding: "8px 12px",
+                            background: "transparent",
+                            border: "none",
+                            color: "#fff",
+                            fontSize: "0.875rem",
+                            cursor: "pointer",
+                            borderRadius: "8px",
+                            textAlign: "left",
+                            transition: "background 0.2s",
+                          }}
+                          onMouseEnter={(e) =>
+                            (e.currentTarget.style.background =
+                              "rgba(255,255,255,0.05)")
+                          }
+                          onMouseLeave={(e) =>
+                            (e.currentTarget.style.background = "transparent")
+                          }
+                        >
+                          Move to Folder
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMoveWorkspaceTarget(file);
+                            setMenuOpenId(null);
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                            width: "100%",
+                            padding: "8px 12px",
+                            background: "transparent",
+                            border: "none",
+                            color: "#fff",
+                            fontSize: "0.875rem",
+                            cursor: "pointer",
+                            borderRadius: "8px",
+                            textAlign: "left",
+                            transition: "background 0.2s",
+                          }}
+                          onMouseEnter={(e) =>
+                            (e.currentTarget.style.background =
+                              "rgba(255,255,255,0.05)")
+                          }
+                          onMouseLeave={(e) =>
+                            (e.currentTarget.style.background = "transparent")
+                          }
+                        >
+                          Move to Workspace
                         </button>
 
                         <div
