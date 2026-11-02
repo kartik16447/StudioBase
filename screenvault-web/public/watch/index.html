@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ScreenVault | Video Player</title>
+    <title>Foyr Screen Recorder | Video Player</title>
     <link rel="icon" type="image/png" href="icons/icon48.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -52,6 +52,31 @@
           transform: rotate(360deg);
         }
       }
+
+      /* Header logo icon entrance: swoosh on fresh navigation, pulse on reload */
+      @keyframes sv-logo-swoosh {
+        0% { opacity: 0; transform: translateX(-28px) scale(0.85); }
+        60% { opacity: 1; transform: translateX(2px) scale(1.03); }
+        100% { opacity: 1; transform: translateX(0) scale(1); }
+      }
+      @keyframes sv-logo-pulse-in {
+        0% { opacity: 0; transform: scale(0.6); }
+        50% { opacity: 1; transform: scale(1.08); }
+        70% { transform: scale(0.97); }
+        100% { opacity: 1; transform: scale(1); }
+      }
+      @keyframes sv-logo-pulse-ring {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(234, 88, 12, 0.5); }
+        50% { box-shadow: 0 0 0 10px rgba(234, 88, 12, 0); }
+      }
+      .sv-logo-icon.sv-anim-swoosh {
+        animation: sv-logo-swoosh 550ms cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+      .sv-logo-icon.sv-anim-pulse {
+        animation:
+          sv-logo-pulse-in 500ms cubic-bezier(0.16, 1, 0.3, 1) both,
+          sv-logo-pulse-ring 1.8s ease-out 500ms 2;
+      }
     </style>
   </head>
   <body
@@ -60,19 +85,20 @@
     <nav
       class="w-full bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm z-10"
     >
-      <a href="https://screenvault-web-7r9.pages.dev/library" class="flex items-center gap-2 no-underline">
+      <a href="/library" class="flex items-center gap-2 no-underline">
         <div
-          class="w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-md"
+          id="sv-logo-icon"
+          class="sv-logo-icon w-8 h-8 bg-brand rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-md"
         >
           <i class="ph ph-video-camera"></i>
         </div>
         <span class="font-bold text-xl tracking-tight text-gray-900"
-          >RecVault Beta</span
+          >Foyr Screen Recorder</span
         >
       </a>
       <div>
         <a
-          href="https://chromewebstore.google.com/detail/screenvault/kcjifkhbafhlccnhamlmjlnpdpofdfom"
+          href="https://chromewebstore.google.com/detail/foyr-screen-recorder/ejaghjlljgimabjjfmkcopcaphaedldg"
           target="_blank"
           rel="noopener"
           class="text-sm font-medium bg-gray-900 text-white px-4 py-2 rounded-md transition-colors hover:bg-gray-800 shadow-sm ml-2 inline-block"
@@ -253,6 +279,19 @@
 
     <script src="playback.js"></script>
     <script>
+      (function () {
+        var icon = document.getElementById("sv-logo-icon");
+        if (!icon) return;
+        var navEntries = performance.getEntriesByType
+          ? performance.getEntriesByType("navigation")
+          : [];
+        var isReload =
+          (navEntries[0] && navEntries[0].type === "reload") ||
+          (performance.navigation && performance.navigation.type === 1);
+        icon.classList.add(isReload ? "sv-anim-pulse" : "sv-anim-swoosh");
+      })();
+    </script>
+    <script>
       // Set today's date dynamically
       document.getElementById("date-display").textContent =
         new Date().toLocaleDateString("en-US", {
@@ -430,6 +469,16 @@
               const data = await metaRes.json();
               if (data.name) titleEl.textContent = data.name.replace(".webm", "");
               if (data.actualDurationMs) authoritativeDurationMs = data.actualDurationMs;
+              if (data.contentType && data.contentType.startsWith("image/")) {
+                // Uploaded image: no playback, just show it.
+                const img = document.createElement("img");
+                img.src = `https://screenvault-proxy.tushar-abf.workers.dev/?id=${fileId}&sid=${sessionId}`;
+                img.alt = titleEl.textContent;
+                img.className = "w-full h-full object-contain bg-black";
+                video.replaceWith(img);
+                ["center-play-btn", "controls-bar", "loader"].forEach((id) => document.getElementById(id)?.remove());
+                return;
+              }
             }
 
             // 2. Start Video (Muted Preview)
@@ -500,19 +549,42 @@
           speedBtn.textContent = speeds[speedIdx] + "x";
         });
 
-        fullscreenBtn.addEventListener("click", () => {
-          if (!document.fullscreenElement) {
-            videoWrapper.requestFullscreen?.();
-          } else {
-            document.exitFullscreen?.();
-          }
-        });
+        // Fullscreen: the standard API works on desktop and Android Chrome, but
+        // iPhone Safari only allows fullscreen on the <video> element itself
+        // (webkitEnterFullscreen, which swaps in the native player), and older
+        // WebKit only has the prefixed element API.
+        const fsElement = () =>
+          document.fullscreenElement || document.webkitFullscreenElement || null;
+        const isFullscreen = () => !!fsElement() || !!video.webkitDisplayingFullscreen;
 
-        document.addEventListener("fullscreenchange", () => {
-          fullscreenIcon.className = document.fullscreenElement
+        function toggleFullscreen() {
+          if (isFullscreen()) {
+            if (video.webkitDisplayingFullscreen) video.webkitExitFullscreen?.();
+            else (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
+            return;
+          }
+          const req = videoWrapper.requestFullscreen || videoWrapper.webkitRequestFullscreen;
+          if (req) {
+            Promise.resolve(req.call(videoWrapper))
+              .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
+              .catch(() => video.webkitEnterFullscreen?.());
+          } else if (video.webkitEnterFullscreen) {
+            video.webkitEnterFullscreen();
+          }
+        }
+
+        function syncFullscreenIcon() {
+          fullscreenIcon.className = isFullscreen()
             ? "ph ph-arrows-in text-xl"
             : "ph ph-arrows-out text-xl";
-        });
+          if (!isFullscreen()) screen.orientation?.unlock?.();
+        }
+
+        fullscreenBtn.addEventListener("click", toggleFullscreen);
+        document.addEventListener("fullscreenchange", syncFullscreenIcon);
+        document.addEventListener("webkitfullscreenchange", syncFullscreenIcon);
+        video.addEventListener("webkitbeginfullscreen", syncFullscreenIcon);
+        video.addEventListener("webkitendfullscreen", syncFullscreenIcon);
 
         // Keyboard Shortcuts
         window.addEventListener("keydown", (e) => {
@@ -529,11 +601,7 @@
               updateVolumeIcon();
               break;
             case "f":
-              if (!document.fullscreenElement) {
-                videoWrapper.requestFullscreen?.();
-              } else {
-                document.exitFullscreen?.();
-              }
+              toggleFullscreen();
               break;
             case "arrowleft":
               video.currentTime = Math.max(0, video.currentTime - 15);

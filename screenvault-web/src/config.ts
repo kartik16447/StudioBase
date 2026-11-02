@@ -1,5 +1,6 @@
 export const API_BASE = 'https://screenvault-backend.tushar-abf.workers.dev';
-export const VIEWER_BASE = 'https://screenvault.tushar-abf.workers.dev';
+export const VIEWER_BASE = 'https://recorder.foyr.com/watch';
+export const DASHBOARD_BASE = 'https://recorder.foyr.com';
 export const STREAM_BASE = 'https://screenvault-proxy.tushar-abf.workers.dev';
 
 // Set this to your Google OAuth Client ID (Web Application type from Google Cloud Console)

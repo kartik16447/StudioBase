@@ -125,8 +125,8 @@ export function LoginPage() {
       padding: '2rem',
     }}>
       <div style={{ marginBottom: '3rem', textAlign: 'center' }}>
-        <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff', letterSpacing: '-0.03em', marginBottom: '0.5rem' }}>
-          ScreenVault
+        <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#fff', letterSpacing: '-0.02em', marginBottom: '0.5rem' }}>
+          Foyr Screen Recorder
         </div>
         <div style={{ fontSize: '0.9rem', color: '#71717A' }}>
           Your team's screen recording library
@@ -169,7 +169,7 @@ export function LoginPage() {
             <div style={{
               width: '18px', height: '18px',
               border: '2px solid rgba(255,255,255,0.1)',
-              borderTopColor: '#3b82f6',
+              borderTopColor: '#EA580C',
               borderRadius: '50%',
               animation: 'spin 0.8s linear infinite',
             }} />

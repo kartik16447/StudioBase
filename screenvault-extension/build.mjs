@@ -1,9 +1,8 @@
 import * as esbuild from 'esbuild'
 import fs from 'fs';
-import { execSync } from 'child_process';
 
 // ─── Change the app name here, it propagates everywhere ───────────────────────
-const APP_NAME = 'RecVault Beta';
+const APP_NAME = 'Foyr Screen Recorder';
 // ──────────────────────────────────────────────────────────────────────────────
 
 const shared = {
@@ -25,17 +24,13 @@ await esbuild.build({ ...shared, entryPoints: ['src/service-worker.ts'] })
 await esbuild.build({ ...shared, entryPoints: ['src/offscreen.ts'] })
 await esbuild.build({ ...shared, entryPoints: ['src/setup.ts'] })
 await esbuild.build({ ...shared, entryPoints: ['src/popup.ts'] })
-await esbuild.build({ ...shared, entryPoints: ['src/playback.ts'] })
-await esbuild.build({ ...shared, entryPoints: ['src/dashboard/index.tsx'], outbase: 'src' })
 
 // Copy static files
 const staticFiles = [
   ['src/popup.css', 'dist/popup.css'],
   ['src/popup.html', 'dist/popup.html'],
-  ['src/index.html', 'dist/index.html'],
   ['src/offscreen.html', 'dist/offscreen.html'],
   ['src/setup.html', 'dist/setup.html'],
-  ['src/dashboard/dashboard.html', 'dist/dashboard.html'],
   ['manifest.json', 'dist/manifest.json'],
 ];
 
@@ -61,15 +56,4 @@ for (const file of fs.readdirSync('icons')) {
 // Privacy page served at /privacy
 fs.mkdirSync('dist/privacy', { recursive: true });
 fs.copyFileSync('src/privacy.html', 'dist/privacy/index.html');
-
-// Self-hosted Phosphor Icons (was CDN-loaded — MV3 forbids remotely hosted code)
-for (const weight of ['regular', 'fill']) {
-  fs.mkdirSync(`dist/vendor/phosphor/${weight}`, { recursive: true });
-  for (const file of fs.readdirSync(`src/vendor/phosphor/${weight}`)) {
-    fs.copyFileSync(`src/vendor/phosphor/${weight}/${file}`, `dist/vendor/phosphor/${weight}/${file}`);
-  }
-}
-
-// Generate Tailwind CSS for the player page (replaces CDN script)
-execSync('./node_modules/.bin/tailwindcss -i src/player.css -o dist/player.css --minify', { stdio: 'inherit' });
 

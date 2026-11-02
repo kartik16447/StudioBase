@@ -1,0 +1,1 @@
+"use strict";var SV=(()=>{async function n(r,t){if(!r)throw new Error("Invalid fileId: Playback cannot start without a target ID.");let a=`https://screenvault-proxy.tushar-abf.workers.dev/?id=${r}`;return t&&(a+=`&sid=${t}`),a}window.SV={getPlayableUrl:n};})();

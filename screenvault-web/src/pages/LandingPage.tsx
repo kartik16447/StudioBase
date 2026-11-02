@@ -3,17 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { getUser } from '../auth';
 import { API_BASE } from '../config';
 
-const CWS_URL = 'https://chromewebstore.google.com/detail/recvault-beta/kcjifkhbafhlccnhamlmjlnpdpofdfom';
+const CWS_URL = 'https://chromewebstore.google.com/detail/foyr-screen-recorder/ejaghjlljgimabjjfmkcopcaphaedldg';
 
 // ── Icons ──────────────────────────────────────────────────────────────────────
-const IconLogo = ({ className = 'w-6 h-6' }) => (
-  <svg viewBox="0 0 24 24" fill="none" style={{ width: 20, height: 20 }}>
-    <rect x="2.5" y="4.5" width="19" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
-    <circle cx="12" cy="11" r="2.6" fill="#3b82f6" />
-    <path d="M8 21h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-  </svg>
-);
-
 const IconChrome = () => (
   <svg viewBox="0 0 24 24" fill="none" style={{ width: 18, height: 18 }} stroke="currentColor" strokeWidth="1.6">
     <circle cx="12" cy="12" r="9.5" /><circle cx="12" cy="12" r="3.5" />
@@ -27,11 +19,9 @@ function Nav({ onLogin }: { onLogin: () => void }) {
     <nav style={{ position: 'sticky', top: 0, zIndex: 40, backdropFilter: 'blur(12px)', background: 'rgba(0,0,0,0.6)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
       <div style={{ maxWidth: 1152, margin: '0 auto', padding: '0 1.5rem', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', color: '#fff' }}>
-          <span style={{ display: 'grid', placeItems: 'center', width: 32, height: 32, borderRadius: 8, background: 'rgba(59,130,246,0.15)', color: '#60a5fa', outline: '1px solid rgba(59,130,246,0.3)' }}>
-            <IconLogo />
-          </span>
+          <img src="/favicon.svg" alt="" width={32} height={32} style={{ borderRadius: 8, display: 'block' }} />
           <span style={{ fontWeight: 600, fontSize: 15, letterSpacing: '-0.01em' }}>
-            RecVault <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '2px 6px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.6)', verticalAlign: 'middle' }}>Beta</span>
+            Foyr Screen Recorder <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '2px 6px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.6)', verticalAlign: 'middle' }}>Beta</span>
           </span>
         </a>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -52,7 +42,7 @@ function PopupMockup() {
   const toggleStyle = (on: boolean) => ({
     width: 32, height: 18, borderRadius: 999, padding: 2,
     display: 'flex', alignItems: 'center', justifyContent: on ? 'flex-end' : 'flex-start',
-    background: on ? '#3b82f6' : 'rgba(255,255,255,0.1)',
+    background: on ? '#EA580C' : 'rgba(255,255,255,0.1)',
   });
   const sources = [
     { label: 'Tab', active: true, d: <rect x="3" y="6" width="18" height="13" rx="1.5" /> },
@@ -61,23 +51,23 @@ function PopupMockup() {
   ];
   return (
     <div style={{ position: 'relative' }}>
-      <div style={{ position: 'absolute', inset: -32, background: 'rgba(59,130,246,0.1)', filter: 'blur(48px)', borderRadius: 48, pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', inset: -32, background: 'rgba(234,88,12,0.1)', filter: 'blur(48px)', borderRadius: 48, pointerEvents: 'none' }} />
       <div style={{ position: 'relative', width: 360, borderRadius: 16, background: '#0a0a0a', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', height: 40, borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ display: 'grid', placeItems: 'center', width: 20, height: 20, borderRadius: 6, background: 'rgba(59,130,246,0.15)', color: '#60a5fa', outline: '1px solid rgba(59,130,246,0.3)' }}><IconLogo /></span>
-            <span style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.02em', color: '#fff' }}>RecVault</span>
+            <img src="/favicon.svg" alt="" width={20} height={20} style={{ borderRadius: 6, display: 'block' }} />
+            <span style={{ fontSize: 11, fontWeight: 500, letterSpacing: '0.02em', color: '#fff' }}>Foyr Screen Recorder</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399' }} />
-            Drive connected
+            Signed in
           </div>
         </div>
         <div style={{ padding: 16 }}>
           <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Source</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
             {sources.map((s, i) => (
-              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, height: 64, borderRadius: 8, border: `1px solid ${s.active ? 'rgba(59,130,246,0.6)' : 'rgba(255,255,255,0.06)'}`, background: s.active ? 'rgba(59,130,246,0.1)' : 'rgba(255,255,255,0.02)', fontSize: 11, color: s.active ? '#fff' : 'rgba(255,255,255,0.55)' }}>
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, height: 64, borderRadius: 8, border: `1px solid ${s.active ? 'rgba(234,88,12,0.6)' : 'rgba(255,255,255,0.06)'}`, background: s.active ? 'rgba(234,88,12,0.1)' : 'rgba(255,255,255,0.02)', fontSize: 11, color: s.active ? '#fff' : 'rgba(255,255,255,0.55)' }}>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 16, height: 16 }}>{s.d}</svg>
                 {s.label}
               </div>
@@ -94,7 +84,7 @@ function PopupMockup() {
               </div>
             ))}
           </div>
-          <a href={CWS_URL} target="_blank" rel="noopener" style={{ marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', height: 44, borderRadius: 12, background: '#3b82f6', color: '#fff', fontSize: 14, fontWeight: 500, textDecoration: 'none' }}>
+          <a href={CWS_URL} target="_blank" rel="noopener" style={{ marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', height: 44, borderRadius: 12, background: '#EA580C', color: '#fff', fontSize: 14, fontWeight: 500, textDecoration: 'none' }}>
             <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fff', animation: 'rv-pulse 1.6s ease-in-out infinite' }} />
             Start recording
           </a>
@@ -122,7 +112,7 @@ function PopupMockup() {
 // ── Sections ───────────────────────────────────────────────────────────────────
 function HowItWorks() {
   const steps = [
-    { n: '01', title: 'Install & connect Google Drive', body: 'Add RecVault to Chrome and authorize the folder where recordings should live.', icon: <path d="M3 7l9-4 9 4-9 4-9-4z" />, icon2: <><path d="M3 12l9 4 9-4" /><path d="M3 17l9 4 9-4" /></> },
+    { n: '01', title: 'Install & sign in with Google', body: 'Add Foyr Screen Recorder to Chrome and sign in — used only for identity, no folders or file permissions needed.', icon: <path d="M3 7l9-4 9 4-9 4-9-4z" />, icon2: <><path d="M3 12l9 4 9-4" /><path d="M3 17l9 4 9-4" /></> },
     { n: '02', title: 'Record your screen', body: 'Pick a tab, window, or full screen. Add mic, camera bubble, click highlights — hit record.', icon: <><circle cx="12" cy="12" r="4" /><circle cx="12" cy="12" r="9" /></> },
     { n: '03', title: 'Get a shareable link instantly', body: 'The moment you stop, your video uploads and a shareable link is already in your clipboard.', icon: <><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.5 1.5" /><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7L12 19" /></> },
   ];
@@ -137,7 +127,7 @@ function HowItWorks() {
           {steps.map((s, i) => (
             <div key={i} style={{ borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.015)', padding: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 48 }}>
-                <span style={{ display: 'grid', placeItems: 'center', width: 40, height: 40, borderRadius: 12, background: 'rgba(59,130,246,0.1)', color: '#60a5fa', outline: '1px solid rgba(59,130,246,0.2)' }}>
+                <span style={{ display: 'grid', placeItems: 'center', width: 40, height: 40, borderRadius: 12, background: 'rgba(234,88,12,0.1)', color: '#FB923C', outline: '1px solid rgba(234,88,12,0.2)' }}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>{s.icon}{s.icon2}</svg>
                 </span>
                 <span style={{ fontSize: 11, letterSpacing: '0.2em', color: 'rgba(255,255,255,0.3)', fontWeight: 500 }}>{s.n}</span>
@@ -154,10 +144,10 @@ function HowItWorks() {
 
 function Features() {
   const items = [
-    { title: 'Auto Google Drive upload', body: "Every recording streams straight into your Drive folder of choice — no manual save needed.", d: <><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></> },
+    { title: 'Automatic cloud upload', body: "Every recording streams straight to secure cloud storage — no manual save needed.", d: <><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></> },
     { title: 'Instant shareable link', body: "A link lands in your clipboard the moment you stop recording.", d: <><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.5 1.5" /><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7L12 19" /></> },
-    { title: 'Team workspaces', body: "Share a folder, share defaults. Everyone's recordings land in the same place.", d: <><circle cx="9" cy="9" r="3.5" /><circle cx="17" cy="11" r="2.5" /><path d="M3 19c.7-3 3.4-4.5 6-4.5s5.3 1.5 6 4.5" /><path d="M15 19c.4-1.7 1.6-3 3-3" /></> },
-    { title: 'No storage limits on Drive', body: "Use the Google Drive plan you already pay for. We never cap recording length or count.", d: <><ellipse cx="12" cy="6" rx="8" ry="3" /><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6" /><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></> },
+    { title: 'Team workspaces', body: "Invite your team and everyone's recordings land in the same shared library.", d: <><circle cx="9" cy="9" r="3.5" /><circle cx="17" cy="11" r="2.5" /><path d="M3 19c.7-3 3.4-4.5 6-4.5s5.3 1.5 6 4.5" /><path d="M15 19c.4-1.7 1.6-3 3-3" /></> },
+    { title: 'Encrypted at rest', body: "Recordings are encrypted in dedicated cloud storage, not a shared personal folder.", d: <><ellipse cx="12" cy="6" rx="8" ry="3" /><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6" /><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></> },
     { title: 'Works in the background', body: "Switch tabs, take notes, hop apps. Recording keeps going without grabbing focus.", d: <><rect x="3" y="5" width="14" height="10" rx="1.5" /><rect x="7" y="9" width="14" height="10" rx="1.5" /></> },
     { title: 'Dashboard to manage recordings', body: "Search, rename, share, or delete — across every recording you've ever made.", d: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /><path d="M8 14h6" /><path d="M8 17h9" /></> },
   ];
@@ -169,7 +159,7 @@ function Features() {
             <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.18em', color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>Features</div>
             <h2 style={{ fontSize: 'clamp(1.75rem, 4vw, 3rem)', fontWeight: 600, letterSpacing: '-0.02em', color: '#fff', margin: 0 }}>Everything you need. Nothing you don't.</h2>
           </div>
-          <p style={{ maxWidth: 380, fontSize: 14, color: 'rgba(255,255,255,0.55)', margin: 0 }}>Built for async teams that already live in Google Drive.</p>
+          <p style={{ maxWidth: 380, fontSize: 14, color: 'rgba(255,255,255,0.55)', margin: 0 }}>Built for async teams who want recordings shared in seconds.</p>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
           {items.map((f, i) => (
@@ -189,12 +179,12 @@ function Features() {
 
 function Pricing({ onLogin }: { onLogin: () => void }) {
   const Check = () => (
-    <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, color: '#60a5fa', flexShrink: 0 }} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, color: '#FB923C', flexShrink: 0 }} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M5 12.5l4.5 4.5L19 7.5" />
     </svg>
   );
   const plans = [
-    { label: 'Free', price: '$0', sub: 'Forever free. No card required.', features: ['500MB storage', '1 workspace', 'Up to 3 members', 'Instant shareable links', 'Recordings in your own Drive'], cta: { text: 'Add to Chrome', action: () => window.open(CWS_URL, '_blank') }, featured: false },
+    { label: 'Free', price: '$0', sub: 'Forever free. No card required.', features: ['Store originals at full quality', '1 workspace', 'Up to 3 members', 'Instant shareable links', 'Encrypted cloud storage'], cta: { text: 'Add to Chrome', action: () => window.open(CWS_URL, '_blank') }, featured: false },
     { label: 'Pro', price: '$9', sub: 'Billed monthly. Cancel anytime.', features: ['50GB storage', '1 workspace', 'Unlimited members', 'Priority support', 'Everything in Free'], cta: { text: 'Get Started', action: () => document.getElementById('waitlist-section')?.scrollIntoView({ behavior: 'smooth' }) }, featured: true },
     { label: 'Team', price: '$29', sub: 'For growing teams.', features: ['200GB storage', '5 workspaces', 'Unlimited members', 'Admin dashboard', 'Everything in Pro'], cta: { text: 'Contact Us', action: () => { window.location.href = 'mailto:karthik.upadhyay98@gmail.com'; } }, featured: false },
   ];
@@ -204,17 +194,17 @@ function Pricing({ onLogin }: { onLogin: () => void }) {
         <div style={{ textAlign: 'center', maxWidth: 520, margin: '0 auto 56px' }}>
           <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.18em', color: 'rgba(255,255,255,0.4)', marginBottom: 12 }}>Pricing</div>
           <h2 style={{ fontSize: 'clamp(1.75rem, 4vw, 3rem)', fontWeight: 600, letterSpacing: '-0.02em', color: '#fff', margin: '0 0 20px' }}>Simple, honest pricing</h2>
-          <p style={{ fontSize: 15, color: 'rgba(255,255,255,0.55)', lineHeight: 1.6, margin: 0 }}>Your recordings always live in your Google Drive. Storage costs us nothing on the free tier.</p>
+          <p style={{ fontSize: 15, color: 'rgba(255,255,255,0.55)', lineHeight: 1.6, margin: 0 }}>Fast, encrypted cloud storage included on every plan — no Google Drive account required.</p>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 24, maxWidth: 960, margin: '0 auto' }}>
           {plans.map((p, i) => (
             <div key={i} style={{ position: 'relative' }}>
               {p.featured && (
                 <div style={{ position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)', zIndex: 1 }}>
-                  <span style={{ display: 'inline-flex', padding: '4px 12px', borderRadius: 999, background: '#3b82f6', color: '#fff', fontSize: 11, fontWeight: 700, boxShadow: '0 6px 24px -6px rgba(59,130,246,0.7)' }}>Most Popular</span>
+                  <span style={{ display: 'inline-flex', padding: '4px 12px', borderRadius: 999, background: '#EA580C', color: '#fff', fontSize: 11, fontWeight: 700, boxShadow: '0 6px 24px -6px rgba(234,88,12,0.7)' }}>Most Popular</span>
                 </div>
               )}
-              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', borderRadius: 16, padding: 28, background: '#09090B', border: p.featured ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.08)', boxShadow: p.featured ? '0 0 0 1px rgba(59,130,246,0.25), 0 20px 60px -30px rgba(59,130,246,0.55)' : 'none' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', borderRadius: 16, padding: 28, background: '#09090B', border: p.featured ? '1px solid #EA580C' : '1px solid rgba(255,255,255,0.08)', boxShadow: p.featured ? '0 0 0 1px rgba(234,88,12,0.25), 0 20px 60px -30px rgba(234,88,12,0.55)' : 'none' }}>
                 <div style={{ flex: 1 }}>
                   <span style={{ display: 'inline-flex', padding: '4px 10px', borderRadius: 999, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{p.label}</span>
                   <div style={{ marginTop: 20, display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -231,14 +221,14 @@ function Pricing({ onLogin }: { onLogin: () => void }) {
                     ))}
                   </ul>
                 </div>
-                <button onClick={p.cta.action} style={{ marginTop: 32, width: '100%', height: 44, borderRadius: 999, border: p.featured ? 'none' : '1px solid rgba(255,255,255,0.15)', background: p.featured ? '#3b82f6' : 'transparent', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+                <button onClick={p.cta.action} style={{ marginTop: 32, width: '100%', height: 44, borderRadius: 999, border: p.featured ? 'none' : '1px solid rgba(255,255,255,0.15)', background: p.featured ? '#EA580C' : 'transparent', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
                   {p.cta.text}
                 </button>
               </div>
             </div>
           ))}
         </div>
-        <p style={{ marginTop: 40, textAlign: 'center', fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>All plans include Google Drive as your storage layer. We never host or access your video content.</p>
+        <p style={{ marginTop: 40, textAlign: 'center', fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>All plans include secure Cloudflare storage. Recordings are encrypted at rest and never sold or shared with third parties.</p>
       </div>
     </section>
   );
@@ -265,7 +255,7 @@ function Waitlist() {
     <section id="waitlist-section" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
       <div style={{ maxWidth: 600, margin: '0 auto', padding: '7rem 1.5rem', textAlign: 'center' }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 24 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#60a5fa', animation: 'rv-pulse 1.6s ease-in-out infinite' }} />
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FB923C', animation: 'rv-pulse 1.6s ease-in-out infinite' }} />
           Beta access — limited spots
         </div>
         <h2 style={{ fontSize: 'clamp(1.75rem, 4vw, 3rem)', fontWeight: 600, letterSpacing: '-0.02em', color: '#fff', margin: '0 0 16px' }}>Join the waitlist.</h2>
@@ -276,7 +266,7 @@ function Waitlist() {
               <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" disabled={state === 'submitting'} required
                 style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', padding: '0 16px', height: 40, fontSize: 14, color: '#fff' }} />
               <button type="submit" disabled={state === 'submitting'}
-                style={{ height: 40, padding: '0 20px', borderRadius: 999, background: '#3b82f6', border: 'none', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', opacity: state === 'submitting' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                style={{ height: 40, padding: '0 20px', borderRadius: 999, background: '#EA580C', border: 'none', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', opacity: state === 'submitting' ? 0.6 : 1, whiteSpace: 'nowrap' }}>
                 {state === 'submitting' ? 'Joining…' : 'Join Waitlist'}
               </button>
             </div>
@@ -285,7 +275,7 @@ function Waitlist() {
           </form>
         ) : (
           <div style={{ borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)', padding: '28px 24px' }}>
-            <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(59,130,246,0.15)', color: '#60a5fa', outline: '1px solid rgba(59,130,246,0.3)', display: 'grid', placeItems: 'center', margin: '0 auto 12px' }}>
+            <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(234,88,12,0.15)', color: '#FB923C', outline: '1px solid rgba(234,88,12,0.3)', display: 'grid', placeItems: 'center', margin: '0 auto 12px' }}>
               <svg viewBox="0 0 24 24" style={{ width: 20, height: 20 }} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
             </div>
             <div style={{ fontSize: 18, fontWeight: 600, color: '#fff', marginBottom: 8 }}>You're on the list!</div>
@@ -302,8 +292,8 @@ function Footer() {
     <footer style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
       <div style={{ maxWidth: 1152, margin: '0 auto', padding: '2.5rem 1.5rem', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, borderRadius: 8, background: 'rgba(59,130,246,0.15)', color: '#60a5fa', outline: '1px solid rgba(59,130,246,0.3)' }}><IconLogo /></span>
-          <span style={{ fontWeight: 600, fontSize: 14, color: '#fff' }}>RecVault</span>
+          <img src="/favicon.svg" alt="" width={28} height={28} style={{ borderRadius: 8, display: 'block' }} />
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#fff' }}>Foyr Screen Recorder</span>
           <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '2px 6px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.55)' }}>Beta</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, fontSize: 14, color: 'rgba(255,255,255,0.55)' }}>
@@ -330,34 +320,34 @@ export function LandingPage() {
     <div style={{ background: '#000', color: '#fff', minHeight: '100vh', fontFamily: "'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" }}>
       <style>{`
         @keyframes rv-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.55;transform:scale(0.9)} }
-        ::selection { background: rgba(59,130,246,0.4); }
+        ::selection { background: rgba(234,88,12,0.4); }
       `}</style>
 
       <Nav onLogin={goLogin} />
 
       {/* Hero */}
-      <section style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -10%, rgba(59,130,246,0.18), transparent 60%)', backgroundImage: `radial-gradient(ellipse 80% 60% at 50% -10%, rgba(59,130,246,0.18), transparent 60%), linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)`, backgroundSize: 'auto, 48px 48px, 48px 48px' }}>
+      <section style={{ background: 'radial-gradient(ellipse 80% 60% at 50% -10%, rgba(234,88,12,0.18), transparent 60%)', backgroundImage: `radial-gradient(ellipse 80% 60% at 50% -10%, rgba(234,88,12,0.18), transparent 60%), linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)`, backgroundSize: 'auto, 48px 48px, 48px 48px' }}>
         <div style={{ maxWidth: 1152, margin: '0 auto', padding: '5rem 1.5rem 6rem' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)', fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 28 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#60a5fa', animation: 'rv-pulse 1.6s ease-in-out infinite' }} />
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#FB923C', animation: 'rv-pulse 1.6s ease-in-out infinite' }} />
               Now in private beta · Chrome extension
             </div>
             <h1 style={{ fontSize: 'clamp(2.5rem, 7vw, 4.5rem)', fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.05, maxWidth: 800, margin: '0 0 24px' }}>
               Record. Upload. Share.<br /><span style={{ color: 'rgba(255,255,255,0.4)' }}>Instantly.</span>
             </h1>
             <p style={{ fontSize: 'clamp(1rem, 2vw, 1.125rem)', color: 'rgba(255,255,255,0.6)', lineHeight: 1.6, maxWidth: 560, margin: '0 0 36px' }}>
-              Screen recordings saved to your Google Drive automatically, with a shareable link the moment you stop.
+              Screen recordings uploaded to secure cloud storage automatically, with a shareable link the moment you stop.
             </p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'center', marginBottom: 16 }}>
-              <a href={CWS_URL} target="_blank" rel="noopener" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 20px', borderRadius: 999, background: '#3b82f6', color: '#fff', fontSize: 14, fontWeight: 600, textDecoration: 'none', boxShadow: '0 8px 30px -8px rgba(59,130,246,0.6)' }}>
+              <a href={CWS_URL} target="_blank" rel="noopener" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 20px', borderRadius: 999, background: '#EA580C', color: '#fff', fontSize: 14, fontWeight: 600, textDecoration: 'none', boxShadow: '0 8px 30px -8px rgba(234,88,12,0.6)' }}>
                 <IconChrome />Add to Chrome — it's free
               </a>
               <a href="#waitlist-section" style={{ display: 'inline-flex', alignItems: 'center', height: 44, padding: '0 20px', borderRadius: 999, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', fontSize: 14, fontWeight: 500, textDecoration: 'none' }}>
                 Join Waitlist
               </a>
             </div>
-            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>No watermarks · Free during beta · Uses your own Drive storage</p>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>No watermarks · Free during beta · Secure cloud storage included</p>
           </div>
           <div style={{ marginTop: 64, display: 'flex', justifyContent: 'center' }}>
             <PopupMockup />

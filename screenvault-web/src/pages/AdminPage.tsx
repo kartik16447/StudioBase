@@ -19,7 +19,7 @@ const pill = (color: string, bg: string): React.CSSProperties => ({
   background: bg, color,
 });
 const btn = (variant: 'primary' | 'ghost' | 'danger' = 'primary', sm = false): React.CSSProperties => ({
-  background: variant === 'primary' ? '#3b82f6' : variant === 'danger' ? 'rgba(239,68,68,0.1)' : 'transparent',
+  background: variant === 'primary' ? '#EA580C' : variant === 'danger' ? 'rgba(239,68,68,0.1)' : 'transparent',
   color: variant === 'primary' ? '#fff' : variant === 'danger' ? '#ef4444' : '#A1A1AA',
   border: variant === 'ghost' ? '1px solid rgba(255,255,255,0.1)' : variant === 'danger' ? '1px solid rgba(239,68,68,0.2)' : 'none',
   padding: sm ? '0.35rem 0.9rem' : '0.65rem 1.4rem',
@@ -60,7 +60,7 @@ function EventTable({ events, onSessionClick }: { events: any[]; onSessionClick?
                 </td>
                 <td style={td}>
                   {ev.sessionId
-                    ? <button onClick={() => onSessionClick?.(ev.sessionId)} style={{ color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.72rem', fontFamily: 'monospace' }}>{ev.sessionId.slice(0, 8)}…</button>
+                    ? <button onClick={() => onSessionClick?.(ev.sessionId)} style={{ color: '#EA580C', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.72rem', fontFamily: 'monospace' }}>{ev.sessionId.slice(0, 8)}…</button>
                     : <span style={{ color: '#3F3F46', fontSize: '0.72rem' }}>—</span>}
                 </td>
                 <td style={{ ...td, color: '#71717A', fontSize: '0.72rem', fontFamily: 'monospace', maxWidth: 380, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -307,7 +307,7 @@ function WaitlistTab({ token }: { token: string }) {
                         </button>
                       )}
                       <a
-                        href={`mailto:${entry.email}?subject=You're in — RecVault Beta&body=Hey! Your RecVault Beta access is ready. Install the extension here: https://chromewebstore.google.com/detail/recvault-beta/kcjifkhbafhlccnhamlmjlnpdpofdfom`}
+                        href={`mailto:${entry.email}?subject=You're in — Foyr Screen Recorder&body=Hey! Your Foyr Screen Recorder access is ready. Install the extension here: https://chromewebstore.google.com/detail/foyr-screen-recorder/ejaghjlljgimabjjfmkcopcaphaedldg`}
                         style={{ ...btn('ghost', true), textDecoration: 'none', display: 'inline-block', marginLeft: entry.approvedAt ? 0 : '0.5rem' }}
                       >
                         ✉ Invite
@@ -329,14 +329,14 @@ function UserView({ data, onSessionClick }: { data: any; onSessionClick: (s: str
     <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '1.5rem' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         <div style={{ ...card, textAlign: 'center' }}>
-          {data.user.picture && <img src={data.user.picture} alt="" style={{ width: 72, height: 72, borderRadius: '50%', marginBottom: '0.75rem', border: '2px solid #3b82f6' }} />}
+          {data.user.picture && <img src={data.user.picture} alt="" style={{ width: 72, height: 72, borderRadius: '50%', marginBottom: '0.75rem', border: '2px solid #EA580C' }} />}
           <div style={{ fontWeight: 700, color: '#fff', marginBottom: '0.25rem' }}>{data.user.name}</div>
           <div style={{ fontSize: '0.8rem', color: '#71717A', marginBottom: '1.25rem' }}>{data.user.email}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
             {[
               { l: 'Recordings', v: data.stats?.recordings, c: '#fff' },
               { l: 'Uploads', v: data.stats?.uploads, c: '#10b981' },
-              { l: 'Playbacks', v: data.stats?.playbacks, c: '#3b82f6' },
+              { l: 'Playbacks', v: data.stats?.playbacks, c: '#EA580C' },
               { l: 'Failures', v: data.stats?.failures, c: '#ef4444' },
             ].map(({ l, v, c }) => (
               <div key={l} style={{ background: 'rgba(255,255,255,0.03)', padding: '0.6rem', borderRadius: '0.75rem' }}>
@@ -357,7 +357,7 @@ function UserView({ data, onSessionClick }: { data: any; onSessionClick: (s: str
           {(data.workspaces || []).map((w: any, i: number) => (
             <div key={i} style={{ fontSize: '0.8rem', color: '#A1A1AA', padding: '0.4rem 0.6rem', background: 'rgba(255,255,255,0.02)', borderRadius: '0.5rem', marginBottom: '0.4rem', display: 'flex', justifyContent: 'space-between' }}>
               <span>{w.name || w.id}</span>
-              <span style={pill('#3b82f6', 'rgba(59,130,246,0.1)')}>{w.role}</span>
+              <span style={pill('#EA580C', 'rgba(234,88,12,0.1)')}>{w.role}</span>
             </div>
           ))}
         </div>
@@ -379,7 +379,7 @@ function VideoView({ data, onSessionClick }: { data: any; onSessionClick: (s: st
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
           <div>
-            <p style={{ fontSize: '0.7rem', color: '#3b82f6', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.4rem' }}>Video Investigation</p>
+            <p style={{ fontSize: '0.7rem', color: '#EA580C', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.4rem' }}>Video Investigation</p>
             <h2 style={{ fontSize: '1.4rem', color: '#fff', fontWeight: 700 }}>{v.title || 'Untitled'}</h2>
             <p style={{ fontSize: '0.75rem', color: '#52525B', fontFamily: 'monospace' }}>{v.id}</p>
           </div>
@@ -444,7 +444,7 @@ function SessionView({ data, searchQuery }: { data: any; searchQuery: string }) 
                     <span style={{ color: isErr ? '#ef4444' : isOk ? '#10b981' : '#fff', fontSize: '0.82rem', fontWeight: 600 }}>{log.tag}</span>
                     {log.count > 1 && <span style={{ ...pill('#f59e0b', 'rgba(245,158,11,0.1)'), marginLeft: '0.4rem' }}>{log.count}× retries</span>}
                   </td>
-                  <td style={td}><span style={pill(log.source === 'extension' ? '#3b82f6' : '#8b5cf6', log.source === 'extension' ? 'rgba(59,130,246,0.1)' : 'rgba(139,92,246,0.1)')}>{log.source?.toUpperCase()}</span></td>
+                  <td style={td}><span style={pill(log.source === 'extension' ? '#EA580C' : '#8b5cf6', log.source === 'extension' ? 'rgba(234,88,12,0.1)' : 'rgba(139,92,246,0.1)')}>{log.source?.toUpperCase()}</span></td>
                   <td style={{ ...td, color: '#71717A', fontSize: '0.72rem', fontFamily: 'monospace', maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.data}</td>
                 </tr>
               );
@@ -516,7 +516,7 @@ export function AdminPage() {
 
   if (loading && !data) return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '1.5rem', color: '#71717A' }}>
-      <div style={{ width: 36, height: 36, border: '3px solid rgba(255,255,255,0.08)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+      <div style={{ width: 36, height: 36, border: '3px solid rgba(255,255,255,0.08)', borderTopColor: '#EA580C', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       <p>Loading operational health…</p>
     </div>
@@ -553,7 +553,7 @@ export function AdminPage() {
       {/* header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <p style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.2em', fontWeight: 700, color: '#3b82f6', marginBottom: '0.3rem' }}>Operational Control</p>
+          <p style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.2em', fontWeight: 700, color: '#EA580C', marginBottom: '0.3rem' }}>Operational Control</p>
           <h1 style={{ fontSize: '2.25rem', fontWeight: 700, color: '#fff', letterSpacing: '-0.02em', margin: 0 }}>Admin</h1>
           <p style={{ fontSize: '0.78rem', color: '#52525B', marginTop: '0.25rem' }}>Signed in as {user?.email}</p>
         </div>

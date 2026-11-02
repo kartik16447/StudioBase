@@ -128,8 +128,8 @@ export function Layout() {
   const navStyle = ({ isActive }: { isActive: boolean }) => ({
     display: 'flex', alignItems: 'center', gap: '0.75rem',
     padding: '0.75rem 1rem', borderRadius: '12px', textDecoration: 'none',
-    fontSize: '0.875rem', fontWeight: 500,
-    color: isActive ? '#fff' : '#A1A1AA',
+    fontSize: '0.875rem', fontWeight: 600,
+    color: isActive ? '#fff' : '#D4D4D8',
     background: isActive ? 'rgba(255,255,255,0.05)' : 'transparent',
     transition: 'all 0.2s ease',
   });
@@ -182,7 +182,7 @@ export function Layout() {
             <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', marginBottom: '0.5rem' }}>
               Join a workspace
             </h3>
-            <p style={{ fontSize: '0.8rem', color: '#71717A', marginBottom: '1.25rem' }}>
+            <p style={{ fontSize: '0.8rem', color: '#D4D4D8', marginBottom: '1.25rem' }}>
               Paste an invite link you received (any format works).
             </p>
             <input
@@ -190,7 +190,7 @@ export function Layout() {
               value={joinLink}
               onChange={e => setJoinLink(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleJoinSubmit()}
-              placeholder="https://screenvault-web-7r9.pages.dev/invite/..."
+              placeholder="https://recorder.foyr.com/invite/..."
               style={{
                 width: '100%', boxSizing: 'border-box',
                 background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
@@ -203,7 +203,7 @@ export function Layout() {
                 onClick={() => { setShowJoinModal(false); setJoinLink(''); }}
                 style={{
                   flex: 1, background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
-                  color: '#A1A1AA', padding: '0.75rem', borderRadius: '9999px',
+                  color: '#D4D4D8', padding: '0.75rem', borderRadius: '9999px',
                   fontWeight: 600, cursor: 'pointer', fontSize: '0.875rem',
                 }}
               >
@@ -213,7 +213,7 @@ export function Layout() {
                 onClick={handleJoinSubmit}
                 disabled={!joinLink.trim()}
                 style={{
-                  flex: 1, background: joinLink.trim() ? '#3b82f6' : 'rgba(59,130,246,0.3)',
+                  flex: 1, background: joinLink.trim() ? '#EA580C' : 'rgba(234,88,12,0.3)',
                   border: 'none', color: '#fff', padding: '0.75rem', borderRadius: '9999px',
                   fontWeight: 600, cursor: joinLink.trim() ? 'pointer' : 'default', fontSize: '0.875rem',
                 }}
@@ -233,17 +233,17 @@ export function Layout() {
       }}>
         <a
           href="/"
-          style={{ fontWeight: 700, fontSize: '1.25rem', color: '#fff', marginBottom: '2rem', paddingLeft: '0.5rem', letterSpacing: '-0.025em', textDecoration: 'none', display: 'block' }}
+          style={{ fontWeight: 700, fontSize: '1.05rem', color: '#fff', marginBottom: '2rem', paddingLeft: '0.5rem', letterSpacing: '-0.02em', textDecoration: 'none', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
         >
-          ScreenVault
+          Foyr Screen Recorder
         </a>
 
         <div style={{ marginBottom: '2rem' }}>
-          <p style={{ fontSize: '0.65rem', color: '#71717A', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, paddingLeft: '0.5rem', marginBottom: '0.75rem' }}>Workspace</p>
+          <p style={{ fontSize: '0.65rem', color: '#D4D4D8', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, paddingLeft: '0.5rem', marginBottom: '0.75rem' }}>Workspace</p>
           {workspacesLoaded && workspaces.length === 0 ? (
             <div style={{ padding: '0.75rem 1rem', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.05)', fontSize: '0.75rem', color: '#ef4444', lineHeight: 1.5 }}>
               Session expired.{' '}
-              <button onClick={signOut} style={{ background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', padding: 0, fontSize: '0.75rem', fontWeight: 600 }}>
+              <button onClick={signOut} style={{ background: 'none', border: 'none', color: '#EA580C', cursor: 'pointer', padding: 0, fontSize: '0.75rem', fontWeight: 600 }}>
                 Sign in again
               </button>
             </div>
@@ -267,12 +267,12 @@ export function Layout() {
             onClick={() => setShowJoinModal(true)}
             style={{
               marginTop: '0.5rem', width: '100%', background: 'transparent',
-              border: '1px dashed rgba(255,255,255,0.1)', color: '#52525B',
+              border: '1px dashed rgba(255,255,255,0.1)', color: '#8b8b93',
               padding: '0.5rem 1rem', borderRadius: '10px', fontSize: '0.75rem',
               cursor: 'pointer', textAlign: 'center', transition: 'all 0.2s',
             }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'; e.currentTarget.style.color = '#A1A1AA'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#52525B'; }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.25)'; e.currentTarget.style.color = '#D4D4D8'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = '#8b8b93'; }}
           >
             + Join a workspace
           </button>
@@ -294,7 +294,7 @@ export function Layout() {
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem',
                   padding: '0.5rem 0.6rem', borderRadius: '9px', cursor: 'pointer',
                   fontSize: '0.8rem', fontWeight: 500,
-                  color: isActive ? '#fff' : '#A1A1AA',
+                  color: isActive ? '#fff' : '#D4D4D8',
                   background: isActive ? 'rgba(255,255,255,0.06)' : 'transparent',
                   animationDelay: `${i * 20}ms`,
                 }}
@@ -310,7 +310,7 @@ export function Layout() {
                     className="sv-icon-btn"
                     onClick={e => handleRenameFolder(e, f)}
                     title="Rename folder"
-                    style={{ background: 'none', border: 'none', color: '#A1A1AA', cursor: 'pointer', padding: '5px', borderRadius: '6px', display: 'flex' }}
+                    style={{ background: 'none', border: 'none', color: '#D4D4D8', cursor: 'pointer', padding: '5px', borderRadius: '6px', display: 'flex' }}
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M12 20h9" />
@@ -321,7 +321,7 @@ export function Layout() {
                     className="sv-icon-btn"
                     onClick={e => handleDeleteFolder(e, f)}
                     title="Delete folder"
-                    style={{ background: 'none', border: 'none', color: '#A1A1AA', cursor: 'pointer', padding: '5px', borderRadius: '6px', display: 'flex' }}
+                    style={{ background: 'none', border: 'none', color: '#D4D4D8', cursor: 'pointer', padding: '5px', borderRadius: '6px', display: 'flex' }}
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 6h18" />
@@ -340,7 +340,7 @@ export function Layout() {
             onClick={handleNewFolder}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.6rem',
-              background: 'none', border: 'none', color: '#71717A', cursor: 'pointer',
+              background: 'none', border: 'none', color: '#D4D4D8', cursor: 'pointer',
               fontSize: '0.8rem', fontWeight: 500, textAlign: 'left', borderRadius: '9px',
             }}
           >
@@ -369,18 +369,18 @@ export function Layout() {
 
         <div style={{ marginTop: 'auto', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
           <div style={{ paddingLeft: '0.5rem', marginBottom: '0.75rem' }}>
-            <div style={{ fontSize: '0.8rem', color: '#fff', fontWeight: 500 }}>{user?.email}</div>
-            <div style={{ fontSize: '0.7rem', color: '#52525B', marginTop: '2px', textTransform: 'capitalize' }}>{user?.workspaceRole}</div>
+            <div style={{ fontSize: '0.8rem', color: '#fff', fontWeight: 600 }}>{user?.email}</div>
+            <div style={{ fontSize: '0.7rem', color: '#8b8b93', marginTop: '2px', textTransform: 'capitalize' }}>{user?.workspaceRole}</div>
           </div>
           <button
             onClick={signOut}
             style={{
               width: '100%', background: 'transparent', border: '1px solid rgba(255,255,255,0.08)',
-              color: '#71717A', padding: '0.6rem 1rem', borderRadius: '10px', fontSize: '0.8rem',
+              color: '#D4D4D8', padding: '0.6rem 1rem', borderRadius: '10px', fontSize: '0.8rem',
               cursor: 'pointer', transition: 'all 0.2s', textAlign: 'left',
             }}
             onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = '#71717A'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#D4D4D8'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
           >
             Sign out
           </button>

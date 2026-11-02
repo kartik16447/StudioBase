@@ -2,7 +2,8 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import { getUser } from '../auth';
 import { safeFetch } from '../api';
-import { API_BASE, VIEWER_BASE, STREAM_BASE } from '../config';
+import { API_BASE, VIEWER_BASE, DASHBOARD_BASE, STREAM_BASE } from '../config';
+import { uploadLocalFile, validateUpload, resolveContentType, ACCEPTED_UPLOAD_TYPES } from '../upload';
 import { BackendVideo, Folder, WorkspaceMember, WorkspaceVideo } from '../types';
 
 const getDeterministicColor = (email: string) => {
@@ -58,6 +59,13 @@ export function LibraryPage() {
   const [moveFolderTarget, setMoveFolderTarget] = useState<WorkspaceVideo | null>(null);
   const [moveWorkspaceTarget, setMoveWorkspaceTarget] = useState<WorkspaceVideo | null>(null);
 
+  const [uploads, setUploads] = useState<{ id: string; name: string; progress: number; error?: string }[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<'all' | 'video' | 'image' | 'audio'>('all');
+  const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name-asc' | 'name-desc'>('newest');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const isFetching = useRef(false);
   const observerTarget = useRef<HTMLDivElement>(null);
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
@@ -106,6 +114,7 @@ export function LibraryPage() {
         ownerId: v.ownerId,
         workspaceId: v.workspaceId,
         folderId: v.folderId,
+        mediaType: v.mediaType,
       }));
 
       if (isInitial) setFiles(mapped);
@@ -170,6 +179,56 @@ export function LibraryPage() {
       .catch(() => { });
   }, [user?.workspaceId]);
 
+  const handleFilesSelected = async (list: FileList | null) => {
+    if (!list?.length || !user?.workspaceId) return;
+    // Folder picks include junk (.DS_Store, docs, ...): skip unsupported files quietly.
+    const picked = Array.from(list).filter(f => !(f as any).webkitRelativePath || resolveContentType(f));
+    if (!picked.length) return;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    const items = picked.map(file => ({ file, id: crypto.randomUUID(), error: validateUpload(file) }));
+    // Folder picks carry webkitRelativePath ("Trip/day1/a.mp4"): mirror the top-level
+    // folder in the library (reusing one with the same name) and file into it.
+    const folderIdByName = new Map<string, string>();
+    const resolveFolder = async (file: File): Promise<string | null> => {
+      const top = (file as any).webkitRelativePath?.split('/')[0];
+      if (!top || (file as any).webkitRelativePath.split('/').length < 2) return activeFolderId;
+      if (folderIdByName.has(top)) return folderIdByName.get(top)!;
+      let id = folders.find(f => f.name === top)?.id;
+      if (!id) {
+        const res = await safeFetch(`${API_BASE}/folders`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspaceId: user.workspaceId, name: top }),
+        });
+        id = (await res.json()).id as string;
+        fetchFolders();
+      }
+      folderIdByName.set(top, id);
+      return id;
+    };
+    setUploads(prev => [...prev, ...items.map(i => ({ id: i.id, name: i.file.name, progress: 0, error: i.error || undefined }))]);
+    const patch = (id: string, change: Partial<{ progress: number; error: string }>) =>
+      setUploads(prev => prev.map(u => (u.id === id ? { ...u, ...change } : u)));
+
+    // Sequential: the backend is happier with one multipart upload at a time per user.
+    for (const { file, id, error } of items) {
+      if (error) continue;
+      try {
+        await uploadLocalFile(file, {
+          workspaceId: user.workspaceId,
+          accountEmail: user.email,
+          folderId: await resolveFolder(file),
+          onProgress: progress => patch(id, { progress }),
+        });
+        fetchData();
+        setTimeout(() => setUploads(prev => prev.filter(u => u.id !== id)), 3000);
+      } catch (e: any) {
+        patch(id, { error: e.message || 'Upload failed' });
+      }
+    }
+  };
+
   const handleMoveToFolder = async (file: WorkspaceVideo, folderId: string | null) => {
     try {
       await safeFetch(`${API_BASE}/videos/${file.backendId}`, {
@@ -216,8 +275,24 @@ export function LibraryPage() {
 
   const filteredFiles = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase();
-    return q ? files.filter(f => (f.title || '').toLowerCase().includes(q)) : files;
-  }, [files, debouncedQuery]);
+    let list = files.filter(f =>
+      (!q || (f.title || '').toLowerCase().includes(q)) &&
+      (typeFilter === 'all' || (f.mediaType === 'image' ? 'image' : f.mediaType === 'audio' ? 'audio' : 'video') === typeFilter) &&
+      (ownerFilter === 'all' || f.ownerId === user?.userId)
+    );
+    if (sortBy !== 'newest') {
+      list = [...list].sort((a, b) => {
+        switch (sortBy) {
+          case 'oldest': return (a.createdAt || 0) - (b.createdAt || 0);
+          case 'name-asc': return (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base', numeric: true });
+          case 'name-desc': return (b.title || '').localeCompare(a.title || '', undefined, { sensitivity: 'base', numeric: true });
+        }
+        return 0;
+      });
+    }
+    return list;
+  }, [files, debouncedQuery, typeFilter, ownerFilter, sortBy, user?.userId]);
+  const filtersActive = typeFilter !== 'all' || ownerFilter !== 'all' || sortBy !== 'newest';
 
   const openVideo = (video: WorkspaceVideo) => {
     if (video.playerUrl) { window.open(video.playerUrl, '_blank'); return; }
@@ -248,6 +323,23 @@ export function LibraryPage() {
     } catch { }
   };
 
+  // Owner-only: the backend re-checks ownership and returns a short-lived signed
+  // link, so the browser streams the original file straight to disk.
+  const handleDownload = async (file: WorkspaceVideo) => {
+    try {
+      const res = await safeFetch(`${API_BASE}/videos/${file.backendId}/download-link`, { method: 'POST' });
+      const { url } = await res.json();
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = '';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e: any) {
+      alert(e.message || 'Download failed');
+    }
+  };
+
   const handleDelete = async (file: WorkspaceVideo) => {
     if (deletingId === file.id) return;
     if (!confirm(`Delete "${file.title}"? This cannot be undone.`)) return;
@@ -268,7 +360,7 @@ export function LibraryPage() {
         body: JSON.stringify({ workspaceId: user.workspaceId }),
       });
       const data = await res.json();
-      const fullUrl = data.joinUrl || `https://screenvault-web-7r9.pages.dev/invite/${data.token}`;
+      const fullUrl = data.joinUrl || `${DASHBOARD_BASE}/invite/${data.token}`;
       setInviteUrl(fullUrl);
       await navigator.clipboard.writeText(fullUrl);
       fetchInvites();
@@ -323,9 +415,20 @@ export function LibraryPage() {
   };
 
   if (loading) return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', color: '#A1A1AA', gap: '1.5rem' }}>
-      <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', color: '#D4D4D8', gap: '1.5rem' }}>
+      <div style={{ width: '48px', height: '48px', borderRadius: 14, background: '#EA580C', animation: 'sv-pulse-in 500ms cubic-bezier(0.16,1,0.3,1) both, sv-pulse-ring 1.8s ease-out 500ms infinite' }} />
+      <style>{`
+        @keyframes sv-pulse-in {
+          0% { opacity: 0; transform: scale(0.6); }
+          50% { opacity: 1; transform: scale(1.08); }
+          70% { transform: scale(0.97); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes sv-pulse-ring {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(234,88,12,0.5); }
+          50% { box-shadow: 0 0 0 14px rgba(234,88,12,0); }
+        }
+      `}</style>
       <p style={{ fontWeight: 500 }}>Loading workspace library...</p>
     </div>
   );
@@ -334,32 +437,56 @@ export function LibraryPage() {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', color: '#fff', textAlign: 'center', padding: '2rem' }}>
       <div style={{ background: 'rgba(239,68,68,0.1)', padding: '1.5rem', borderRadius: '1rem', border: '1px solid rgba(239,68,68,0.2)', marginBottom: '1.5rem' }}>
         <p style={{ color: '#ef4444', fontWeight: 600, fontSize: '1.1rem', marginBottom: '0.5rem' }}>Connection Error</p>
-        <p style={{ color: '#A1A1AA', fontSize: '0.9rem', maxWidth: '300px' }}>{error}</p>
+        <p style={{ color: '#D4D4D8', fontSize: '0.9rem', maxWidth: '300px' }}>{error}</p>
       </div>
-      <button onClick={() => fetchData()} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '9999px', fontWeight: 600, cursor: 'pointer' }}>
+      <button onClick={() => fetchData()} style={{ background: '#EA580C', color: '#fff', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '9999px', fontWeight: 600, cursor: 'pointer' }}>
         Try Again
       </button>
     </div>
+  );
+
+  const uploadCard = (
+    <button
+      type="button"
+      className={`sv-upload-card${dragOver ? ' drag' : ''}`}
+      onClick={() => fileInputRef.current?.click()}
+      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={e => { e.preventDefault(); setDragOver(false); handleFilesSelected(e.dataTransfer.files); }}
+    >
+      <span className="sv-upload-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </span>
+      <span style={{ fontWeight: 600, fontSize: '1rem' }}>Upload files</span>
+      <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>Click or drop videos, audio and images<br />MP4, MOV, WebM, MP3, WAV, PNG, JPG · up to 2GB</span>
+    </button>
   );
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
       <style>{`
         @keyframes shimmer { 0% { background-position: -800px 0; } 100% { background-position: 800px 0; } }
+        .sv-upload-card { background: rgba(255,255,255,0.02); border: 2px dashed rgba(255,255,255,0.12); border-radius: 16px; min-height: 280px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; cursor: pointer; color: #71717a; text-align: center; padding: 1.5rem; font: inherit; transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.2s cubic-bezier(0.16,1,0.3,1); }
+        .sv-upload-card .sv-upload-icon { width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; transition: background 0.2s, transform 0.2s; }
+        .sv-upload-card:hover, .sv-upload-card.drag { background: rgba(234,88,12,0.08); border-color: #EA580C; color: #EA580C; transform: translateY(-3px); }
+        .sv-upload-card:hover .sv-upload-icon, .sv-upload-card.drag .sv-upload-icon { background: rgba(234,88,12,0.18); transform: scale(1.08); }
         .skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%); background-size: 800px 100%; animation: shimmer 1.4s infinite linear; border-radius: 8px; }
       `}</style>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '3rem' }}>
         <div>
-          <p style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.2em', fontWeight: 600, color: '#A1A1AA', marginBottom: '0.5rem' }}>Library</p>
+          <p style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.2em', fontWeight: 600, color: '#D4D4D8', marginBottom: '0.5rem' }}>Library</p>
           <h1 style={{ fontSize: '2.5rem', fontWeight: 700, color: '#fff', letterSpacing: '-0.02em' }}>Team Workspace Library</h1>
-          <p style={{ color: '#A1A1AA', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+          <p style={{ color: '#D4D4D8', fontSize: '0.9rem', marginTop: '0.25rem' }}>
             {activeFolderId
               ? `Library / ${folders.find(f => f.id === activeFolderId)?.name || 'Folder'}`
               : 'All recordings in this workspace are shared with your team.'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_UPLOAD_TYPES.join(',')} style={{ display: 'none' }} onChange={e => handleFilesSelected(e.target.files)} />
+          <input ref={folderInputRef} type="file" multiple {...({ webkitdirectory: '' } as any)} style={{ display: 'none' }} onChange={e => { handleFilesSelected(e.target.files); e.target.value = ''; }} />
+          <button onClick={() => folderInputRef.current?.click()} style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '0.6rem 1.2rem', borderRadius: '9999px', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer' }}>Upload folder</button>
           <button onClick={() => { setShowMembersModal(true); fetchMembers(); }} style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '0.6rem 1.2rem', borderRadius: '9999px', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             Members
@@ -375,32 +502,51 @@ export function LibraryPage() {
         </div>
       </div>
 
+      {/* Upload progress */}
+      {uploads.length > 0 && (
+        <div style={{ position: 'fixed', right: '1.5rem', bottom: '1.5rem', zIndex: 70, width: '320px', maxWidth: 'calc(100vw - 3rem)', background: '#18181b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '14px', padding: '0.9rem 1rem', boxShadow: '0 20px 40px -12px rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          {uploads.map(u => (
+            <div key={u.id}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', fontSize: '0.8rem', color: '#fff', marginBottom: '6px' }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name}</span>
+                {u.error
+                  ? <button onClick={() => setUploads(prev => prev.filter(x => x.id !== u.id))} style={{ background: 'none', border: 'none', color: '#8b8b93', cursor: 'pointer' }}>✕</button>
+                  : <span style={{ color: u.progress === 100 ? '#10B981' : '#D4D4D8', flexShrink: 0 }}>{u.progress === 100 ? 'Done' : `${u.progress}%`}</span>}
+              </div>
+              {u.error
+                ? <div style={{ fontSize: '0.75rem', color: '#ef4444' }}>{u.error}</div>
+                : <div style={{ height: '4px', background: 'rgba(255,255,255,0.08)', borderRadius: '2px', overflow: 'hidden' }}><div style={{ width: `${u.progress}%`, height: '100%', background: u.progress === 100 ? '#10B981' : '#EA580C', transition: 'width 0.3s' }} /></div>}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Members Modal */}
       {showMembersModal && (
         <div className="sv-modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
           <div className="sv-modal-panel" style={{ background: '#18181b', padding: '2rem', borderRadius: '1.5rem', maxWidth: '500px', width: '90%', border: '1px solid rgba(255,255,255,0.1)', position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
-            <button onClick={() => setShowMembersModal(false)} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: '#71717A', cursor: 'pointer' }}>✕</button>
+            <button onClick={() => setShowMembersModal(false)} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: '#D4D4D8', cursor: 'pointer' }}>✕</button>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem' }}>
               <div>
                 <h3 style={{ fontSize: '1.5rem', fontWeight: 700, color: '#fff' }}>Workspace Settings</h3>
-                <p style={{ color: '#71717A', fontSize: '0.9rem', marginTop: '4px' }}>Manage your team and invites</p>
+                <p style={{ color: '#D4D4D8', fontSize: '0.9rem', marginTop: '4px' }}>Manage your team and invites</p>
               </div>
-              <button onClick={handleInvite} disabled={inviting} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '9999px', fontWeight: 600, cursor: inviting ? 'not-allowed' : 'pointer' }}>
+              <button onClick={handleInvite} disabled={inviting} style={{ background: '#EA580C', color: '#fff', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '9999px', fontWeight: 600, cursor: inviting ? 'not-allowed' : 'pointer' }}>
                 {inviting ? 'Generating...' : 'Generate Invite'}
               </button>
             </div>
-            {loadingMembers ? <div style={{ padding: '2rem', textAlign: 'center', color: '#A1A1AA' }}>Loading members...</div> : (
+            {loadingMembers ? <div style={{ padding: '2rem', textAlign: 'center', color: '#D4D4D8' }}>Loading members...</div> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '40vh', overflowY: 'auto' }}>
                 {members.map(member => (
                   <div key={member.userId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '1rem', border: '1px solid rgba(255,255,255,0.05)', gap: '0.75rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#3b82f6', flexShrink: 0 }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(234,88,12,0.15)', border: '1px solid rgba(234,88,12,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem', fontWeight: 700, color: '#EA580C', flexShrink: 0 }}>
                         {(member.email || '?').charAt(0).toUpperCase()}
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ color: '#fff', fontWeight: 500, fontSize: '0.875rem', wordBreak: 'break-all' }}>{member.email}</div>
                         <div style={{ display: 'flex', gap: '4px', marginTop: '3px' }}>
-                          {member.userId === user?.userId && <span style={{ fontSize: '0.65rem', color: '#3b82f6', background: 'rgba(59,130,246,0.1)', padding: '1px 6px', borderRadius: '4px' }}>You</span>}
+                          {member.userId === user?.userId && <span style={{ fontSize: '0.65rem', color: '#EA580C', background: 'rgba(234,88,12,0.1)', padding: '1px 6px', borderRadius: '4px' }}>You</span>}
                           {member.role === 'owner' && <span style={{ fontSize: '0.65rem', color: '#f59e0b', background: 'rgba(245,158,11,0.1)', padding: '1px 6px', borderRadius: '4px' }}>Owner</span>}
                         </div>
                       </div>
@@ -414,9 +560,9 @@ export function LibraryPage() {
             )}
             {/* Active Invites */}
             <div style={{ marginTop: '2rem' }}>
-              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#A1A1AA', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Invites</h4>
-              {loadingInvites ? <div style={{ color: '#71717A', fontSize: '0.85rem' }}>Loading...</div> : invites.length === 0 ? (
-                <div style={{ padding: '1.5rem', textAlign: 'center', background: 'rgba(255,255,255,0.02)', borderRadius: '1rem', color: '#71717A', fontSize: '0.85rem', border: '1px dashed rgba(255,255,255,0.1)' }}>No active invites</div>
+              <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: '#D4D4D8', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Active Invites</h4>
+              {loadingInvites ? <div style={{ color: '#D4D4D8', fontSize: '0.85rem' }}>Loading...</div> : invites.length === 0 ? (
+                <div style={{ padding: '1.5rem', textAlign: 'center', background: 'rgba(255,255,255,0.02)', borderRadius: '1rem', color: '#D4D4D8', fontSize: '0.85rem', border: '1px dashed rgba(255,255,255,0.1)' }}>No active invites</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {invites.map(inv => {
@@ -427,19 +573,19 @@ export function LibraryPage() {
                       <div key={inv.id} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '1rem', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: isActive ? 1 : 0.6 }}>
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem', color: '#3b82f6' }}>{inv.token.slice(0, 8)}...</code>
+                            <code style={{ background: 'rgba(0,0,0,0.3)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.75rem', color: '#EA580C' }}>{inv.token.slice(0, 8)}...</code>
                             <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px', background: isRevoked ? 'rgba(239,68,68,0.1)' : isExpired ? 'rgba(245,158,11,0.1)' : 'rgba(16,185,129,0.1)', color: isRevoked ? '#ef4444' : isExpired ? '#f59e0b' : '#10b981' }}>
                               {isRevoked ? 'Revoked' : isExpired ? 'Expired' : 'Active'}
                             </span>
                           </div>
-                          <div style={{ fontSize: '0.7rem', color: '#71717A', marginTop: '4px' }}>Expires {new Date(inv.expiresAt).toLocaleDateString()}</div>
+                          <div style={{ fontSize: '0.7rem', color: '#D4D4D8', marginTop: '4px' }}>Expires {new Date(inv.expiresAt).toLocaleDateString()}</div>
                         </div>
                         {isActive && (
                           <div style={{ display: 'flex', gap: '8px' }}>
                             {user?.workspaceRole === 'owner' && (
-                              <button onClick={() => handleRevokeInvite(inv.id)} style={{ background: 'none', border: 'none', color: '#71717A', cursor: 'pointer', fontSize: '0.8rem' }}>Revoke</button>
+                              <button onClick={() => handleRevokeInvite(inv.id)} style={{ background: 'none', border: 'none', color: '#D4D4D8', cursor: 'pointer', fontSize: '0.8rem' }}>Revoke</button>
                             )}
-                            <button onClick={async () => { await navigator.clipboard.writeText(`${VIEWER_BASE}/#/invite/${inv.token}`); alert('Copied!'); }} style={{ background: 'rgba(59,130,246,0.1)', border: 'none', color: '#3b82f6', cursor: 'pointer', fontSize: '0.8rem', padding: '4px 10px', borderRadius: '6px' }}>Copy</button>
+                            <button onClick={async () => { await navigator.clipboard.writeText(`${DASHBOARD_BASE}/invite/${inv.token}`); alert('Copied!'); }} style={{ background: 'rgba(234,88,12,0.1)', border: 'none', color: '#EA580C', cursor: 'pointer', fontSize: '0.8rem', padding: '4px 10px', borderRadius: '6px' }}>Copy</button>
                           </div>
                         )}
                       </div>
@@ -449,7 +595,7 @@ export function LibraryPage() {
               )}
             </div>
             <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowMembersModal(false)} style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '9999px', fontWeight: 600, cursor: 'pointer' }}>Done</button>
+              <button onClick={() => setShowMembersModal(false)} style={{ background: '#EA580C', color: '#fff', border: 'none', padding: '0.75rem 1.5rem', borderRadius: '9999px', fontWeight: 600, cursor: 'pointer' }}>Done</button>
             </div>
           </div>
         </div>
@@ -460,7 +606,7 @@ export function LibraryPage() {
         <div className="sv-modal-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
           <div className="sv-modal-panel" style={{ background: '#18181b', padding: '2rem', borderRadius: '12px', maxWidth: '400px', width: '90%', border: '1px solid rgba(255,255,255,0.1)' }}>
             <h3 style={{ color: '#fff', fontSize: '1.25rem', marginBottom: '1rem' }}>Leave this workspace?</h3>
-            <ul style={{ color: '#A1A1AA', marginBottom: '2rem', paddingLeft: '1.2rem', lineHeight: 1.6 }}>
+            <ul style={{ color: '#D4D4D8', marginBottom: '2rem', paddingLeft: '1.2rem', lineHeight: 1.6 }}>
               <li>You will lose access to shared videos.</li>
               <li>You will need a new invite to rejoin.</li>
             </ul>
@@ -477,21 +623,21 @@ export function LibraryPage() {
         <div className="sv-modal-backdrop" onClick={() => setMoveFolderTarget(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
           <div className="sv-modal-panel" onClick={e => e.stopPropagation()} style={{ background: '#18181b', padding: '1.5rem', borderRadius: '1.1rem', maxWidth: '360px', width: '90%', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 20px 40px -12px rgba(0,0,0,0.6)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', marginBottom: '1.25rem' }}>
-              <div style={{ width: '34px', height: '34px', borderRadius: '9px', background: 'rgba(59,130,246,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <div style={{ width: '34px', height: '34px', borderRadius: '9px', background: 'rgba(234,88,12,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#EA580C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
                 </svg>
               </div>
               <div style={{ minWidth: 0 }}>
                 <h3 style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 700 }}>Move recording</h3>
-                <p style={{ color: '#71717A', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{moveFolderTarget.title}</p>
+                <p style={{ color: '#D4D4D8', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{moveFolderTarget.title}</p>
               </div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '40vh', overflowY: 'auto' }}>
               <button
                 className="sv-btn-ghost"
                 onClick={() => handleMoveToFolder(moveFolderTarget, null)}
-                style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', textAlign: 'left', padding: '0.6rem 0.75rem', background: 'transparent', border: '1px dashed rgba(255,255,255,0.14)', borderRadius: '9px', color: '#A1A1AA', cursor: 'pointer', fontSize: '0.85rem' }}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', textAlign: 'left', padding: '0.6rem 0.75rem', background: 'transparent', border: '1px dashed rgba(255,255,255,0.14)', borderRadius: '9px', color: '#D4D4D8', cursor: 'pointer', fontSize: '0.85rem' }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                   <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
@@ -501,7 +647,7 @@ export function LibraryPage() {
               </button>
               {folders.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '8px 0 2px' }}>
-                  <span style={{ fontSize: '0.65rem', color: '#52525B', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Folders</span>
+                  <span style={{ fontSize: '0.65rem', color: '#8b8b93', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>Folders</span>
                   <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.06)' }} />
                 </div>
               )}
@@ -512,15 +658,15 @@ export function LibraryPage() {
                   style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', textAlign: 'left', padding: '0.6rem 0.75rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '9px', color: '#fff', cursor: 'pointer', fontSize: '0.85rem', animationDelay: `${i * 20}ms` }}
                   onClick={() => handleMoveToFolder(moveFolderTarget, f.id)}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EA580C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
                   </svg>
                   {f.name}
                 </button>
               ))}
-              {!folders.length && <p style={{ color: '#71717A', fontSize: '0.8rem', padding: '0.5rem 0.1rem' }}>No folders yet — create one from the sidebar first.</p>}
+              {!folders.length && <p style={{ color: '#D4D4D8', fontSize: '0.8rem', padding: '0.5rem 0.1rem' }}>No folders yet — create one from the sidebar first.</p>}
             </div>
-            <button className="sv-btn-ghost sv-btn-press" onClick={() => setMoveFolderTarget(null)} style={{ marginTop: '1rem', width: '100%', padding: '0.6rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '9px', color: '#A1A1AA', cursor: 'pointer', fontSize: '0.85rem' }}>Cancel</button>
+            <button className="sv-btn-ghost sv-btn-press" onClick={() => setMoveFolderTarget(null)} style={{ marginTop: '1rem', width: '100%', padding: '0.6rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '9px', color: '#D4D4D8', cursor: 'pointer', fontSize: '0.85rem' }}>Cancel</button>
           </div>
         </div>
       )}
@@ -537,10 +683,10 @@ export function LibraryPage() {
               </div>
               <div style={{ minWidth: 0 }}>
                 <h3 style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 700 }}>Move to workspace</h3>
-                <p style={{ color: '#71717A', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{moveWorkspaceTarget.title}</p>
+                <p style={{ color: '#D4D4D8', fontSize: '0.75rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{moveWorkspaceTarget.title}</p>
               </div>
             </div>
-            <p style={{ color: '#71717A', fontSize: '0.75rem', marginBottom: '1rem' }}>This unfiles the recording from its current folder.</p>
+            <p style={{ color: '#D4D4D8', fontSize: '0.75rem', marginBottom: '1rem' }}>This unfiles the recording from its current folder.</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '40vh', overflowY: 'auto' }}>
               {workspacesList.filter(w => w.id !== user?.workspaceId).map((w, i) => (
                 <button
@@ -555,17 +701,20 @@ export function LibraryPage() {
                   {w.name}
                 </button>
               ))}
-              {workspacesList.filter(w => w.id !== user?.workspaceId).length === 0 && <p style={{ color: '#71717A', fontSize: '0.8rem', padding: '0.5rem 0.1rem' }}>You're not a member of any other workspace.</p>}
+              {workspacesList.filter(w => w.id !== user?.workspaceId).length === 0 && <p style={{ color: '#D4D4D8', fontSize: '0.8rem', padding: '0.5rem 0.1rem' }}>You're not a member of any other workspace.</p>}
             </div>
-            <button className="sv-btn-ghost sv-btn-press" onClick={() => setMoveWorkspaceTarget(null)} style={{ marginTop: '1rem', width: '100%', padding: '0.6rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '9px', color: '#A1A1AA', cursor: 'pointer', fontSize: '0.85rem' }}>Cancel</button>
+            <button className="sv-btn-ghost sv-btn-press" onClick={() => setMoveWorkspaceTarget(null)} style={{ marginTop: '1rem', width: '100%', padding: '0.6rem', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '9px', color: '#D4D4D8', cursor: 'pointer', fontSize: '0.85rem' }}>Cancel</button>
           </div>
         </div>
       )}
 
       {!files.length ? (
-        <div style={{ color: '#A1A1AA', textAlign: 'center', padding: '4rem 0' }}>
-          <p style={{ marginBottom: '1rem' }}>No recordings yet in this workspace.</p>
-          <p style={{ fontSize: '0.9rem' }}>Use the Chrome extension to record and they'll appear here.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
+          {uploadCard}
+          <div style={{ color: '#D4D4D8', alignSelf: 'center', padding: '1rem' }}>
+            <p style={{ marginBottom: '0.5rem' }}>No recordings yet in this workspace.</p>
+            <p style={{ fontSize: '0.9rem' }}>Upload a file, or use the Chrome extension to record.</p>
+          </div>
         </div>
       ) : (
         <>
@@ -588,13 +737,32 @@ export function LibraryPage() {
             {searchQuery && <button onClick={() => setSearchQuery('')} style={{ position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>}
           </div>
 
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', marginBottom: '1.5rem' }}>
+            {([
+              { label: 'Type', value: typeFilter, set: setTypeFilter, options: [['all', 'All types'], ['video', 'Videos'], ['image', 'Images'], ['audio', 'Audio']] },
+              { label: 'Owner', value: ownerFilter, set: setOwnerFilter, options: [['all', 'Everyone'], ['mine', 'Mine']] },
+              { label: 'Sort', value: sortBy, set: setSortBy, options: [['newest', 'Newest first'], ['oldest', 'Oldest first'], ['name-asc', 'Name A–Z'], ['name-desc', 'Name Z–A']] },
+            ] as { label: string; value: string; set: (v: any) => void; options: string[][] }[]).map(f => (
+              <label key={f.label} style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(255,255,255,0.03)', border: `1px solid ${f.value !== f.options[0][0] ? 'rgba(234,88,12,0.5)' : 'rgba(255,255,255,0.08)'}`, borderRadius: '9999px', padding: '0.4rem 0.9rem', fontSize: '0.8rem', color: '#8b8b93' }}>
+                {f.label}
+                <select value={f.value} onChange={e => f.set(e.target.value)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.8rem', fontWeight: 600, outline: 'none', cursor: 'pointer' }}>
+                  {f.options.map(([v, l]) => <option key={v} value={v} style={{ background: '#18181b' }}>{l}</option>)}
+                </select>
+              </label>
+            ))}
+            {filtersActive && (
+              <button onClick={() => { setTypeFilter('all'); setOwnerFilter('all'); setSortBy('newest'); }} style={{ background: 'none', border: 'none', color: '#EA580C', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>Reset</button>
+            )}
+          </div>
+
           {!filteredFiles.length ? (
-            <div style={{ textAlign: 'center', padding: '4rem 0', color: '#A1A1AA' }}>
+            <div style={{ textAlign: 'center', padding: '4rem 0', color: '#D4D4D8' }}>
               <div style={{ fontSize: '1.25rem', fontWeight: 600, color: '#fff', marginBottom: '0.5rem' }}>No results found</div>
-              <div>We couldn't find any recordings matching "{searchQuery}"</div>
+              <div>{searchQuery ? `We couldn't find any recordings matching "${searchQuery}"` : 'No recordings match these filters.'}</div>
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
+              {!debouncedQuery && !filtersActive && uploadCard}
               {filteredFiles.map((file, i) => (
                 <div
                   key={file.id}
@@ -613,6 +781,7 @@ export function LibraryPage() {
                       <div className="sv-menu-panel" style={{ position: 'absolute', top: '40px', right: '0', background: '#18181B', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)', padding: '6px', minWidth: '140px', zIndex: 100 }}>
                         {[
                           { label: copiedId === file.id ? 'Copied!' : 'Copy Link', onClick: (e: React.MouseEvent) => { copyLink(e, file); setMenuOpenId(null); } },
+                          ...(file.ownerId === user?.userId ? [{ label: 'Download original', onClick: (e: React.MouseEvent) => { e.stopPropagation(); handleDownload(file); setMenuOpenId(null); } }] : []),
                           { label: 'Rename', onClick: (e: React.MouseEvent) => { e.stopPropagation(); setEditingId(file.id); setEditingTitle(file.title); setMenuOpenId(null); } },
                           { label: 'Move to Folder', onClick: (e: React.MouseEvent) => { e.stopPropagation(); setMoveFolderTarget(file); setMenuOpenId(null); } },
                           { label: 'Move to Workspace', onClick: (e: React.MouseEvent) => { e.stopPropagation(); setMoveWorkspaceTarget(file); setMenuOpenId(null); } },
@@ -646,7 +815,14 @@ export function LibraryPage() {
                     onClick={() => openVideo(file)}
                   >
                     <div style={{ aspectRatio: '16/9', background: '#050505', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                      {extractStreamId(file.playerUrl) ? (
+                      {extractStreamId(file.playerUrl) && file.mediaType === 'image' ? (
+                        <img
+                          src={`${STREAM_BASE}/?id=${extractStreamId(file.playerUrl)}`}
+                          alt={file.title}
+                          loading="lazy"
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: hoveredId === file.id ? 0.85 : 1, transition: 'opacity 0.2s' }}
+                        />
+                      ) : extractStreamId(file.playerUrl) ? (
                         <video
                           key={file.id}
                           ref={el => { if (el) videoRefs.current.set(file.id, el); else videoRefs.current.delete(file.id); }}
@@ -703,11 +879,11 @@ export function LibraryPage() {
                       <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: getDeterministicColor(file.accountEmail || ''), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold', color: '#fff', flexShrink: 0 }}>
                         {(file.accountEmail || 'S').charAt(0).toUpperCase()}
                       </div>
-                      <div style={{ fontSize: '0.75rem', color: '#A1A1AA', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <div style={{ fontSize: '0.75rem', color: '#D4D4D8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {file.accountEmail === user?.email ? 'You' : file.accountEmail}
                       </div>
                     </div>
-                    <div style={{ fontSize: '0.8125rem', color: '#52525B' }}>
+                    <div style={{ fontSize: '0.8125rem', color: '#8b8b93' }}>
                       {new Date(file.createdTime || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                     </div>
                   </div>

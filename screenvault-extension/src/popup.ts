@@ -46,7 +46,9 @@ const progressFill = document.getElementById("progress-fill")!;
 const progressPct = document.getElementById("progress-pct")!;
 const uploadAccountLabel = document.getElementById("upload-account-label")!;
 const successMeta = document.getElementById("success-meta")!;
+const errorTitle = document.getElementById("error-title")!;
 const errorMessage = document.getElementById("error-message")!;
+let errorNeedsReconnect = false;
 const toast = document.getElementById("toast") as HTMLElement;
 
 let hasMicPermission = false;
@@ -148,14 +150,25 @@ function sendStartRecording(target: AppState["target"]) {
   });
 }
 
-function startRecordingNow(target: AppState["target"]) {
+async function startRecordingNow(target: AppState["target"]) {
   if (!target) return;
 
   // Pre-allocate in parallel while the picker is open
   chrome.runtime.sendMessage({ type: "PRE_ALLOCATE_AND_COPY" });
 
-  // Send immediately — screen picker appears right away
-  sendStartRecording(target);
+  // Name the recording after the tab it was started from (activeTab grants
+  // title access on popup click). Only the title is taken — not tabId — so
+  // closing that tab doesn't stop a screen/window recording.
+  let tabTitle = target.tabTitle;
+  if (!tabTitle) {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      tabTitle = tab?.title?.trim() || undefined;
+    } catch {}
+  }
+
+  // Screen picker appears right after
+  sendStartRecording({ ...target, tabTitle });
 }
 
 function handleInstantLink(url: string) {
@@ -218,7 +231,7 @@ function renderState(newState: AppState) {
         successMeta.style.color = "var(--blue)";
       } else {
         successMeta.textContent = `Uploaded to ${state.uploadAccount}`;
-        successMeta.style.color = "var(--text-secondary)";
+        successMeta.style.color = "var(--text-2)";
       }
 
       // Auto-copy only on transition to success or if URL improves
@@ -235,11 +248,22 @@ function renderState(newState: AppState) {
         showToast("Link copied to clipboard!");
       }
       break;
-    case "error":
+    case "error": {
       showScreen(screenError);
-      errorMessage.textContent =
-        state.errorMessage || "An unknown error occurred.";
+      const rawMessage = state.errorMessage || "An unknown error occurred.";
+      errorNeedsReconnect = /reconnect/i.test(rawMessage);
+      if (errorNeedsReconnect) {
+        errorTitle.textContent = "Sign-in expired";
+        errorMessage.textContent =
+          "Your Google sign-in expired, so this recording couldn't be uploaded. Click \"Reconnect Google Account\" below, sign in again, then start a new recording.";
+        btnTryAgain.textContent = "Reconnect Google Account";
+      } else {
+        errorTitle.textContent = "Something went wrong";
+        errorMessage.textContent = rawMessage;
+        btnTryAgain.textContent = "Try again";
+      }
       break;
+    }
   }
 }
 
@@ -393,10 +417,13 @@ btnSaveDisk.addEventListener("click", () => {
 
 btnTryAgain.addEventListener("click", () => {
   chrome.runtime.sendMessage({ type: "SET_STATUS", status: "idle" });
+  if (errorNeedsReconnect) {
+    connectHandler();
+  }
 });
 
 document.getElementById("dashboardBtn")?.addEventListener("click", () => {
   chrome.tabs.create({
-    url: "https://screenvault-web-7r9.pages.dev/library",
+    url: "https://recorder.foyr.com/library",
   });
 });

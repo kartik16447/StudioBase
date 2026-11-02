@@ -175,7 +175,7 @@ const sub: React.CSSProperties = {
 };
 
 const btnPrimary: React.CSSProperties = {
-  background: '#3b82f6',
+  background: '#EA580C',
   color: '#fff',
   border: 'none',
   padding: '0.875rem 1.5rem',
@@ -201,7 +201,7 @@ const spinner: React.CSSProperties = {
   width: '40px',
   height: '40px',
   border: '3px solid rgba(255,255,255,0.1)',
-  borderTopColor: '#3b82f6',
+  borderTopColor: '#EA580C',
   borderRadius: '50%',
   animation: 'spin 1s linear infinite',
 };

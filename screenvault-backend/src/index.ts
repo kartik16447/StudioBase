@@ -13,7 +13,7 @@
 
 const corsHeaders = {
 	'Access-Control-Allow-Origin': '*',
-	'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS, DELETE, PATCH',
+	'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, OPTIONS, DELETE, PATCH',
 	'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 	'Access-Control-Max-Age': '86400',
 };
@@ -43,6 +43,10 @@ export default {
 			if (method === 'POST') response = await createVideo(request, env);
 			else if (method === 'GET') response = await getVideos(request, env);
 			else response = jsonError('Method Not Allowed', 'METHOD_NOT_ALLOWED', 405);
+		} else if (pathname.startsWith('/videos/') && pathname.endsWith('/download-link') && method === 'POST') {
+			response = await createDownloadLink(request, env);
+		} else if (pathname === '/download' && method === 'GET') {
+			response = await serveDownload(request, env);
 		} else if (pathname.startsWith('/videos/')) {
 			if (method === 'PATCH') response = await updateVideo(request, env);
 			else if (method === 'DELETE') response = await deleteVideo(request, env);
@@ -104,6 +108,8 @@ export default {
 			response = await handleExtensionLogs(request, env);
 		} else if (pathname === '/admin/migrate-file-ids' && method === 'POST') {
 			response = await migrateFileIds(request, env);
+		} else if (pathname === '/admin/backfill-short-ids' && method === 'POST') {
+			response = await backfillShortIds(request, env);
 		} else {
 			response = jsonError('Not Found', 'NOT_FOUND', 404);
 		}
@@ -401,6 +407,9 @@ async function createVideo(request: Request, env: any) {
 	try {
 		const body = (await request.json()) as any;
 		const { fileId, title, workspaceId, duration, accountEmail, sessionId } = body;
+		// Local file uploads aren't live recordings, so they skip the recording cooldown.
+		const isUpload = body.source === 'upload';
+		const mediaType = body.mediaType === 'image' ? 'image' : body.mediaType === 'audio' ? 'audio' : 'video';
 		
 		await backendLog(env, user.id, "API_CREATE_VIDEO", {
 			workspaceId,
@@ -410,13 +419,6 @@ async function createVideo(request: Request, env: any) {
 
 		if (!fileId || !workspaceId) {
 			return jsonError('fileId and workspaceId are required', 'VALIDATION_ERROR');
-		}
-
-		// Enforce 500MB storage limit per user
-		const STORAGE_LIMIT_BYTES = 500 * 1024 * 1024;
-		const storageRow = (await env.DB.prepare('SELECT storageUsedBytes FROM users WHERE id = ?').bind(user.id).first()) as any;
-		if ((storageRow?.storageUsedBytes || 0) >= STORAGE_LIMIT_BYTES) {
-			return jsonError('Storage limit reached (500MB). Delete old recordings to free space.', 'STORAGE_LIMIT', 429);
 		}
 
 		// Validate workspace membership
@@ -437,7 +439,7 @@ async function createVideo(request: Request, env: any) {
 			.first()) as any;
 
 		// 1. Cooldown (20s)
-		if (stats?.lastRecordingAt && now - stats.lastRecordingAt < 20000) {
+		if (!isUpload && stats?.lastRecordingAt && now - stats.lastRecordingAt < 20000) {
 			const remaining = Math.ceil((20000 - (now - stats.lastRecordingAt)) / 1000);
 			return jsonError(`Wait ${remaining} seconds before next recording`, 'USAGE_LIMIT', 429);
 		}
@@ -457,34 +459,50 @@ async function createVideo(request: Request, env: any) {
 		}
 
 		// Check if video exists
-		const existing = (await env.DB.prepare('SELECT id, workspaceId, encryptedFileId, title, accountEmail FROM videos WHERE fileId = ?').bind(fileId).first()) as any;
+		const existing = (await env.DB.prepare('SELECT id, workspaceId, encryptedFileId, shortId, title, accountEmail FROM videos WHERE fileId = ?').bind(fileId).first()) as any;
 		if (existing) {
 			if (existing.workspaceId !== workspaceId) {
 				return jsonError('Video already exists in another workspace', 'CONFLICT', 409);
 			}
-			const idToUse = existing.encryptedFileId || fileId;
-			return Response.json({ 
+			// The recording pipeline re-POSTs the same fileId as better titles become
+			// available (pre-allocation has none, startRecording knows the captured
+			// tab's title) — pick up a more specific title on each idempotent re-POST.
+			let effectiveTitle = existing.title;
+			if (title && title !== existing.title) {
+				await env.DB.prepare('UPDATE videos SET title = ?, updatedAt = ? WHERE id = ?')
+					.bind(title, Date.now(), existing.id)
+					.run();
+				effectiveTitle = title;
+			}
+			// Backfill a shortId for rows created before this column existed.
+			const shortId = existing.shortId || (await assignShortId(env, existing.id));
+			return Response.json({
 				id: existing.id,
 				encryptedFileId: existing.encryptedFileId,
 				accountEmail: existing.accountEmail,
-				playerUrl: `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodeURIComponent(existing.title || 'Recording')}`
+				playerUrl: `${PLAYER_BASE_URL}/?id=${shortId}`
 			});
 		}
 
 		const id = crypto.randomUUID();
 		const encryptedFileId = await encryptFileId(fileId, env);
+		const shortId = generateShortId();
 
 		await env.DB.prepare(
-			`INSERT INTO videos (id, fileId, encryptedFileId, title, ownerId, workspaceId, accountEmail, createdAt, updatedAt, duration, actualDurationMs, status, thumbnailUrl, sessionId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO videos (id, fileId, encryptedFileId, shortId, title, ownerId, workspaceId, accountEmail, createdAt, updatedAt, duration, actualDurationMs, status, thumbnailUrl, sessionId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		)
-			.bind(id, fileId, encryptedFileId, title, user.id, workspaceId, accountEmail, now, now, duration || 0, body.actualDurationMs || null, 'uploading', body.thumbnailUrl || null, sessionId || null)
+			.bind(id, fileId, encryptedFileId, shortId, title, user.id, workspaceId, accountEmail, now, now, duration || 0, body.actualDurationMs || null, 'uploading', body.thumbnailUrl || null, sessionId || null)
 			.run();
+
+		if (mediaType !== 'video') {
+			await env.DB.prepare('UPDATE videos SET mediaType = ? WHERE id = ?').bind(mediaType, id).run();
+		}
 
 		await backendLog(env, user.id, 'FILEID_ENCRYPTED', { videoId: id, workspaceId });
 
 		// Update lastRecordingAt to enforce cooldown for next attempt
-		await env.DB.prepare(
+		if (!isUpload) await env.DB.prepare(
 			`INSERT INTO usage_stats (userId, workspaceId, lastRecordingAt, createdAt, updatedAt)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(userId, workspaceId) DO UPDATE SET
@@ -503,12 +521,40 @@ async function createVideo(request: Request, env: any) {
 			id,
 			encryptedFileId,
 			accountEmail,
-			playerUrl: `${PLAYER_BASE_URL}/?id=${encryptedFileId}&title=${encodeURIComponent(title || 'Recording')}${sessionId ? '&sid=' + sessionId : ''}`
+			playerUrl: `${PLAYER_BASE_URL}/?id=${shortId}${sessionId ? '&sid=' + sessionId : ''}`
 		});
 	} catch (err: any) {
 		return jsonError(err.message);
 	}
 }
+
+// Per-file cap (no per-user storage cap). Raise this one constant to allow bigger files.
+const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
+
+// Content types accepted for upload -> R2 key extension.
+const UPLOAD_CONTENT_TYPES: Record<string, string> = {
+	'video/webm': 'webm',
+	'video/mp4': 'mp4',
+	'video/x-m4v': 'm4v',
+	'video/quicktime': 'mov',
+	'video/x-matroska': 'mkv',
+	'video/ogg': 'ogv',
+	'video/3gpp': '3gp',
+	'video/mpeg': 'mpg',
+	'audio/mpeg': 'mp3',
+	'audio/mp4': 'm4a',
+	'audio/aac': 'aac',
+	'audio/wav': 'wav',
+	'audio/ogg': 'ogg',
+	'audio/flac': 'flac',
+	'audio/webm': 'weba',
+	'image/png': 'png',
+	'image/jpeg': 'jpg',
+	'image/gif': 'gif',
+	'image/webp': 'webp',
+	'image/avif': 'avif',
+	'image/bmp': 'bmp',
+};
 
 // Starts an R2 multipart upload for a new recording. The returned `key`
 // is the final R2 object key for the whole recording's lifetime — unlike
@@ -517,18 +563,25 @@ async function initUpload(request: Request, env: any) {
 	try {
 		const user = await getUserFromToken(request, env);
 		const body = (await request.json()) as any;
-		const { workspaceId } = body;
+		const { workspaceId, size } = body;
+		// Recordings are always webm; local uploads can be any common video/image type.
+		const contentType: string = body.contentType || 'video/webm';
+		const ext = UPLOAD_CONTENT_TYPES[contentType];
 
 		if (!workspaceId) return jsonError('workspaceId is required', 'VALIDATION_ERROR');
+		if (!ext) return jsonError(`Unsupported file type: ${contentType}`, 'VALIDATION_ERROR');
+		if (typeof size === 'number' && size > MAX_FILE_BYTES) {
+			return jsonError('File is larger than 2GB', 'FILE_TOO_LARGE', 413);
+		}
 
 		const membership = await env.DB.prepare('SELECT role FROM workspace_members WHERE workspaceId = ? AND userId = ?')
 			.bind(workspaceId, user.id)
 			.first();
 		if (!membership) return jsonError('Unauthorized workspace access', 'FORBIDDEN', 403);
 
-		const key = `videos/${workspaceId}/${crypto.randomUUID()}.webm`;
+		const key = `videos/${workspaceId}/${crypto.randomUUID()}.${ext}`;
 		const multipartUpload = await env.BUCKET.createMultipartUpload(key, {
-			httpMetadata: { contentType: 'video/webm' },
+			httpMetadata: { contentType },
 		});
 
 		return Response.json({ key, uploadId: multipartUpload.uploadId });
@@ -602,6 +655,67 @@ async function abortUpload(request: Request, env: any) {
 	}
 }
 
+// ── Owner-only downloads ─────────────────────────────────────────────────────
+// A browser can't attach an Authorization header to a plain <a download>, and
+// buffering a multi-GB file through fetch() into a Blob would exhaust memory.
+// So the owner asks for a short-lived HMAC-signed link (auth + ownership checked
+// here), and GET /download streams the original R2 object straight to the browser.
+const DOWNLOAD_LINK_TTL_MS = 5 * 60 * 1000;
+
+async function hmacHex(secret: string, data: string): Promise<string> {
+	const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+	const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data));
+	return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function createDownloadLink(request: Request, env: any) {
+	try {
+		const user = await getUserFromToken(request, env);
+		const id = new URL(request.url).pathname.split('/').filter(Boolean)[1];
+		const video = (await env.DB.prepare('SELECT ownerId FROM videos WHERE id = ? AND deletedAt IS NULL').bind(id).first()) as any;
+		if (!video) return jsonError('Video not found', 'NOT_FOUND', 404);
+		if (video.ownerId !== user.id) return jsonError('Only the person who recorded or uploaded this can download it', 'FORBIDDEN', 403);
+
+		const exp = Date.now() + DOWNLOAD_LINK_TTL_MS;
+		const sig = await hmacHex(env.ENCRYPTION_KEY, `${id}.${exp}`);
+		const origin = new URL(request.url).origin;
+		return Response.json({ url: `${origin}/download?id=${id}&exp=${exp}&sig=${sig}` });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+async function serveDownload(request: Request, env: any) {
+	try {
+		const url = new URL(request.url);
+		const id = url.searchParams.get('id') || '';
+		const exp = url.searchParams.get('exp') || '';
+		const sig = url.searchParams.get('sig') || '';
+		const expected = await hmacHex(env.ENCRYPTION_KEY, `${id}.${exp}`);
+		if (!id || !sig || sig !== expected || Date.now() > parseInt(exp, 10)) {
+			return jsonError('Download link is invalid or expired', 'FORBIDDEN', 403);
+		}
+
+		const video = (await env.DB.prepare('SELECT title, fileId FROM videos WHERE id = ? AND deletedAt IS NULL').bind(id).first()) as any;
+		if (!video?.fileId) return jsonError('Video not found', 'NOT_FOUND', 404);
+
+		const object = await env.BUCKET.get(video.fileId);
+		if (!object) return jsonError('File not found in storage', 'NOT_FOUND', 404);
+
+		const ext = (video.fileId.split('.').pop() || 'bin').toLowerCase();
+		const safeTitle = (video.title || 'download').replace(/[\\/:*?"<>|\r\n]+/g, '_').slice(0, 120);
+		const filename = `${safeTitle}.${ext}`;
+
+		const headers = new Headers(corsHeaders);
+		headers.set('Content-Type', object.httpMetadata?.contentType || 'application/octet-stream');
+		headers.set('Content-Length', String(object.size));
+		headers.set('Content-Disposition', `attachment; filename="${filename.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+		return new Response(object.body, { headers });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
 async function getVideos(request: Request, env: any) {
 	try {
 		const user = await getUserFromToken(request, env);
@@ -650,12 +764,12 @@ async function getVideos(request: Request, env: any) {
 
 		// Construct playerUrl and sanitize sensitive fields
 		const processedVideos = results.map((v: any) => {
-			const { encryptedFileId, sessionId, fileId, ...rest } = v;
-			// Player uses encrypted version
-			const idToUse = encryptedFileId || fileId; 
-			const encodedTitle = encodeURIComponent(v.title || 'Recording');
-			
-			let playerUrl = `${PLAYER_BASE_URL}/?id=${idToUse}&title=${encodedTitle}`;
+			const { encryptedFileId, sessionId, fileId, shortId, ...rest } = v;
+			// Short slug when available (post-migration rows); older rows fall
+			// back to the long encrypted id until they're re-touched.
+			const idToUse = shortId || encryptedFileId || fileId;
+			let playerUrl = `${PLAYER_BASE_URL}/?id=${idToUse}`;
+			if (!shortId) playerUrl += `&title=${encodeURIComponent(v.title || 'Recording')}`;
 			if (sessionId) playerUrl += `&sid=${sessionId}`;
 
 			return {
@@ -1116,7 +1230,7 @@ async function createInvite(request: Request, env: any) {
 
 		return Response.json({
 			token,
-			joinUrl: `${PLAYER_BASE_URL}/#/invite/${token}`,
+			joinUrl: `${DASHBOARD_BASE_URL}/invite/${token}`,
 			expiresAt,
 			role: inviteRole
 		});
@@ -1615,12 +1729,8 @@ async function getAccount(request: Request, env: any) {
 		const user = await getUserFromToken(request, env);
 		const row = (await env.DB.prepare('SELECT storageUsedBytes FROM users WHERE id = ?').bind(user.id).first()) as any;
 		const storageUsedBytes = row?.storageUsedBytes || 0;
-		const storageLimitBytes = 500 * 1024 * 1024;
-		return Response.json({
-			storageUsedBytes,
-			storageLimitBytes,
-			storageRemainingBytes: Math.max(0, storageLimitBytes - storageUsedBytes),
-		});
+		// No storage cap: usage is tracked but never enforced.
+		return Response.json({ storageUsedBytes, storageLimitBytes: null, storageRemainingBytes: null });
 	} catch (err: any) {
 		return jsonError(err.message);
 	}
@@ -1875,12 +1985,66 @@ async function migrateFileIds(request: Request, env: Env) {
 	}
 }
 
-const PLAYER_BASE_URL = 'https://screenvault.tushar-abf.workers.dev';
+async function backfillShortIds(request: Request, env: Env) {
+	try {
+		const user = await getUserFromToken(request, env);
+		if (!isAdmin(user.email, env)) {
+			return jsonError('Unauthorized', 'UNAUTHORIZED', 401);
+		}
+
+		const { results } = await env.DB.prepare('SELECT id FROM videos WHERE shortId IS NULL').all();
+
+		let migrated = 0;
+		let failed = 0;
+
+		for (const video of results as any[]) {
+			try {
+				await assignShortId(env, video.id);
+				migrated++;
+			} catch (e) {
+				console.error(`shortId backfill failed for video ${video.id}:`, e);
+				failed++;
+			}
+		}
+
+		return Response.json({ success: true, migrated, failed, total: results.length });
+	} catch (err: any) {
+		return jsonError(err.message);
+	}
+}
+
+const PLAYER_BASE_URL = 'https://recorder.foyr.com/watch';
+const DASHBOARD_BASE_URL = 'https://recorder.foyr.com';
 
 /**
  * ENCRYPTION UTILITIES (AES-256-GCM)
  * Securely encrypts/decrypts Google Drive file IDs.
  */
+
+// Short, unguessable player-link slug (e.g. "aB3xK9pQ") — resolved server-side
+// via a DB lookup, so links stay short without weakening the "can't be guessed"
+// privacy promise the encrypted fileId gave us before.
+const SHORT_ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+function generateShortId(length = 8): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(length));
+	let out = '';
+	for (let i = 0; i < length; i++) out += SHORT_ID_ALPHABET[bytes[i] % SHORT_ID_ALPHABET.length];
+	return out;
+}
+
+async function assignShortId(env: any, videoId: string): Promise<string> {
+	for (let attempt = 0; attempt < 5; attempt++) {
+		const shortId = generateShortId();
+		try {
+			await env.DB.prepare('UPDATE videos SET shortId = ? WHERE id = ?').bind(shortId, videoId).run();
+			return shortId;
+		} catch (err: any) {
+			// Unique constraint collision (astronomically unlikely at 8 chars) — retry.
+			if (attempt === 4) throw err;
+		}
+	}
+	throw new Error('Failed to assign shortId');
+}
 
 async function getEncryptionKey(encryptionKey: string): Promise<CryptoKey> {
 	// Pad/slice to 32 bytes for AES-256

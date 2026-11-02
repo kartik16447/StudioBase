@@ -9,7 +9,7 @@ import { saveChunk, recoverSession, deleteSession, getChunks, deleteChunks } fro
 import { svLog } from './logger';
 
 const BACKEND_URL = 'https://screenvault-backend.tushar-abf.workers.dev';
-const PLAYER_BASE_URL = 'https://screenvault.tushar-abf.workers.dev';
+const PLAYER_BASE_URL = 'https://recorder.foyr.com/watch';
 
 let recorder: MediaRecorder | null = null;
 let activeSessionId: string | null = null;

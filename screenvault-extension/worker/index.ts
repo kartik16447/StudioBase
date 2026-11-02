@@ -41,11 +41,23 @@ export default {
        return new Response("Missing fileId", { status: 400, headers: corsHeaders });
     }
 
-    // Try to decrypt if it looks like an encrypted ID
-    // Encrypted IDs are > 60 chars (IV + encrypted data). Raw IDs are ~33.
+    // Three id formats can show up in the "id" param, distinguished by length:
+    //  - short slug (8 chars): new short links, resolved via a DB lookup below
+    //  - raw fileId (~33 chars): legacy, used as-is
+    //  - encrypted blob (>50 chars): legacy long links, decrypted below
     let decryptError = null;
     let isDecrypted = false;
-    if (fileId && fileId.length > 50) {
+    let video: any = null;
+
+    if (fileId.length <= 12) {
+      video = (await env.DB.prepare('SELECT id, title, workspaceId, ownerId, actualDurationMs, fileId FROM videos WHERE shortId = ?')
+        .bind(fileId)
+        .first()) as any;
+      if (!video) {
+        return new Response("Invalid or expired link", { status: 404, headers: corsHeaders });
+      }
+      fileId = video.fileId;
+    } else if (fileId.length > 50) {
       try {
         fileId = await decryptFileId(fileId, env.ENCRYPTION_KEY);
         isDecrypted = true;
@@ -62,10 +74,12 @@ export default {
 
     console.log(`[SV][FETCH_START] Decrypted: ${isDecrypted}, Key: ${fileId?.slice(0, 8)}..., Session: ${sessionId || 'none'}`);
 
-    // Resolve videoId and workspaceId for linkage.
-    const video = (await env.DB.prepare('SELECT id, title, workspaceId, ownerId, actualDurationMs, fileId FROM videos WHERE fileId = ? OR encryptedFileId = ?')
-      .bind(fileId, rawEncryptedId)
-      .first()) as any;
+    // Resolve videoId and workspaceId for linkage (short-slug path already has this).
+    if (!video) {
+      video = (await env.DB.prepare('SELECT id, title, workspaceId, ownerId, actualDurationMs, fileId FROM videos WHERE fileId = ? OR encryptedFileId = ?')
+        .bind(fileId, rawEncryptedId)
+        .first()) as any;
+    }
 
     const commonMeta = {
       videoId: video?.id,
@@ -84,9 +98,13 @@ export default {
 
     // 2. Metadata Route (Resolves video title from DB or generates a fallback)
     if (url.pathname === "/meta") {
+      // Uploaded images share this route with videos; the watch page needs
+      // the stored content type to pick <img> vs <video>.
+      const contentType = (await env.BUCKET.head(fileId).catch(() => null))?.httpMetadata?.contentType || "video/webm";
       if (video && video.title) {
         return new Response(JSON.stringify({
           name: video.title,
+          contentType,
           actualDurationMs: video.actualDurationMs
         }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -138,7 +156,7 @@ export default {
       }
 
       const responseHeaders = new Headers(corsHeaders);
-      responseHeaders.set("Content-Type", "video/webm");
+      responseHeaders.set("Content-Type", object.httpMetadata?.contentType || "video/webm");
       responseHeaders.set("Accept-Ranges", "bytes");
 
       const servedRange = (object as any).range as { offset: number; length: number } | undefined;

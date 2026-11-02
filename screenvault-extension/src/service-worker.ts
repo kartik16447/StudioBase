@@ -13,7 +13,7 @@ import { getPendingSessions, recoverSession, deleteSession } from "./db";
 import { svLog } from "./logger";
 
 const BACKEND_URL = "https://screenvault-backend.tushar-abf.workers.dev";
-const PLAYER_BASE_URL = "https://screenvault.tushar-abf.workers.dev";
+const PLAYER_BASE_URL = "https://recorder.foyr.com/watch";
 
 let state: AppState = {
   status: "idle",
@@ -424,6 +424,11 @@ function stopBadgeTimer() {
   chrome.action.setBadgeText({ text: "" });
 }
 
+// Fallback name when there's no tab title or user-typed title.
+function friendlyRecordingTitle(now = new Date()): string {
+  return `Recording — ${now.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
+
 // Reserves an R2 upload session and registers the video row immediately so
 // there's a real, working share link before recording even starts. Unlike
 // the old Drive flow, no folder resolution is needed — every recording
@@ -434,8 +439,9 @@ async function preAllocateUpload(account: StorageAccount, title?: string): Promi
 
   const { key, uploadId } = await initUpload(account.accessToken, user.workspaceId);
 
-  const fileName = `screenvault-${new Date().toISOString().slice(0, 10)}.webm`;
-  const finalTitle = title || fileName.replace(".webm", "");
+  const now = new Date();
+  const fileName = `screenvault-${now.toISOString().slice(0, 10)}.webm`;
+  const finalTitle = title || friendlyRecordingTitle(now);
 
   let url = `${PLAYER_BASE_URL}/?title=${encodeURIComponent(finalTitle)}`;
   let videoId: string | undefined;
@@ -970,7 +976,7 @@ async function startRecording(target: AppState["target"]) {
           }
         }
 
-        const title = (target as any).userTitle || target.tabTitle || (allocation.fileName?.replace(".webm", "") ?? "");
+        const title = (target as any).userTitle || target.tabTitle || friendlyRecordingTitle();
 
         const postVideo = async (token: string) => {
           return fetch(`${BACKEND_URL}/videos`, {
@@ -1037,7 +1043,7 @@ async function startRecording(target: AppState["target"]) {
     const fileId = allocation.id;
     const uploadId = allocation.uploadId;
     const account = allocation.account;
-    const title = (target as any).userTitle || target.tabTitle || (allocation.fileName?.replace(".webm", "") ?? "Untitled Recording");
+    const title = (target as any).userTitle || target.tabTitle || friendlyRecordingTitle();
 
     // Metadata save can be concurrent with offscreen message
     const metaSaveProm = saveSessionMetadata(sessionId, {
@@ -1172,8 +1178,10 @@ function stopRecording() {
       const stored = await chrome.storage.local.get(["sv_state", "sv_sessions"]);
       const currentState = stored.sv_state as AppState;
 
-      // Abort if session changed or already marked ready by the real upload handler
-      if (!currentState || currentState.status === "ready" || currentState.sessionId !== sessionId) return;
+      // Abort if session changed, or the real upload handler already finished
+      // (it goes enriching -> idle after auto-copying the good link, so "idle"
+      // here means this timer is stale and must not overwrite it with an id-less link).
+      if (!currentState || currentState.status === "ready" || currentState.status === "idle" || currentState.sessionId !== sessionId) return;
 
       const sv_sessions = (stored.sv_sessions || {}) as Record<string, any>;
       const sessionMeta = sv_sessions[sessionId] as SessionMetadata;

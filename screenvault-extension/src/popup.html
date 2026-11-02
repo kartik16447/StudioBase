@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>RecVault Beta</title>
+    <title>Foyr Screen Recorder</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <div class="header">
         <div class="logo">
           <div class="logo-dot"></div>
-          <span class="logo-name">RecVault Beta</span>
+          <span class="logo-name">Foyr Screen Recorder</span>
         </div>
         <div class="header-actions">
           <button
@@ -59,7 +59,7 @@
             <div class="onboarding-step step-muted">
               <div class="step-num step-num-muted">2</div>
               <div class="step-body">
-                <div class="step-title" style="color: var(--text-3)">Start Recording</div>
+                <div class="step-title">Start Recording</div>
                 <div class="step-desc">Available once you're signed in.</div>
               </div>
             </div>
@@ -112,12 +112,12 @@
                 outline: none;
                 transition: border-color 0.2s;
               "
-              onfocus="this.style.borderColor='#3b82f6'"
+              onfocus="this.style.borderColor='#EA580C'"
               onblur="this.style.borderColor='#222'"
             />
           </div>
 
-          <div style="font-size: 11px; color: var(--text-3); text-align: center; margin-bottom: 10px; padding: 0 14px;">
+          <div style="font-size: 11px; font-weight: 500; color: var(--text-2); text-align: center; margin-bottom: 10px; padding: 0 14px;">
             You'll choose what to record (Tab, Window, or Screen) next.
           </div>
 
@@ -171,6 +171,7 @@
       <!-- Screen: Uploading -->
       <div class="screen" id="screen-uploading" style="display: none">
         <div class="upload-body">
+          <div class="upload-icon"></div>
           <div class="upload-label">Preparing your link...</div>
           <div class="upload-sub" id="upload-account-label">—</div>
           <div class="progress-track">
@@ -198,7 +199,7 @@
       <div class="screen" id="screen-error" style="display: none">
         <div class="error-body">
           <div class="error-icon">⚠</div>
-          <div class="error-title">Something went wrong</div>
+          <div class="error-title" id="error-title">Something went wrong</div>
           <div class="error-message" id="error-message">—</div>
           <button class="btn-secondary" id="btn-save-disk">Save to disk</button>
           <button class="btn-ghost" id="btn-try-again">Try again</button>
