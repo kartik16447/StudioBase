@@ -556,36 +556,46 @@ function startMediaRecorder(stream: MediaStream) {
         uploadChunkBufferSize += chunk.size;
 
         if (uploadChunkBufferSize >= MIN_UPLOAD_CHUNK) {
-          const blobToUpload = new Blob(uploadChunkBuffer, { type: 'video/webm' });
-          uploadChunkBuffer = [];
-          uploadChunkBufferSize = 0;
-
-          const partNumber = nextPartNumber++;
+          // R2 requires every part except the last to be exactly the same size, so cut
+          // the buffer into fixed MIN_UPLOAD_CHUNK slices (not "whatever we have, >= 5MiB",
+          // which made parts vary and broke multi-part recordings) and keep the remainder.
+          const combined = new Blob(uploadChunkBuffer, { type: 'video/webm' });
+          let offset = 0;
           const key = activeUploadKey;
           const uploadId = activeUploadId;
 
-          uploadQueue = uploadQueue
-            .then(async () => {
-              if (!progressiveEnabled || consecutiveFailures >= 3) {
+          while (combined.size - offset >= MIN_UPLOAD_CHUNK) {
+            const blobToUpload = combined.slice(offset, offset + MIN_UPLOAD_CHUNK, 'video/webm');
+            offset += MIN_UPLOAD_CHUNK;
+            const partNumber = nextPartNumber++;
+
+            uploadQueue = uploadQueue
+              .then(async () => {
+                if (!progressiveEnabled || consecutiveFailures >= 3) {
+                  progressiveEnabled = false;
+                  return;
+                }
+                const token = await getFreshToken(activeAccount!.id, false);
+                const part = await uploadPartWithRetry(token, key!, uploadId!, partNumber, blobToUpload);
+                uploadParts.push(part);
+                uploadedBytes += blobToUpload.size;
+                if (activeSessionId) {
+                  await chrome.runtime.sendMessage({
+                    type: 'SAVE_SESSION_METADATA',
+                    sessionId: activeSessionId,
+                    metadata: { uploadedBytes }
+                  });
+                }
+              })
+              .catch(err => {
+                console.error('[SV][PROGRESSIVE_PART_FAIL]', err?.message, { partNumber, size: blobToUpload.size });
                 progressiveEnabled = false;
-                return;
-              }
-              const token = await getFreshToken(activeAccount!.id, false);
-              const part = await uploadPartWithRetry(token, key!, uploadId!, partNumber, blobToUpload);
-              uploadParts.push(part);
-              uploadedBytes += blobToUpload.size;
-              if (activeSessionId) {
-                await chrome.runtime.sendMessage({
-                  type: 'SAVE_SESSION_METADATA',
-                  sessionId: activeSessionId,
-                  metadata: { uploadedBytes }
-                });
-              }
-            })
-            .catch(err => {
-              console.error('[SV][PROGRESSIVE_PART_FAIL]', err?.message, { partNumber, size: blobToUpload.size });
-              progressiveEnabled = false;
-            });
+              });
+          }
+
+          const remainder = combined.slice(offset, combined.size, 'video/webm');
+          uploadChunkBuffer = remainder.size > 0 ? [remainder] : [];
+          uploadChunkBufferSize = remainder.size;
         }
       }
     }
