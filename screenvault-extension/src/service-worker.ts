@@ -34,6 +34,7 @@ let accounts: StorageAccount[] = [];
 let badgeInterval: ReturnType<typeof setInterval> | null = null;
 let lastBlobUrl: string | null = null;
 let isStarting = false;
+const CAPTURE_START_TIMEOUT_MS = 2 * 60 * 1000;
 const processingSessions = new Set<string>();
 const preAllocationMap = new Map<string, Promise<PreAllocationResult>>();
 
@@ -1107,15 +1108,19 @@ async function startRecording(target: AppState["target"]) {
       };
       chrome.runtime.onMessage.addListener(captureListener);
 
+      // This window includes the time the user spends in Chrome's screen picker
+      // (getDisplayMedia only resolves after they choose), so it must be generous.
+      // A cancelled picker already reports RECORDING_ERROR on its own; this is
+      // only a backstop for a capture that never answers.
       setTimeout(() => {
-        if (!captureStarted) {
-          chrome.runtime.onMessage.removeListener(captureListener);
-          updateState({
-            status: "error",
-            errorMessage: "Recording failed to start within 8 seconds.",
-          });
-        }
-      }, 8000);
+        chrome.runtime.onMessage.removeListener(captureListener);
+        // Skip if capture started, or the user already moved on (error, stop, new session).
+        if (captureStarted || state.sessionId !== sessionId || state.status !== "recording") return;
+        updateState({
+          status: "error",
+          errorMessage: "Recording didn't start. Please try again.",
+        });
+      }, CAPTURE_START_TIMEOUT_MS);
     };
 
     if (await chrome.offscreen.hasDocument()) {
