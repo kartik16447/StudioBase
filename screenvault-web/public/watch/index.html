@@ -674,7 +674,17 @@
         video.addEventListener("play", updateUI);
         video.addEventListener("pause", updateUI);
         video.addEventListener("volumechange", updateVolumeIcon);
-        video.addEventListener("loadedmetadata", updateUI);
+        video.addEventListener("loadedmetadata", () => {
+          if (resumeAt !== null) {
+            video.currentTime = resumeAt;
+            resumeAt = null;
+            if (hasUserPlayed || previewLoopActive) video.play().catch(() => {});
+          }
+          updateUI();
+        });
+        video.addEventListener("timeupdate", () => {
+          if (retryCount > 0 && video.currentTime > lastFailAt + 10) retryCount = 0;
+        });
         video.addEventListener("durationchange", updateUI);
 
         video.addEventListener("canplay", () => {
@@ -686,11 +696,20 @@
           showToast(delightMessages[Math.floor(Math.random() * delightMessages.length)], "ph-lightning", "text-yellow-400");
         }, { once: true });
 
+        // A mid-stream error (e.g. a decode glitch Chrome only hits when playing
+        // straight through) used to reload from 0:00, so long videos restarted over
+        // and over. Resume from where it failed instead, nudging past the bad spot
+        // if the same spot fails twice. Retries reset once playback gets well past it.
         let retryCount = 0;
+        let resumeAt = null;
+        let lastFailAt = -10;
         video.addEventListener("error", () => {
-          if (retryCount < 2) {
+          const failedAt = video.currentTime || 0;
+          if (retryCount < 6) {
             retryCount++;
-            setTimeout(() => { video.load(); }, 1000);
+            resumeAt = Math.abs(failedAt - lastFailAt) < 2 ? failedAt + 2 : failedAt;
+            lastFailAt = failedAt;
+            setTimeout(() => { video.load(); }, 500);
             return;
           }
           fetch('https://screenvault-proxy.tushar-abf.workers.dev/event', {
