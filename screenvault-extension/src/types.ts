@@ -70,6 +70,7 @@ export interface AppState {
   errorMessage: string | null;
   backendVideoId: string | null;
   captureStarted?: boolean;      // false until offscreen reports CAPTURE_STARTED
+  pickerCancelled?: boolean;     // screen picker closed without a choice: offer "choose again"
 }
 
 export interface StorageAccount {
@@ -161,6 +162,7 @@ export type OffscreenMessage =
   | { type: 'CANCEL_START' }
   | { type: 'CAPTURE_STARTED' }
   | { type: 'RECORDING_ERROR'; message: string }
+  | { type: 'PICKER_CANCELLED'; sessionId: string | null }
   | { type: 'UPLOAD_PROGRESS'; progress: number }
   | { type: 'UPLOAD_COMPLETE'; url: string; account: string }
   | { type: 'RECORDING_FINISHED'; blobUrl: string }

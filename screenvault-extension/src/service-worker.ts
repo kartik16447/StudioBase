@@ -567,8 +567,20 @@ chrome.runtime.onMessage.addListener(
       if (msg.url) {
         chrome.tabs.create({ url: msg.url });
       }
+    } else if (msg.type === "PICKER_CANCELLED") {
+      if (msg.sessionId && msg.sessionId !== state.sessionId) return;
+      svLog("PICKER_CANCELLED", { sessionId: msg.sessionId });
+      releaseStartForRepick(msg.sessionId);
+      updateState({
+        status: "error",
+        pickerCancelled: true,
+        captureStarted: false,
+        startedAt: null,
+        errorMessage: "The screen picker closed before you chose a screen, so nothing was recorded.",
+      });
     } else if (msg.type === "RECORDING_ERROR") {
       stopBadgeTimer();
+      updateState({ pickerCancelled: false });
       if (
         typeof msg.message === "string" &&
         msg.message.includes("Mic access failed")
@@ -610,6 +622,14 @@ chrome.runtime.onMessage.addListener(
 
       // PRE-WARM: Start offscreen document during the countdown to save ~500ms later
       startOffscreenDocument().catch(() => {});
+
+      // An unused allocation from a cancelled pick is still valid: reuse it so
+      // choosing again doesn't leave an empty row behind.
+      const pending = preAllocationMap.get("latest");
+      if (pending) {
+        pending.then((data) => sendResponse({ url: data.url })).catch((err) => sendResponse({ error: err.message }));
+        return true;
+      }
 
       // Register "latest" synchronously: the popup sends START_RECORDING right
       // after this, and if startRecording can't see it yet it allocates a second
@@ -1062,8 +1082,11 @@ async function startRecording(target: AppState["target"]) {
     updateState({
       status: "recording",
       captureStarted: false,
+      pickerCancelled: false,
+      errorMessage: null,
       sessionId,
-      startedAt,
+      // The clock starts at CAPTURE_STARTED, not while the screen picker is open.
+      startedAt: null,
       preAllocatedFileId: fileId,
       uploadAccount: account.email,
       target,
@@ -1143,6 +1166,19 @@ async function startRecording(target: AppState["target"]) {
   }
 }
 
+// Nothing was captured: keep this session's upload slot for the next attempt
+// (PRE_ALLOCATE_AND_COPY / startRecording reuse "latest") and forget the session.
+function releaseStartForRepick(sessionId: string | null) {
+  stopBadgeTimer();
+  if (!sessionId) return;
+  const prom = preAllocationMap.get(sessionId);
+  if (prom) {
+    preAllocationMap.delete(sessionId);
+    preAllocationMap.set("latest", prom);
+  }
+  removeSessionMetadata(sessionId);
+}
+
 function stopRecording() {
   const sessionId = state.sessionId;
   const fileId = state.preAllocatedFileId;
@@ -1163,7 +1199,8 @@ function stopRecording() {
   if (state.status === "recording" && !state.captureStarted) {
     svLog("STOP_BEFORE_CAPTURE", { sessionId, fileId, timestamp: Date.now() });
     chrome.runtime.sendMessage({ type: "CANCEL_START" }).catch(() => {});
-    updateState({ status: "error", errorMessage: "Recording hadn't started, so nothing was captured. Please try again." });
+    releaseStartForRepick(sessionId);
+    updateState({ status: "idle", sessionId: null, startedAt: null, captureStarted: false, errorMessage: null });
     return;
   }
 

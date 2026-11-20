@@ -27,6 +27,8 @@ const btnNewRecording = document.getElementById("btn-new-recording")!;
 const recTitleInput = document.getElementById("rec-title-input") as HTMLInputElement;
 
 const btnStop = document.getElementById("btn-stop")!;
+const btnStopLabel = document.getElementById("btn-stop-label")!;
+const recLiveLabel = screenRecording.querySelector(".rec-live-label") as HTMLElement;
 const btnCopyLink = document.getElementById("btn-copy-link")!;
 const btnOpenLink = document.getElementById("btn-open-link")!;
 const btnRecordAgain = document.getElementById("btn-record-again")!;
@@ -203,11 +205,24 @@ function renderState(newState: AppState) {
     case "idle":
       showScreen(screenIdle);
       break;
-    case "recording":
+    case "recording": {
       showScreen(screenRecording);
-      recTargetLabel.textContent = state.target?.tabTitle || "Entire Screen";
-      if (state.startedAt) startLocalTimer(state.startedAt);
+      // Until Chrome starts capturing, the user is still in the screen picker.
+      const picking = state.captureStarted === false || !state.startedAt;
+      screenRecording.classList.toggle("picking", picking);
+      recLiveLabel.textContent = picking ? "SETUP" : "REC";
+      if (picking) {
+        stopLocalTimer();
+        recTimer.textContent = "Choose what to share";
+        recTargetLabel.textContent = "Pick a screen, window or tab in Chrome's picker";
+        btnStopLabel.textContent = "Cancel";
+      } else {
+        recTargetLabel.textContent = state.target?.tabTitle || "Entire Screen";
+        btnStopLabel.textContent = "Stop & Upload";
+        startLocalTimer(state.startedAt!);
+      }
       break;
+    }
     case "uploading":
     case "finalizing":
       showScreen(screenUploading);
@@ -252,7 +267,12 @@ function renderState(newState: AppState) {
       showScreen(screenError);
       const rawMessage = state.errorMessage || "An unknown error occurred.";
       errorNeedsReconnect = /reconnect/i.test(rawMessage);
-      if (errorNeedsReconnect) {
+      btnSaveDisk.style.display = state.pickerCancelled ? "none" : "";
+      if (state.pickerCancelled) {
+        errorTitle.textContent = "No screen chosen";
+        errorMessage.textContent = rawMessage;
+        btnTryAgain.textContent = "Choose screen again";
+      } else if (errorNeedsReconnect) {
         errorTitle.textContent = "Sign-in expired";
         errorMessage.textContent =
           "Your Google sign-in expired, so this recording couldn't be uploaded. Click \"Reconnect Google Account\" below, sign in again, then start a new recording.";
@@ -380,7 +400,9 @@ btnToggleMic.addEventListener("click", async () => {
 
 btnStop.addEventListener("click", () => {
   chrome.runtime.sendMessage({ type: "STOP_RECORDING" });
-  
+  // Still in the picker: this is Cancel, nothing to upload.
+  if (screenRecording.classList.contains("picking")) return;
+
   // Task: Instant feedback loader
   showScreen(screenUploading);
   uploadAccountLabel.textContent = "Processing recording...";
@@ -416,7 +438,12 @@ btnSaveDisk.addEventListener("click", () => {
 });
 
 btnTryAgain.addEventListener("click", () => {
+  const repick = !!state?.pickerCancelled;
   chrome.runtime.sendMessage({ type: "SET_STATUS", status: "idle" });
+  if (repick && accounts.length > 0) {
+    startRecordingNow(state.target || {});
+    return;
+  }
   if (errorNeedsReconnect) {
     connectHandler();
   }

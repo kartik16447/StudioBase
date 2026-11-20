@@ -825,3 +825,9 @@ body { width: 340px; background: var(--bg); font-family: -apple-system, BlinkMac
 .skeleton-line.short {
   width: 60px;
 }
+
+/* Screen picker open: not recording yet, so no live dot or clock. */
+#screen-recording.picking .rec-live-dot { animation: none; background-color: var(--text-3); }
+#screen-recording.picking .rec-live-label { color: var(--text-3); }
+#screen-recording.picking .rec-timer { font-family: inherit; font-size: 13px; font-weight: 600; }
+#screen-recording.picking .rec-target-label { white-space: normal; }

@@ -143,16 +143,35 @@ async function startScreenRecording(includeMic: boolean) {
   if (isRecording) return;
   isStopping = false;
   svLog("PICKER_OPENED", { sessionId: activeSessionId, timestamp: Date.now() });
-  const stream = await navigator.mediaDevices.getDisplayMedia({
+  let stream: MediaStream;
+  try {
+  stream = await navigator.mediaDevices.getDisplayMedia({
     video: true,
     audio: true,
     // Hint Chrome picker to include audio options when available.
     // Cast required because these keys are not yet in TS DOM typings.
     ...( {
       systemAudio: 'include',
-      selfBrowserSurface: 'include'
+      selfBrowserSurface: 'include',
+      // Chrome shows "Share this tab instead" while recording a tab.
+      surfaceSwitching: 'include'
     } as any)
   } as any);
+  } catch (err: any) {
+    // Cancel button, Esc, or clicking away closes the picker with NotAllowedError.
+    // That is not a failure: let the user choose again. macOS blocking Chrome from
+    // recording the screen also says NotAllowedError, but with "system" in it.
+    const dismissed = (err?.name === 'NotAllowedError' || err?.name === 'AbortError') && !/system/i.test(err?.message || '');
+    if (startCancelled || dismissed) {
+      svLog("PICKER_DISMISSED", { sessionId: activeSessionId, name: err?.name, cancelledFromPopup: startCancelled });
+      if (!startCancelled) chrome.runtime.sendMessage({ type: 'PICKER_CANCELLED', sessionId: activeSessionId } as OffscreenMessage);
+      return;
+    }
+    if (/system/i.test(err?.message || '')) {
+      throw new Error("Chrome isn't allowed to record your screen. Open System Settings → Privacy & Security → Screen Recording, turn on Google Chrome, then restart Chrome.");
+    }
+    throw err;
+  }
 
   // The user pressed stop while the picker was open: drop the stream, record nothing.
   if (startCancelled) {
@@ -466,6 +485,12 @@ async function generateThumbnail(blob: Blob, retry = true): Promise<string | nul
 
 function startMediaRecorder(stream: MediaStream) {
   if (isRecording) return;
+  // Cancel pressed after picking but before recording began (mic setup is async).
+  if (startCancelled) {
+    svLog("PICKER_RESOLVED_AFTER_CANCEL", { sessionId: activeSessionId, stage: 'before_recorder' });
+    stream.getTracks().forEach(t => { try { t.stop(); } catch {} });
+    return;
+  }
   isRecording = true;
   isStopping = false;
   let hasFinishedChunkProcessing = false;
