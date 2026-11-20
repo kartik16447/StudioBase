@@ -21,6 +21,7 @@ const EXT_TO_TYPE: Record<string, string> = {
   webm: 'video/webm', mp4: 'video/mp4', m4v: 'video/x-m4v', mov: 'video/quicktime',
   mkv: 'video/x-matroska', ogv: 'video/ogg', '3gp': 'video/3gpp', mpg: 'video/mpeg', mpeg: 'video/mpeg',
   mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', flac: 'audio/flac', weba: 'audio/webm',
+  zip: 'application/zip',
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', jfif: 'image/jpeg', gif: 'image/gif',
   webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp',
 };
@@ -36,7 +37,7 @@ export function resolveContentType(file: File): string | null {
 }
 
 export function validateUpload(file: File): string | null {
-  if (!resolveContentType(file)) return 'Unsupported file type (use video, audio or image files: MP4, MOV, WebM, MKV, MP3, WAV, M4A, PNG, JPG…)';
+  if (!resolveContentType(file)) return 'Unsupported file type (use video, audio, image or ZIP files: MP4, MOV, WebM, MKV, MP3, WAV, PNG, JPG, ZIP…)';
   if (file.size === 0) return 'File is empty';
   if (file.size > MAX_UPLOAD_BYTES) return 'File is larger than 2GB';
   return null;
@@ -74,6 +75,7 @@ export async function uploadLocalFile(
   const contentType = resolveContentType(file)!;
   const isImage = contentType.startsWith('image/');
   const isAudio = contentType.startsWith('audio/');
+  const isZip = contentType === 'application/zip';
   const PART_SIZE = partSizeFor(file.size);
   const { key, uploadId } = await api('/uploads/init', json('POST', { workspaceId: opts.workspaceId, contentType, size: file.size }));
 
@@ -100,10 +102,10 @@ export async function uploadLocalFile(
     title,
     accountEmail: opts.accountEmail,
     source: 'upload',
-    mediaType: isImage ? 'image' : isAudio ? 'audio' : 'video',
+    mediaType: isImage ? 'image' : isAudio ? 'audio' : isZip ? 'file' : 'video',
   }));
 
-  const durationMs = isImage ? null : await readVideoDurationMs(file);
+  const durationMs = isImage || isZip ? null : await readVideoDurationMs(file);
   await api(`/videos/${created.id}`, json('PATCH', {
     status: 'ready',
     fileSizeBytes: file.size,

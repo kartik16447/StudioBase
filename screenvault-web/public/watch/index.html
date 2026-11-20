@@ -469,6 +469,11 @@
               const data = await metaRes.json();
               if (data.name) titleEl.textContent = data.name.replace(".webm", "");
               if (data.actualDurationMs) authoritativeDurationMs = data.actualDurationMs;
+              if (data.contentType && !/^(video|audio|image)\//.test(data.contentType)) {
+                // Zip and other stored files: nothing to play. The owner downloads from the dashboard.
+                showError("This is a file", "This item is a stored file, not a video. Only its owner can download it, from their dashboard.");
+                return;
+              }
               if (data.contentType && data.contentType.startsWith("image/")) {
                 // Uploaded image: no playback, just show it.
                 const img = document.createElement("img");

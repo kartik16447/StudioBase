@@ -522,7 +522,8 @@ chrome.runtime.onMessage.addListener(
       updateState({ status: "uploading", uploadProgress: 0 });
     } else if (msg.type === "CAPTURE_STARTED") {
       const startedAt = Date.now();
-      updateState({ startedAt, status: "recording" });
+      updateState({ startedAt, status: "recording", captureStarted: true });
+      svLog("CAPTURE_STARTED_RECEIVED", { sessionId: state.sessionId, timestamp: startedAt });
       if (state.sessionId)
         saveSessionMetadata(state.sessionId, {
           startedAt,
@@ -1060,6 +1061,7 @@ async function startRecording(target: AppState["target"]) {
 
     updateState({
       status: "recording",
+      captureStarted: false,
       sessionId,
       startedAt,
       preAllocatedFileId: fileId,
@@ -1155,6 +1157,15 @@ function stopRecording() {
   });
 
   stopBadgeTimer();
+
+  // Stopped before a screen was picked: nothing was captured, so cancel the
+  // pending start instead of handing out a link to an empty recording.
+  if (state.status === "recording" && !state.captureStarted) {
+    svLog("STOP_BEFORE_CAPTURE", { sessionId, fileId, timestamp: Date.now() });
+    chrome.runtime.sendMessage({ type: "CANCEL_START" }).catch(() => {});
+    updateState({ status: "error", errorMessage: "Recording hadn't started, so nothing was captured. Please try again." });
+    return;
+  }
 
   // Transition to processing state immediately
   updateState({ status: "uploading", uploadProgress: 0 });

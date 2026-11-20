@@ -61,7 +61,7 @@ export function LibraryPage() {
 
   const [uploads, setUploads] = useState<{ id: string; name: string; progress: number; error?: string }[]>([]);
   const [dragOver, setDragOver] = useState(false);
-  const [typeFilter, setTypeFilter] = useState<'all' | 'video' | 'image' | 'audio'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'video' | 'image' | 'audio' | 'file'>('all');
   const [ownerFilter, setOwnerFilter] = useState<'all' | 'mine'>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name-asc' | 'name-desc'>('newest');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -277,7 +277,7 @@ export function LibraryPage() {
     const q = debouncedQuery.trim().toLowerCase();
     let list = files.filter(f =>
       (!q || (f.title || '').toLowerCase().includes(q)) &&
-      (typeFilter === 'all' || (f.mediaType === 'image' ? 'image' : f.mediaType === 'audio' ? 'audio' : 'video') === typeFilter) &&
+      (typeFilter === 'all' || (f.mediaType === 'image' ? 'image' : f.mediaType === 'audio' ? 'audio' : f.mediaType === 'file' ? 'file' : 'video') === typeFilter) &&
       (ownerFilter === 'all' || f.ownerId === user?.userId)
     );
     if (sortBy !== 'newest') {
@@ -295,6 +295,8 @@ export function LibraryPage() {
   const filtersActive = typeFilter !== 'all' || ownerFilter !== 'all' || sortBy !== 'newest';
 
   const openVideo = (video: WorkspaceVideo) => {
+    // Zip files can't play; the owner clicking one downloads it.
+    if (video.mediaType === 'file') { if (video.ownerId === user?.userId) handleDownload(video); return; }
     if (video.playerUrl) { window.open(video.playerUrl, '_blank'); return; }
     if (video.fileId) {
       window.open(`${VIEWER_BASE}/?id=${video.fileId}&title=${encodeURIComponent(video.title)}`, '_blank');
@@ -458,7 +460,7 @@ export function LibraryPage() {
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       </span>
       <span style={{ fontWeight: 600, fontSize: '1rem' }}>Upload files</span>
-      <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>Click or drop videos, audio and images<br />MP4, MOV, WebM, MP3, WAV, PNG, JPG · up to 2GB</span>
+      <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>Click or drop videos, audio, images and ZIPs<br />MP4, MOV, WebM, MP3, WAV, PNG, JPG, ZIP · up to 2GB</span>
     </button>
   );
 
@@ -739,7 +741,7 @@ export function LibraryPage() {
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', marginBottom: '1.5rem' }}>
             {([
-              { label: 'Type', value: typeFilter, set: setTypeFilter, options: [['all', 'All types'], ['video', 'Videos'], ['image', 'Images'], ['audio', 'Audio']] },
+              { label: 'Type', value: typeFilter, set: setTypeFilter, options: [['all', 'All types'], ['video', 'Videos'], ['image', 'Images'], ['audio', 'Audio'], ['file', 'Zip files']] },
               { label: 'Owner', value: ownerFilter, set: setOwnerFilter, options: [['all', 'Everyone'], ['mine', 'Mine']] },
               { label: 'Sort', value: sortBy, set: setSortBy, options: [['newest', 'Newest first'], ['oldest', 'Oldest first'], ['name-asc', 'Name A–Z'], ['name-desc', 'Name Z–A']] },
             ] as { label: string; value: string; set: (v: any) => void; options: string[][] }[]).map(f => (
@@ -815,7 +817,16 @@ export function LibraryPage() {
                     onClick={() => openVideo(file)}
                   >
                     <div style={{ aspectRatio: '16/9', background: '#050505', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-                      {extractStreamId(file.playerUrl) && file.mediaType === 'image' ? (
+                      {file.mediaType === 'file' ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#A1A1AA' }}>
+                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 8v13H3V3h12l6 5z" />
+                            <path d="M14 3v6h7" />
+                            <path d="M10 11h2M10 14h2M10 17h2" />
+                          </svg>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 600, letterSpacing: '0.08em' }}>ZIP FILE</span>
+                        </div>
+                      ) : extractStreamId(file.playerUrl) && file.mediaType === 'image' ? (
                         <img
                           src={`${STREAM_BASE}/?id=${extractStreamId(file.playerUrl)}`}
                           alt={file.title}

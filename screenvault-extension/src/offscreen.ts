@@ -36,6 +36,8 @@ let activeBackendVideoId: string | null = null;
 let activePlayerUrl: string | null = null;
 let activeEncryptedFileId: string | null = null;
 let tokenPrefetched = false;
+// Set by CANCEL_START when the user stops before choosing a screen in the picker.
+let startCancelled = false;
 
 const ENABLE_PROGRESSIVE_UPLOAD = true;
 
@@ -73,6 +75,7 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
       console.warn('Recording already in progress, ignoring START_SCREEN');
       return;
     }
+    startCancelled = false;
     activeUploadKey = message.fileId;
     activeUploadId = message.uploadId;
     activeSessionId = message.sessionId;
@@ -105,6 +108,8 @@ chrome.runtime.onMessage.addListener((message: OffscreenMessage, sender, sendRes
     });
 
     startScreenRecording(message.includeMic !== false).catch(handleError);
+  } else if (message.type === 'CANCEL_START') {
+    startCancelled = true;
   } else if (message.type === 'STOP') {
     activeAccount = message.account;
     stopRecording();
@@ -137,6 +142,7 @@ function deriveTitleFromStream(stream: MediaStream): string | null {
 async function startScreenRecording(includeMic: boolean) {
   if (isRecording) return;
   isStopping = false;
+  svLog("PICKER_OPENED", { sessionId: activeSessionId, timestamp: Date.now() });
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: true,
     audio: true,
@@ -147,6 +153,14 @@ async function startScreenRecording(includeMic: boolean) {
       selfBrowserSurface: 'include'
     } as any)
   } as any);
+
+  // The user pressed stop while the picker was open: drop the stream, record nothing.
+  if (startCancelled) {
+    svLog("PICKER_RESOLVED_AFTER_CANCEL", { sessionId: activeSessionId });
+    stream.getTracks().forEach(t => { try { t.stop(); } catch {} });
+    return;
+  }
+  svLog("PICKER_RESOLVED", { sessionId: activeSessionId, timestamp: Date.now() });
 
   // Only override with the captured source's own name if the user didn't
   // type a custom title themselves — never clobber an explicit choice.

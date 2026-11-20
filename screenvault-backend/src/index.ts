@@ -409,7 +409,7 @@ async function createVideo(request: Request, env: any) {
 		const { fileId, title, workspaceId, duration, accountEmail, sessionId } = body;
 		// Local file uploads aren't live recordings, so they skip the recording cooldown.
 		const isUpload = body.source === 'upload';
-		const mediaType = body.mediaType === 'image' ? 'image' : body.mediaType === 'audio' ? 'audio' : 'video';
+		const mediaType = body.mediaType === 'image' ? 'image' : body.mediaType === 'audio' ? 'audio' : body.mediaType === 'file' ? 'file' : 'video';
 		
 		await backendLog(env, user.id, "API_CREATE_VIDEO", {
 			workspaceId,
@@ -541,6 +541,7 @@ const UPLOAD_CONTENT_TYPES: Record<string, string> = {
 	'video/ogg': 'ogv',
 	'video/3gpp': '3gp',
 	'video/mpeg': 'mpg',
+	'application/zip': 'zip',
 	'audio/mpeg': 'mp3',
 	'audio/mp4': 'm4a',
 	'audio/aac': 'aac',

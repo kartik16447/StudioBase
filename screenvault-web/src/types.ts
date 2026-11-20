@@ -4,7 +4,7 @@ export interface BackendVideo {
   sessionId?: string;
   workspaceId: string;
   folderId?: string | null;
-  mediaType?: 'video' | 'image' | 'audio';
+  mediaType?: 'video' | 'image' | 'audio' | 'file';
   title: string;
   playerUrl?: string;
   thumbnailUrl?: string;
@@ -46,5 +46,5 @@ export interface WorkspaceVideo {
   ownerId?: string;
   workspaceId?: string;
   folderId?: string | null;
-  mediaType?: 'video' | 'image' | 'audio';
+  mediaType?: 'video' | 'image' | 'audio' | 'file';
 }

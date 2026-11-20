@@ -69,6 +69,7 @@ export interface AppState {
   uploadAccount: string | null;  // email
   errorMessage: string | null;
   backendVideoId: string | null;
+  captureStarted?: boolean;      // false until offscreen reports CAPTURE_STARTED
 }
 
 export interface StorageAccount {
@@ -157,6 +158,7 @@ export type OffscreenMessage =
       hasUserTitle?: boolean;
     }
   | { type: 'STOP'; account: StorageAccount | null }
+  | { type: 'CANCEL_START' }
   | { type: 'CAPTURE_STARTED' }
   | { type: 'RECORDING_ERROR'; message: string }
   | { type: 'UPLOAD_PROGRESS'; progress: number }
