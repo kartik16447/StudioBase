@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useSearchParams } from 'react-router-dom';
-import { getUser, clearUser } from '../auth';
+import { getUser, signOut } from '../auth';
 import { safeFetch } from '../api';
 import { API_BASE } from '../config';
 import { Folder } from '../types';
@@ -110,7 +110,7 @@ export function Layout() {
   };
 
   const signOut = () => {
-    clearUser();
+    signOut();
     navigate('/login');
   };
 

@@ -17,6 +17,9 @@
     "https://screenvault-proxy.tushar-abf.workers.dev/*",
     "https://screenvault-backend.tushar-abf.workers.dev/*"
   ],
+  "externally_connectable": {
+    "matches": ["https://recorder.foyr.com/*", "https://screenvault-web-7r9.pages.dev/*"]
+  },
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"

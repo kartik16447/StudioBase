@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { setUser, getUser } from '../auth';
+import { setUser, getUser, signInFromExtension, clearSignedOutFlag } from '../auth';
 import { API_BASE, GOOGLE_CLIENT_ID } from '../config';
 
 declare global {
@@ -20,6 +20,10 @@ export function LoginPage() {
       navigate('/library', { replace: true });
       return;
     }
+
+    signInFromExtension().then((user) => {
+      if (user) navigate('/library', { replace: true });
+    });
 
     const init = () => {
       if (!window.google || !GOOGLE_CLIENT_ID) return;
@@ -81,7 +85,9 @@ export function LoginPage() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      setUser({ accessToken, ...data });
+      // Use the backend's 30-day session, not Google's 1-hour token, for all API calls.
+      setUser({ ...data, accessToken: data.sessionToken || accessToken });
+      clearSignedOutFlag();
       navigate('/library', { replace: true });
     } catch (err: any) {
       setError(err.message || 'Sign-in failed. Please try again.');

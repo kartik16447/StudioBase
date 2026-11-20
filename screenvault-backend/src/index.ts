@@ -1606,9 +1606,12 @@ async function handleGoogleAuth(request: Request, env: any) {
 		// Fetch slug for the resolved workspace
 		const resolvedWorkspace = (await env.DB.prepare('SELECT slug FROM workspaces WHERE id = ?').bind(resolvedWorkspaceId).first()) as any;
 
+		const session = await createSessionToken(env, { id: userId, email, name, picture });
 		return Response.json({
 			userId,
 			email,
+			sessionToken: session.token,
+			sessionExpiresAt: session.expiresAt,
 			workspaceId: resolvedWorkspaceId,
 			workspaceSlug: resolvedWorkspace?.slug || workspace.slug,
 			workspaceRole: resolvedRole,
@@ -1635,6 +1638,51 @@ function jsonError(message: string, code: string = 'API_ERROR', status: number =
 	);
 }
 
+// ── Sessions ──────────────────────────────────────────────────────────────
+// Format: sv1.<base64url(JSON {u,e,n,p,exp})>.<hex HMAC-SHA256 over "sv1.<payload>">
+// Signed with ENCRYPTION_KEY; the "sv1." prefix keeps it distinct from download-link signatures.
+// shortcut: no server-side revocation list; a stolen token works until it expires. Add a
+// per-user session version column if forced sign-out is ever needed.
+const SESSION_PREFIX = 'sv1.';
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function b64urlEncode(text: string): string {
+	return btoa(unescape(encodeURIComponent(text))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(text: string): string {
+	const b64 = text.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((text.length + 3) % 4);
+	return decodeURIComponent(escape(atob(b64)));
+}
+
+async function createSessionToken(env: any, user: { id: string; email: string; name?: string; picture?: string }) {
+	if (!env.ENCRYPTION_KEY) throw new Error('ENCRYPTION_KEY not configured');
+	const expiresAt = Date.now() + SESSION_TTL_MS;
+	const payload = b64urlEncode(JSON.stringify({ u: user.id, e: user.email, n: user.name || '', p: user.picture || '', exp: expiresAt }));
+	const sig = await hmacHex(env.ENCRYPTION_KEY, SESSION_PREFIX + payload);
+	return { token: `${SESSION_PREFIX}${payload}.${sig}`, expiresAt };
+}
+
+async function verifySessionToken(env: any, token: string) {
+	if (!env.ENCRYPTION_KEY) return null;
+	const rest = token.slice(SESSION_PREFIX.length);
+	const dot = rest.lastIndexOf('.');
+	if (dot <= 0) return null;
+	const payload = rest.slice(0, dot);
+	const sig = rest.slice(dot + 1);
+	const expected = await hmacHex(env.ENCRYPTION_KEY, SESSION_PREFIX + payload);
+	if (sig.length !== expected.length) return null;
+	let diff = 0;
+	for (let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
+	if (diff !== 0) return null;
+	try {
+		const data = JSON.parse(b64urlDecode(payload));
+		if (!data.u || !data.exp || Date.now() > data.exp) return null;
+		return { id: data.u, email: data.e, name: data.n, picture: data.p };
+	} catch {
+		return null;
+	}
+}
+
 async function getUserFromToken(request: Request, env: Env) {
 	const authHeader = request.headers.get('Authorization');
 	if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -1643,7 +1691,15 @@ async function getUserFromToken(request: Request, env: Env) {
 
 	const token = authHeader.split(' ')[1];
 	const now = Date.now();
-	
+
+	// Our own signed session (issued at sign-in). Google access tokens die after
+	// 1 hour, which signed people out of the dashboard and extension constantly.
+	if (token.startsWith(SESSION_PREFIX)) {
+		const user = await verifySessionToken(env, token);
+		if (!user) throw new Error('Invalid access token');
+		return user;
+	}
+
 	// Read from KV (Distributed Cache)
 	const cached = await env.TOKEN_CACHE.get(token, 'json') as { user: any; expiresAt: number } | null;
 	

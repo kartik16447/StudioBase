@@ -42,6 +42,10 @@ let lastPreAllocateTime = 0;
 
 async function validateToken(account: StorageAccount): Promise<string> {
   try {
+    if (isSessionToken(account.accessToken)) {
+      if (account.expiresAt > Date.now()) return account.accessToken;
+      throw new Error("session expired");
+    }
     const res = await fetch(
       "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=" +
         account.accessToken,
@@ -73,6 +77,18 @@ async function validateToken(account: StorageAccount): Promise<string> {
 }
 
 const inFlightRefreshes = new Map<string, Promise<StorageAccount>>();
+
+// Google access tokens last 1 hour; the backend trades one for a 30-day session
+// token (sv1...). Backend calls use the session, so people stay signed in.
+const isSessionToken = (t?: string) => !!t && t.startsWith("sv1.");
+const DAY_MS = 24 * 60 * 60 * 1000;
+function sessionFields(googleToken: string, backend: any): { accessToken: string; expiresAt: number } {
+  if (backend?.sessionToken && backend?.sessionExpiresAt) {
+    // Renew a day early so a recording is never cut off by expiry.
+    return { accessToken: backend.sessionToken, expiresAt: backend.sessionExpiresAt - DAY_MS };
+  }
+  return { accessToken: googleToken, expiresAt: Date.now() + 3500 * 1000 };
+}
 
 async function trySilentRefresh(account: StorageAccount): Promise<StorageAccount> {
   const accountId = account.id || account.email;
@@ -111,10 +127,12 @@ async function trySilentRefresh(account: StorageAccount): Promise<StorageAccount
 
       svLog("TOKEN_REFRESH_SUCCESS", { accountEmail: account.email });
 
+      const backend = await syncPrimaryAccount(token, !!account.isPrimary);
+      const fresh = sessionFields(token, backend);
+
       const updatedAccount = {
         ...account,
-        accessToken: token,
-        expiresAt: Date.now() + 3500 * 1000,
+        ...fresh,
         invalid: false,
         invalidReason: undefined
       };
@@ -126,7 +144,7 @@ async function trySilentRefresh(account: StorageAccount): Promise<StorageAccount
       if (updatedAccount.isPrimary) {
         const stored = await chrome.storage.local.get("sv_user");
         if (stored.sv_user) {
-          await chrome.storage.local.set({ sv_user: { ...stored.sv_user, accessToken: token } });
+          await chrome.storage.local.set({ sv_user: { ...stored.sv_user, accessToken: fresh.accessToken } });
         }
       }
 
@@ -472,6 +490,28 @@ async function preAllocateUpload(account: StorageAccount, title?: string): Promi
 
   return { id: key, uploadId, url, fileName, account, videoId, encryptedFileId };
 }
+
+// The dashboard (recorder.foyr.com only, enforced by externally_connectable and
+// the origin check) asks for the extension's sign-in so people sign in once.
+const WEB_ORIGINS = ["https://recorder.foyr.com", "https://screenvault-web-7r9.pages.dev"];
+chrome.runtime.onMessageExternal.addListener((msg: any, sender, sendResponse) => {
+  if (msg?.type !== "GET_WEB_SESSION") return;
+  const origin = (sender as any).origin || (sender.url ? new URL(sender.url).origin : "");
+  if (!WEB_ORIGINS.includes(origin)) { sendResponse(null); return; }
+  chrome.storage.local.get(["sv_user", "sv_accounts"]).then(({ sv_user, sv_accounts }: any) => {
+    const acc = ((sv_accounts || []) as StorageAccount[]).find((a) => a.isPrimary) || (sv_accounts || [])[0];
+    const token = sv_user?.accessToken;
+    // Only ever hand out our own session token, never a Google token.
+    if (!sv_user?.workspaceId || !isSessionToken(token) || !acc || acc.invalid || acc.expiresAt < Date.now()) {
+      sendResponse(null);
+      return;
+    }
+    const { userId, email, workspaceId, workspaceSlug, workspaceRole } = sv_user;
+    svLog("WEB_SESSION_SHARED", { email });
+    sendResponse({ accessToken: token, userId, email, workspaceId, workspaceSlug, workspaceRole });
+  }).catch(() => sendResponse(null));
+  return true;
+});
 
 chrome.runtime.onMessage.addListener(
   (msg: PopupMessage | any, sender, sendResponse) => {
@@ -837,20 +877,19 @@ async function connectAccount() {
       throw new Error("Failed to retrieve user identity from Google.");
     }
 
+    // Sync identity with backend (creates/links the user + workspace) and get a 30-day session.
+    const backend = await syncPrimaryAccount(token, true);
+
     const account: StorageAccount = {
       id: user.id,
       email: user.email,
       displayName: user.name,
-      accessToken: token,
-      expiresAt: Date.now() + 3500 * 1000,
+      ...sessionFields(token, backend),
       uploadSuccessCount: 0,
       uploadFailureCount: 0,
       isPrimary: true,
       isActive: true,
     };
-
-    // Sync identity with backend (creates/links the user + workspace)
-    await syncPrimaryAccount(token, true);
 
     // Single-account model: signing in replaces any previous account.
     accounts = [account];
@@ -867,7 +906,7 @@ async function connectAccount() {
   }
 }
 
-async function syncPrimaryAccount(token: string, forceUpdate = false) {
+async function syncPrimaryAccount(token: string, forceUpdate = false): Promise<any> {
   const currentSession = (await chrome.storage.local.get("sv_user")) as {
     sv_user?: BackendUser;
   };
@@ -896,7 +935,7 @@ async function syncPrimaryAccount(token: string, forceUpdate = false) {
         const { userId, email, workspaceId, workspaceSlug, workspaceRole } = backendData;
         await chrome.storage.local.set({
           sv_user: {
-            accessToken: token,
+            accessToken: backendData.sessionToken || token,
             userId,
             email,
             workspaceId,
@@ -906,10 +945,12 @@ async function syncPrimaryAccount(token: string, forceUpdate = false) {
         });
         chrome.runtime.sendMessage({ type: "STATE_UPDATE", state }).catch(() => {});
       }
+      return backendData;
     }
   } catch (err) {
     console.error("Backend identity sync failed:", err);
   }
+  return null;
 }
 
 

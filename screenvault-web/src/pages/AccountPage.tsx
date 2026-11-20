@@ -1,5 +1,5 @@
 import React from 'react';
-import { getUser, clearUser } from '../auth';
+import { getUser, signOut } from '../auth';
 import { useNavigate } from 'react-router-dom';
 
 export function AccountPage() {
@@ -7,7 +7,7 @@ export function AccountPage() {
   const navigate = useNavigate();
 
   const signOut = () => {
-    clearUser();
+    signOut();
     navigate('/login');
   };
 
