@@ -8,6 +8,7 @@
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://screenvault-proxy.tushar-abf.workers.dev" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
@@ -20,37 +21,11 @@
     <link rel="stylesheet" href="vendor/phosphor/fill/style.css" />
 
     <style>
-      /* Custom styles to hide/show elements smoothly */
-      #player {
-        display: none;
-        opacity: 0;
-        transition: opacity 0.5s ease-in-out;
-      }
-      #player.loaded {
-        display: block;
-        opacity: 1;
-      }
-
       /* Premium video container shadow */
       .video-shadow {
         box-shadow:
           0 25px 50px -12px rgba(0, 0, 0, 0.25),
           0 0 0 1px rgba(0, 0, 0, 0.05);
-      }
-
-      /* Spinner animation */
-      .spinner {
-        border: 3px solid rgba(255, 255, 255, 0.2);
-        border-top-color: #fff;
-        border-radius: 50%;
-        width: 32px;
-        height: 32px;
-        animation: spin 1s linear infinite;
-      }
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
       }
 
       /* Header logo icon entrance: swoosh on fresh navigation, pulse on reload */
@@ -76,6 +51,123 @@
         animation:
           sv-logo-pulse-in 500ms cubic-bezier(0.16, 1, 0.3, 1) both,
           sv-logo-pulse-ring 1.8s ease-out 500ms 2;
+      }
+
+      .ph-fill { font-family: "Phosphor-Fill" !important; }
+
+      /* ───────────── Player (plain CSS: player.css is a prebuilt Tailwind file) ───────────── */
+      :root { --svp-brand: #ea580c; }
+      #video-wrapper { position: relative; user-select: none; -webkit-user-select: none; }
+      #video-wrapper:fullscreen, #video-wrapper:-webkit-full-screen { border-radius: 0; width: 100%; height: 100%; max-width: none; aspect-ratio: auto; }
+      #player { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; outline: none; }
+
+      .svp-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 40px; height: 40px; border-radius: 10px; border: 0; padding: 0;
+        background: transparent; color: #fff; cursor: pointer; font-size: 22px;
+        transition: background-color .15s, transform .15s;
+      }
+      .svp-btn:hover { background: rgba(255,255,255,.12); }
+      .svp-btn:active { transform: scale(.92); }
+      .svp-btn:focus-visible, .svp-track:focus-visible, .svp-vol:focus-visible { outline: 2px solid var(--svp-brand); outline-offset: 2px; }
+      .svp-btn .svp-sub { position: absolute; font: 700 8px/1 Inter, system-ui, sans-serif; margin-top: 1px; }
+      .svp-skip { position: relative; }
+
+      /* Big centre button + spinner */
+      .svp-center {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(1);
+        width: 84px; height: 84px; border-radius: 9999px; border: 0; cursor: pointer;
+        background: rgba(234, 88, 12, .92); color: #fff; font-size: 38px; z-index: 20;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 10px 40px rgba(0,0,0,.45);
+        transition: opacity .2s, transform .2s;
+      }
+      .svp-center:hover { transform: translate(-50%, -50%) scale(1.06); }
+      .svp-center i.ph-play { margin-left: 5px; }
+      #video-wrapper.svp-playing .svp-center { opacity: 0; pointer-events: none; transform: translate(-50%, -50%) scale(.85); }
+      .svp-spinner {
+        position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; z-index: 15;
+        border: 4px solid rgba(255,255,255,.2); border-top-color: #fff; border-radius: 50%;
+        animation: svp-spin .8s linear infinite; opacity: 0; transition: opacity .2s; pointer-events: none;
+      }
+      #video-wrapper.svp-waiting .svp-spinner { opacity: 1; }
+      #video-wrapper.svp-waiting .svp-center { opacity: 0; pointer-events: none; }
+      @keyframes svp-spin { to { transform: rotate(360deg); } }
+
+      /* Flash feedback for keyboard / click actions */
+      .svp-flash {
+        position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 16;
+        background: rgba(0,0,0,.6); color: #fff; border-radius: 9999px; padding: 14px 20px;
+        font: 600 15px/1 Inter, system-ui, sans-serif; display: flex; gap: 8px; align-items: center;
+        opacity: 0; pointer-events: none;
+      }
+      .svp-flash.show { animation: svp-flash .6s ease-out; }
+      @keyframes svp-flash { 0% { opacity: 1; transform: translate(-50%,-50%) scale(.9); } 100% { opacity: 0; transform: translate(-50%,-50%) scale(1.15); } }
+
+      /* Control bar */
+      .svp-controls {
+        position: absolute; left: 0; right: 0; bottom: 0; z-index: 30;
+        padding: 40px 14px 10px; color: #fff;
+        background: linear-gradient(to top, rgba(0,0,0,.85), rgba(0,0,0,.35) 60%, transparent);
+        transition: opacity .25s, transform .25s; font-family: Inter, system-ui, sans-serif;
+      }
+      #video-wrapper.svp-idle .svp-controls { opacity: 0; transform: translateY(8px); pointer-events: none; }
+      #video-wrapper.svp-idle { cursor: none; }
+      .svp-row { display: flex; align-items: center; gap: 4px; }
+      .svp-spacer { flex: 1; }
+      .svp-time { font-size: 13px; font-variant-numeric: tabular-nums; margin-left: 8px; white-space: nowrap; opacity: .95; }
+
+      /* Progress bar */
+      .svp-track { position: relative; height: 18px; display: flex; align-items: center; cursor: pointer; touch-action: none; margin-bottom: 2px; }
+      .svp-rail { position: relative; width: 100%; height: 4px; border-radius: 4px; background: rgba(255,255,255,.22); transition: height .12s; overflow: hidden; }
+      .svp-track:hover .svp-rail, .svp-track.dragging .svp-rail { height: 6px; }
+      .svp-buffered, .svp-played, .svp-hoverbar { position: absolute; top: 0; left: 0; height: 100%; width: 0; }
+      .svp-buffered { background: rgba(255,255,255,.35); }
+      .svp-hoverbar { background: rgba(255,255,255,.18); }
+      .svp-played { background: var(--svp-brand); }
+      .svp-thumb {
+        position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+        background: #fff; box-shadow: 0 0 0 3px rgba(234,88,12,.55); transform: scale(0); transition: transform .12s; left: 0;
+      }
+      .svp-track:hover .svp-thumb, .svp-track.dragging .svp-thumb, .svp-track:focus-visible .svp-thumb { transform: scale(1); }
+      .svp-tip {
+        position: absolute; bottom: 22px; transform: translateX(-50%); padding: 4px 8px; border-radius: 6px;
+        background: rgba(0,0,0,.85); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap;
+        opacity: 0; pointer-events: none; transition: opacity .1s;
+      }
+      .svp-track:hover .svp-tip, .svp-track.dragging .svp-tip { opacity: 1; }
+      .svp-track.unknown { cursor: default; }
+      .svp-track.unknown .svp-thumb, .svp-track.unknown .svp-tip { display: none; }
+
+      /* Volume */
+      .svp-volgroup { display: flex; align-items: center; }
+      .svp-vol { width: 0; opacity: 0; transition: width .2s, opacity .2s; accent-color: var(--svp-brand); cursor: pointer; height: 4px; }
+      .svp-volgroup:hover .svp-vol, .svp-volgroup:focus-within .svp-vol { width: 84px; opacity: 1; margin: 0 6px; }
+
+      /* Speed menu */
+      .svp-speedwrap { position: relative; }
+      .svp-speed { width: auto; padding: 0 10px; font: 700 13px/1 Inter, system-ui, sans-serif; }
+      .svp-menu {
+        position: absolute; right: 0; bottom: 48px; min-width: 120px; padding: 6px; border-radius: 12px;
+        background: rgba(20,20,20,.96); box-shadow: 0 10px 30px rgba(0,0,0,.5); display: none;
+      }
+      .svp-menu.open { display: block; }
+      .svp-menu button {
+        display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 12px;
+        background: transparent; border: 0; color: #fff; padding: 8px 10px; border-radius: 8px; cursor: pointer;
+        font: 500 14px/1 Inter, system-ui, sans-serif;
+      }
+      .svp-menu button:hover { background: rgba(255,255,255,.1); }
+      .svp-menu button[aria-checked="true"] { color: var(--svp-brand); font-weight: 700; }
+
+      @media (max-width: 640px) {
+        .svp-btn { width: 36px; height: 36px; font-size: 20px; }
+        .svp-skip, .svp-volgroup .svp-vol { display: none; }
+        .svp-center { width: 68px; height: 68px; font-size: 30px; }
+        .svp-controls { padding: 32px 8px 6px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .svp-controls, .svp-center, .svp-thumb, .svp-rail { transition: none; }
       }
     </style>
   </head>
@@ -163,84 +255,66 @@
 
       <div
         id="video-wrapper"
-        class="w-full max-w-5xl bg-black rounded-2xl overflow-hidden video-shadow relative aspect-video flex items-center justify-center group hidden"
+        class="w-full max-w-5xl bg-black rounded-2xl overflow-hidden video-shadow aspect-video hidden svp-waiting"
+        tabindex="-1"
       >
-        <div
-          id="loader"
-          class="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 z-10 transition-opacity duration-300"
-          style="display:none"
-        >
-          <div class="spinner mb-4"></div>
-          <p class="text-gray-400 font-medium text-sm animate-pulse">Preparing your video...</p>
-        </div>
-
         <video
           id="player"
-          class="w-full h-full object-contain outline-none bg-black"
-          autoplay
-          muted
+          preload="auto"
           playsinline
           crossorigin="anonymous"
           controlsList="nodownload"
-          disablePictureInPicture
         ></video>
 
-        <!-- Big Center Play Button (Hover Only) -->
-        <button id="center-play-btn" class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
-          <div class="w-20 h-20 bg-brand/90 backdrop-blur-md rounded-full flex items-center justify-center text-white shadow-2xl transform scale-90 group-hover:scale-100 transition-transform">
-            <i id="center-play-icon" class="ph-fill ph-play text-4xl ml-1"></i>
-          </div>
+        <div class="svp-spinner" aria-hidden="true"></div>
+        <div id="svp-flash" class="svp-flash" aria-hidden="true"></div>
+
+        <button id="center-play-btn" class="svp-center" aria-label="Play">
+          <i id="center-play-icon" class="ph-fill ph-play"></i>
         </button>
 
-        <!-- Custom Control Bar -->
-        <div id="controls-bar" class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-4 pt-12 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col gap-3 z-30 pointer-events-none group-hover:pointer-events-auto">
-          <!-- Progress Bar -->
-          <div class="relative w-full h-1.5 bg-white/20 rounded-full cursor-pointer group/progress mb-1">
-             <div id="progress-fill" class="absolute top-0 left-0 h-full bg-brand rounded-full" style="width: 0%"></div>
-             <div id="seek-hover" class="absolute top-0 h-full bg-white/10 hidden pointer-events-none"></div>
-             <input id="seek-slider" type="range" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" min="0" max="1000" value="0">
+        <div id="controls-bar" class="svp-controls">
+          <div id="svp-track" class="svp-track unknown" role="slider" tabindex="0"
+               aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00">
+            <div class="svp-rail">
+              <div id="svp-buffered" class="svp-buffered"></div>
+              <div id="svp-hoverbar" class="svp-hoverbar"></div>
+              <div id="svp-played" class="svp-played"></div>
+            </div>
+            <div id="svp-thumb" class="svp-thumb"></div>
+            <div id="svp-tip" class="svp-tip">0:00</div>
           </div>
-          
-          <div class="flex items-center justify-between text-white">
-             <div class="flex items-center gap-5">
-                <!-- Play/Pause -->
-                <button id="play-pause-btn" class="hover:scale-110 transition-transform focus:outline-none">
-                   <i id="play-icon" class="ph-fill ph-play text-2xl"></i>
-                </button>
-                
-                <!-- Skip Buttons -->
-                <div class="flex items-center gap-4">
-                  <button id="skip-back-btn" class="hover:text-brand transition-colors focus:outline-none flex flex-col items-center">
-                     <i class="ph ph-rewind-15 text-2xl"></i>
-                  </button>
-                  <button id="skip-forward-btn" class="hover:text-brand transition-colors focus:outline-none flex flex-col items-center">
-                     <i class="ph ph-fast-forward-15 text-2xl"></i>
-                  </button>
-                </div>
-                
-                <!-- Time -->
-                <div id="time-text" class="text-xs font-mono font-medium tracking-tight">0:00 / 0:00</div>
-             </div>
-             
-             <div class="flex items-center gap-5">
-                <!-- Speed -->
-                <div id="speed-btn" class="text-[10px] font-black bg-white/10 hover:bg-white/20 px-2.5 py-1 rounded-full cursor-pointer transition-colors border border-white/5 uppercase tracking-widest">1x</div>
 
-                <!-- Volume -->
-                <div class="flex items-center gap-2 group/volume relative">
-                   <button id="volume-btn" class="focus:outline-none hover:scale-110 transition-transform">
-                     <i id="volume-icon" class="ph-fill ph-speaker-high text-xl"></i>
-                   </button>
-                   <div class="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-300 flex items-center">
-                      <input id="volume-slider" type="range" class="w-20 accent-brand cursor-pointer h-1" min="0" max="1" step="0.05" value="1">
-                   </div>
-                </div>
+          <div class="svp-row">
+            <button id="play-pause-btn" class="svp-btn" aria-label="Play (k)">
+              <i id="play-icon" class="ph-fill ph-play"></i>
+            </button>
+            <button id="skip-back-btn" class="svp-btn svp-skip" aria-label="Back 10 seconds (j)">
+              <i class="ph ph-arrow-counter-clockwise"></i><span class="svp-sub">10</span>
+            </button>
+            <button id="skip-forward-btn" class="svp-btn svp-skip" aria-label="Forward 10 seconds (l)">
+              <i class="ph ph-arrow-clockwise"></i><span class="svp-sub">10</span>
+            </button>
+            <div class="svp-volgroup">
+              <button id="volume-btn" class="svp-btn" aria-label="Mute (m)">
+                <i id="volume-icon" class="ph-fill ph-speaker-high"></i>
+              </button>
+              <input id="volume-slider" class="svp-vol" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume" />
+            </div>
+            <div id="time-text" class="svp-time">0:00</div>
 
-                <!-- Fullscreen -->
-                <button id="fullscreen-btn" class="hover:scale-110 transition-transform focus:outline-none">
-                  <i id="fullscreen-icon" class="ph ph-arrows-out text-xl"></i>
-                </button>
-             </div>
+            <div class="svp-spacer"></div>
+
+            <div class="svp-speedwrap">
+              <button id="speed-btn" class="svp-btn svp-speed" aria-label="Playback speed" aria-haspopup="menu" aria-expanded="false">1x</button>
+              <div id="speed-menu" class="svp-menu" role="menu"></div>
+            </div>
+            <button id="pip-btn" class="svp-btn" aria-label="Picture in picture" hidden>
+              <i class="ph ph-picture-in-picture"></i>
+            </button>
+            <button id="fullscreen-btn" class="svp-btn" aria-label="Full screen (f)">
+              <i id="fullscreen-icon" class="ph ph-corners-out"></i>
+            </button>
           </div>
         </div>
       </div>
@@ -292,16 +366,8 @@
       })();
     </script>
     <script>
-      // Set today's date dynamically
-      document.getElementById("date-display").textContent =
-        new Date().toLocaleDateString("en-US", {
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-        });
-
-      // 10 Random Delightful Messages
-      const delightMessages = [
+      const PROXY = "https://screenvault-proxy.tushar-abf.workers.dev";
+      const DELIGHT = [
         "Hooray! You just saved a meeting. 🎉",
         "Boom! Knowledge shared instantly. 🚀",
         "Another meeting avoided. You're welcome. 🙌",
@@ -314,22 +380,15 @@
         "That's a wrap! Ready to watch. 🍿",
       ];
 
-      // Dynamic Toast Function
-      function showToast(
-        message,
-        iconClass = "ph-check-circle",
-        colorClass = "text-green-400",
-      ) {
+      document.getElementById("date-display").textContent =
+        new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+      function showToast(message, iconClass = "ph-check-circle", colorClass = "text-green-400") {
         const toast = document.getElementById("toast");
         document.getElementById("toast-msg").textContent = message;
-
-        const iconEl = document.getElementById("toast-icon");
-        iconEl.className = `ph ${iconClass} ${colorClass} text-lg`;
-
+        document.getElementById("toast-icon").className = `ph ${iconClass} ${colorClass} text-lg`;
         toast.classList.remove("translate-y-24", "opacity-0");
-        setTimeout(() => {
-          toast.classList.add("translate-y-24", "opacity-0");
-        }, 1000); // 1 second for snappier feedback
+        setTimeout(() => toast.classList.add("translate-y-24", "opacity-0"), 1500);
       }
 
       function copyLink() {
@@ -338,457 +397,538 @@
         });
       }
 
-      // Error handling UI toggle
       function showError(title, description) {
         document.getElementById("video-wrapper").classList.add("hidden");
-        const errState = document.getElementById("error-state");
-        errState.classList.remove("hidden");
+        document.getElementById("error-state").classList.remove("hidden");
         document.getElementById("error-title").textContent = title;
         document.getElementById("error-desc").textContent = description;
+      }
+
+      // Small storage helpers: storage can be blocked (private mode, policies).
+      const store = {
+        get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+        set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+      };
+
+      function formatTime(sec) {
+        if (sec == null || !isFinite(sec) || isNaN(sec)) sec = 0;
+        sec = Math.max(0, Math.floor(sec));
+        const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+        const ss = String(s).padStart(2, "0");
+        return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+      }
+
+      // ── Duration for MediaRecorder WebM ───────────────────────────────────
+      // Chrome's MediaRecorder writes WebM with no duration, so <video>.duration
+      // is Infinity and the bar can't move. Read it from the file's tail instead:
+      // the last Cluster's timecode + its last block's offset ≈ the duration.
+      function readVint(view, pos, keepMarker) {
+        const first = view.getUint8(pos);
+        let len = 1, mask = 0x80;
+        while (len <= 8 && !(first & mask)) { len++; mask >>= 1; }
+        if (len > 8 || pos + len > view.byteLength) return null;
+        let value = keepMarker ? first : first & (mask - 1);
+        for (let i = 1; i < len; i++) value = value * 256 + view.getUint8(pos + i);
+        return { value, len };
+      }
+
+      async function webmDurationFromTail(url) {
+        const head = await fetch(url, { headers: { Range: "bytes=0-0" } });
+        const range = head.headers.get("Content-Range");
+        const total = range ? parseInt(range.split("/")[1], 10) : 0;
+        if (!total) return null;
+        // Timecode scale is 1ms unless the header says otherwise; recorder files use the default.
+        let tail = 2 * 1024 * 1024;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const start = Math.max(0, total - tail);
+          const res = await fetch(url, { headers: { Range: `bytes=${start}-${total - 1}` } });
+          if (!res.ok) return null;
+          const view = new DataView(await res.arrayBuffer());
+          // Find the last Cluster (1F 43 B6 75) followed by a Timecode element (E7).
+          for (let i = view.byteLength - 4; i >= 0; i--) {
+            if (view.getUint8(i) !== 0x1f || view.getUint8(i + 1) !== 0x43 || view.getUint8(i + 2) !== 0xb6 || view.getUint8(i + 3) !== 0x75) continue;
+            let p = i + 4;
+            const size = readVint(view, p, false); if (!size) continue;
+            p += size.len;
+            if (view.getUint8(p) !== 0xe7) continue;
+            const tlen = readVint(view, p + 1, false); if (!tlen || tlen.value > 8) continue;
+            let clusterTc = 0;
+            for (let k = 0; k < tlen.value; k++) clusterTc = clusterTc * 256 + view.getUint8(p + 1 + tlen.len + k);
+            p += 1 + tlen.len + tlen.value;
+            // Walk the cluster's children for SimpleBlocks (A3) and keep the max relative time.
+            let maxRel = 0;
+            while (p + 2 < view.byteLength) {
+              const id = readVint(view, p, true); if (!id) break;
+              const sz = readVint(view, p + id.len, false); if (!sz) break;
+              const body = p + id.len + sz.len;
+              if (id.value === 0xa3 && body + 3 < view.byteLength) {
+                const track = readVint(view, body, false);
+                if (track) maxRel = Math.max(maxRel, view.getInt16(body + track.len));
+              } else if (id.value === 0x1f43b675) break;
+              if (!isFinite(sz.value) || sz.value > view.byteLength) break;
+              p = body + sz.value;
+            }
+            const sec = (clusterTc + maxRel) / 1000;
+            return sec > 0 ? sec : null;
+          }
+          if (start === 0) return null;
+          tail *= 4;
+        }
+        return null;
       }
 
       document.addEventListener("DOMContentLoaded", () => {
         const params = new URLSearchParams(window.location.search);
         const fileId = params.get("id");
         const urlTitle = params.get("title");
-        const videoWrapper = document.getElementById("video-wrapper");
-        const video = document.getElementById("player");
-        const loader = document.getElementById("loader");
-
-        // Custom UI Elements
-        const playPauseBtn = document.getElementById("play-pause-btn");
-        const playIcon = document.getElementById("play-icon");
-        const centerPlayBtn = document.getElementById("center-play-btn");
-        const centerPlayIcon = document.getElementById("center-play-icon");
-        const skipBackBtn = document.getElementById("skip-back-btn");
-        const skipForwardBtn = document.getElementById("skip-forward-btn");
-        const seekSlider = document.getElementById("seek-slider");
-        const progressFill = document.getElementById("progress-fill");
-        const timeText = document.getElementById("time-text");
-        const volumeBtn = document.getElementById("volume-btn");
-        const volumeIcon = document.getElementById("volume-icon");
-        const volumeSlider = document.getElementById("volume-slider");
-        const speedBtn = document.getElementById("speed-btn");
-        const fullscreenBtn = document.getElementById("fullscreen-btn");
-        const fullscreenIcon = document.getElementById("fullscreen-icon");
-
-        let hasUserPlayed = false;
-        let previewLoopActive = true;
-        let authoritativeDurationMs = 0;
-
         const sessionId = params.get("sid") || crypto.randomUUID?.() || Math.random().toString(36).substring(2);
+
+        const wrapper = document.getElementById("video-wrapper");
+        const video = document.getElementById("player");
+        const titleEl = document.getElementById("video-title");
+        const $ = (id) => document.getElementById(id);
+        const playBtn = $("play-pause-btn"), playIcon = $("play-icon");
+        const centerBtn = $("center-play-btn"), centerIcon = $("center-play-icon");
+        const track = $("svp-track"), played = $("svp-played"), buffered = $("svp-buffered");
+        const hoverbar = $("svp-hoverbar"), thumb = $("svp-thumb"), tip = $("svp-tip");
+        const timeText = $("time-text");
+        const volumeBtn = $("volume-btn"), volumeIcon = $("volume-icon"), volumeSlider = $("volume-slider");
+        const speedBtn = $("speed-btn"), speedMenu = $("speed-menu");
+        const pipBtn = $("pip-btn"), fullscreenBtn = $("fullscreen-btn"), fullscreenIcon = $("fullscreen-icon");
+        const flash = $("svp-flash");
 
         if (!fileId) {
           showError("Invalid Link", "We couldn't find a video ID in this URL.");
           return;
         }
 
-        const titleEl = document.getElementById("video-title");
-
-        function formatTime(ms) {
-          if (ms === null || ms === undefined || isNaN(ms) || !isFinite(ms)) return "0:00";
-          const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-          const mins = Math.floor(totalSeconds / 60);
-          const secs = totalSeconds % 60;
-          return `${mins}:${secs.toString().padStart(2, "0")}`;
+        // Best known duration in seconds: backend value, then the element, then the file's tail.
+        let knownDuration = 0;
+        const duration = () =>
+          knownDuration || (isFinite(video.duration) && video.duration > 0 ? video.duration : 0);
+        function setDuration(sec, source) {
+          if (!sec || !isFinite(sec) || sec <= 0) return;
+          if (knownDuration && source !== "element") return;
+          knownDuration = sec;
+          render();
         }
 
-        function updateUI() {
-          const currentMs = video.currentTime * 1000;
-
-          // Resolve total duration: prefer authoritative backend value,
-          // fall back to video.duration once it becomes finite (WebM streams
-          // report Infinity until enough data is buffered).
-          let totalMs = authoritativeDurationMs;
-          if (!totalMs && video.duration && isFinite(video.duration) && video.duration > 0) {
-            totalMs = Math.floor(video.duration * 1000);
-          }
-
-          if (totalMs > 0) {
-            const progress = (currentMs / totalMs) * 100;
-            progressFill.style.width = `${Math.min(100, progress)}%`;
-            seekSlider.value = Math.min(1000, (currentMs / totalMs) * 1000);
-            timeText.textContent = `${formatTime(currentMs)} / ${formatTime(totalMs)}`;
+        // ── Rendering ─────────────────────────────────────────────────────
+        let dragging = false, dragTime = 0;
+        function render() {
+          const total = duration();
+          const current = dragging ? dragTime : video.currentTime;
+          track.classList.toggle("unknown", !total);
+          if (total) {
+            const pct = Math.min(100, (current / total) * 100);
+            played.style.width = pct + "%";
+            thumb.style.left = pct + "%";
+            timeText.textContent = `${formatTime(current)} / ${formatTime(total)}`;
+            track.setAttribute("aria-valuemax", Math.round(total));
+            track.setAttribute("aria-valuenow", Math.round(current));
+            track.setAttribute("aria-valuetext", `${formatTime(current)} of ${formatTime(total)}`);
+            if (video.buffered.length) {
+              let end = 0;
+              for (let i = 0; i < video.buffered.length; i++) {
+                if (video.buffered.start(i) <= video.currentTime + 0.5) end = Math.max(end, video.buffered.end(i));
+              }
+              buffered.style.width = Math.min(100, (end / total) * 100) + "%";
+            }
           } else {
-            // Duration unknown yet — still show elapsed time so the clock ticks
-            timeText.textContent = formatTime(currentMs);
-          }
-
-          // Play/Pause Icons
-          if (video.paused || previewLoopActive) {
-            playIcon.className = "ph-fill ph-play text-2xl";
-            centerPlayIcon.className = "ph-fill ph-play text-4xl ml-1";
-            if (!previewLoopActive) videoWrapper.classList.add("paused");
-          } else {
-            playIcon.className = "ph-fill ph-pause text-2xl";
-            centerPlayIcon.className = "ph-fill ph-pause text-4xl";
-            videoWrapper.classList.remove("paused");
+            timeText.textContent = formatTime(current);
           }
         }
 
+        function renderPlayState() {
+          const paused = video.paused || video.ended;
+          wrapper.classList.toggle("svp-playing", !paused);
+          const icon = video.ended ? "ph-arrow-counter-clockwise" : paused ? "ph-play" : "ph-pause";
+          playIcon.className = `ph-fill ${icon}`;
+          centerIcon.className = `ph-fill ${icon}`;
+          playBtn.setAttribute("aria-label", paused ? "Play (k)" : "Pause (k)");
+          centerBtn.setAttribute("aria-label", video.ended ? "Replay" : "Play");
+          if (paused) showControls(); else scheduleHide();
+        }
+
+        function renderVolume() {
+          const muted = video.muted || video.volume === 0;
+          volumeIcon.className = `ph-fill ${muted ? "ph-speaker-x" : video.volume < 0.5 ? "ph-speaker-low" : "ph-speaker-high"}`;
+          volumeSlider.value = muted ? 0 : video.volume;
+          volumeBtn.setAttribute("aria-label", muted ? "Unmute (m)" : "Mute (m)");
+        }
+
+        function flashIcon(iconClass, text) {
+          flash.innerHTML = `<i class="ph-fill ${iconClass}" style="font-size:22px"></i>${text ? `<span>${text}</span>` : ""}`;
+          flash.classList.remove("show");
+          void flash.offsetWidth;
+          flash.classList.add("show");
+        }
+
+        // ── Actions ───────────────────────────────────────────────────────
+        function play() {
+          if (video.ended) video.currentTime = 0;
+          const p = video.play();
+          if (p && p.catch) p.catch(() => renderPlayState());
+        }
         function togglePlay() {
-          if (!hasUserPlayed) {
-            hasUserPlayed = true;
-            previewLoopActive = false;
-            videoWrapper.classList.remove("preview");
-            video.muted = false;
-            video.currentTime = 0;
-            updateVolumeIcon();
-            video.play();
-            updateUI();
-            return;
-          }
-
-          if (video.paused) {
-            video.play();
-          } else {
-            video.pause();
-          }
-          updateUI();
+          if (video.paused || video.ended) play(); else video.pause();
+        }
+        function seekTo(sec) {
+          const total = duration();
+          sec = Math.max(0, total ? Math.min(total - 0.05, sec) : sec);
+          if (typeof video.fastSeek === "function" && dragging) video.fastSeek(sec);
+          else video.currentTime = sec;
+          render();
+        }
+        function skip(by) {
+          seekTo(video.currentTime + by);
+          flashIcon(by < 0 ? "ph-arrow-counter-clockwise" : "ph-arrow-clockwise", `${Math.abs(by)}s`);
+        }
+        function setVolume(v) {
+          video.volume = Math.max(0, Math.min(1, v));
+          video.muted = video.volume === 0;
         }
 
-        function updateVolumeIcon() {
-          if (video.muted || video.volume === 0) {
-            volumeIcon.className = "ph-fill ph-speaker-simple-x text-xl";
-          } else if (video.volume <= 0.5) {
-            volumeIcon.className = "ph-fill ph-speaker-simple-low text-xl";
-          } else {
-            volumeIcon.className = "ph-fill ph-speaker-simple-high text-xl";
-          }
+        // ── Controls visibility ───────────────────────────────────────────
+        let hideTimer = null;
+        const IDLE_MS = 2500;
+        function showControls() {
+          wrapper.classList.remove("svp-idle");
+          clearTimeout(hideTimer);
         }
-
-        async function initPlayer() {
-          try {
-            if (urlTitle) titleEl.textContent = decodeURIComponent(urlTitle);
-            videoWrapper.classList.remove("hidden");
-
-            // 1. Fetch Metadata
-            let metaUrl = `https://screenvault-proxy.tushar-abf.workers.dev/meta?id=${fileId}&sid=${sessionId}`;
-            const metaRes = await fetch(metaUrl).catch(() => null);
-            if (metaRes && metaRes.ok) {
-              const data = await metaRes.json();
-              if (data.name) titleEl.textContent = data.name.replace(".webm", "");
-              if (data.actualDurationMs) authoritativeDurationMs = data.actualDurationMs;
-              if (data.contentType && !/^(video|audio|image)\//.test(data.contentType)) {
-                // Zip and other stored files: nothing to play. The owner downloads from the dashboard.
-                showError("This is a file", "This item is a stored file, not a video. Only its owner can download it, from their dashboard.");
-                return;
-              }
-              if (data.contentType && data.contentType.startsWith("image/")) {
-                // Uploaded image: no playback, just show it.
-                const img = document.createElement("img");
-                img.src = `https://screenvault-proxy.tushar-abf.workers.dev/?id=${fileId}&sid=${sessionId}`;
-                img.alt = titleEl.textContent;
-                img.className = "w-full h-full object-contain bg-black";
-                video.replaceWith(img);
-                ["center-play-btn", "controls-bar", "loader"].forEach((id) => document.getElementById(id)?.remove());
-                return;
-              }
-            }
-
-            // 2. Start Video (Muted Preview)
-            let streamUrl;
-            if (window.SV && typeof window.SV.getPlayableUrl === "function") {
-              streamUrl = await window.SV.getPlayableUrl(fileId, sessionId);
-            } else {
-              streamUrl = `https://screenvault-proxy.tushar-abf.workers.dev/?id=${fileId}&sid=${sessionId}`;
-            }
-            video.src = streamUrl;
-            video.load();
-
-            // Only show loader if video takes >500ms — avoids flash on fast connections
-            const loaderTimer = setTimeout(() => {
-              loader.style.display = "flex";
-            }, 500);
-            video.addEventListener("canplay", () => clearTimeout(loaderTimer), { once: true });
-
-            video.muted = true;
-            video.play().catch(() => {});
-
-          } catch (e) {
-            showError("Connection Failed", "We couldn't connect to the stream.");
-          }
+        function scheduleHide() {
+          clearTimeout(hideTimer);
+          hideTimer = setTimeout(() => {
+            if (!video.paused && !dragging && !speedMenu.classList.contains("open")) wrapper.classList.add("svp-idle");
+          }, IDLE_MS);
         }
+        function nudgeControls() {
+          showControls();
+          if (!video.paused) scheduleHide();
+        }
+        wrapper.addEventListener("pointermove", (e) => { if (e.pointerType === "mouse") nudgeControls(); });
+        wrapper.addEventListener("mouseleave", () => { if (!video.paused) wrapper.classList.add("svp-idle"); });
+        wrapper.addEventListener("focusin", nudgeControls);
 
-        // Control Listeners
-        playPauseBtn.addEventListener("click", togglePlay);
-        centerPlayBtn.addEventListener("click", togglePlay);
-        
-        skipBackBtn.addEventListener("click", () => {
-          video.currentTime = Math.max(0, video.currentTime - 15);
-          updateUI();
+        // Click on the picture: toggle play on desktop; on touch, first tap shows controls.
+        let lastTap = 0;
+        video.addEventListener("pointerup", (e) => {
+          if (e.pointerType === "mouse") { togglePlay(); return; }
+          const now = Date.now();
+          if (wrapper.classList.contains("svp-idle")) nudgeControls();
+          else if (now - lastTap < 300) toggleFullscreen();
+          else if (!video.paused) { wrapper.classList.add("svp-idle"); }
+          lastTap = now;
         });
+        video.addEventListener("dblclick", toggleFullscreen);
 
-        skipForwardBtn.addEventListener("click", () => {
-          let totalSec = authoritativeDurationMs / 1000;
-          if (!totalSec && video.duration && isFinite(video.duration)) totalSec = video.duration;
-          video.currentTime = Math.min(totalSec || video.currentTime + 15, video.currentTime + 15);
-          updateUI();
-        });
-
-        seekSlider.addEventListener("input", () => {
-          let totalMs = authoritativeDurationMs;
-          if (!totalMs && video.duration && isFinite(video.duration)) totalMs = video.duration * 1000;
-          if (totalMs > 0) {
-            video.currentTime = (seekSlider.value / 1000) * (totalMs / 1000);
-            updateUI();
-          }
-        });
+        playBtn.addEventListener("click", togglePlay);
+        centerBtn.addEventListener("click", togglePlay);
+        $("skip-back-btn").addEventListener("click", () => skip(-10));
+        $("skip-forward-btn").addEventListener("click", () => skip(10));
 
         volumeBtn.addEventListener("click", () => {
-          video.muted = !video.muted;
-          updateVolumeIcon();
+          if (video.muted || video.volume === 0) { video.muted = false; if (!video.volume) video.volume = 1; }
+          else video.muted = true;
+        });
+        volumeSlider.addEventListener("input", () => setVolume(parseFloat(volumeSlider.value)));
+
+        // ── Seek bar: click, drag (mouse + touch), hover preview time ──────
+        function timeAt(clientX) {
+          const r = track.getBoundingClientRect();
+          const frac = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+          return { frac, sec: frac * duration() };
+        }
+        track.addEventListener("pointermove", (e) => {
+          if (!duration()) return;
+          const { frac, sec } = timeAt(e.clientX);
+          hoverbar.style.width = frac * 100 + "%";
+          tip.style.left = Math.max(4, Math.min(96, frac * 100)) + "%";
+          tip.textContent = formatTime(sec);
+          if (dragging) { dragTime = sec; seekTo(sec); }
+        });
+        track.addEventListener("pointerleave", () => { hoverbar.style.width = "0"; });
+        let wasPlaying = false;
+        track.addEventListener("pointerdown", (e) => {
+          if (!duration()) return;
+          dragging = true;
+          track.classList.add("dragging");
+          track.setPointerCapture(e.pointerId);
+          wasPlaying = !video.paused;
+          if (wasPlaying) video.pause();
+          dragTime = timeAt(e.clientX).sec;
+          seekTo(dragTime);
+          showControls();
+        });
+        const endDrag = () => {
+          if (!dragging) return;
+          dragging = false;
+          track.classList.remove("dragging");
+          video.currentTime = dragTime;
+          if (wasPlaying) play();
+          render();
+        };
+        track.addEventListener("pointerup", endDrag);
+        track.addEventListener("pointercancel", endDrag);
+        track.addEventListener("keydown", (e) => {
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault(); e.stopPropagation();
+            skip(e.key === "ArrowLeft" ? -5 : 5);
+          }
         });
 
-        volumeSlider.addEventListener("input", () => {
-          video.volume = volumeSlider.value;
-          video.muted = video.volume === 0;
-          updateVolumeIcon();
+        // ── Speed menu ────────────────────────────────────────────────────
+        const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+        function setSpeed(rate) {
+          video.playbackRate = rate;
+          video.defaultPlaybackRate = rate;
+          speedBtn.textContent = rate + "x";
+          speedMenu.querySelectorAll("button").forEach((b) =>
+            b.setAttribute("aria-checked", String(parseFloat(b.dataset.rate) === rate)));
+          store.set("svp-speed", String(rate));
+        }
+        SPEEDS.slice().reverse().forEach((rate) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.setAttribute("role", "menuitemradio");
+          b.dataset.rate = rate;
+          b.innerHTML = `<span>${rate === 1 ? "Normal" : rate + "x"}</span><i class="ph ph-check"></i>`;
+          b.addEventListener("click", () => { setSpeed(rate); closeSpeedMenu(); flashIcon("ph-gauge", rate + "x"); });
+          speedMenu.appendChild(b);
         });
-
-        const speeds = [1, 1.25, 1.5, 2];
-        let speedIdx = 0;
-        speedBtn.addEventListener("click", () => {
-          speedIdx = (speedIdx + 1) % speeds.length;
-          video.playbackRate = speeds[speedIdx];
-          speedBtn.textContent = speeds[speedIdx] + "x";
+        function closeSpeedMenu() { speedMenu.classList.remove("open"); speedBtn.setAttribute("aria-expanded", "false"); scheduleHide(); }
+        speedBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const open = !speedMenu.classList.contains("open");
+          speedMenu.classList.toggle("open", open);
+          speedBtn.setAttribute("aria-expanded", String(open));
+          showControls();
         });
+        document.addEventListener("click", (e) => { if (!speedMenu.contains(e.target)) closeSpeedMenu(); });
+        function stepSpeed(dir) {
+          const i = SPEEDS.indexOf(video.playbackRate);
+          const next = SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 2 : i) + dir))];
+          setSpeed(next);
+          flashIcon("ph-gauge", next + "x");
+        }
 
-        // Fullscreen: the standard API works on desktop and Android Chrome, but
-        // iPhone Safari only allows fullscreen on the <video> element itself
-        // (webkitEnterFullscreen, which swaps in the native player), and older
-        // WebKit only has the prefixed element API.
-        const fsElement = () =>
-          document.fullscreenElement || document.webkitFullscreenElement || null;
+        // ── Picture in picture ────────────────────────────────────────────
+        if (document.pictureInPictureEnabled && !video.disablePictureInPicture) {
+          pipBtn.hidden = false;
+          pipBtn.addEventListener("click", async () => {
+            try {
+              if (document.pictureInPictureElement) await document.exitPictureInPicture();
+              else await video.requestPictureInPicture();
+            } catch {}
+          });
+        }
+
+        // ── Fullscreen ────────────────────────────────────────────────────
+        // iPhone Safari only allows fullscreen on the <video> itself (native player).
+        const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
         const isFullscreen = () => !!fsElement() || !!video.webkitDisplayingFullscreen;
-
         function toggleFullscreen() {
           if (isFullscreen()) {
             if (video.webkitDisplayingFullscreen) video.webkitExitFullscreen?.();
             else (document.exitFullscreen || document.webkitExitFullscreen)?.call(document);
             return;
           }
-          const req = videoWrapper.requestFullscreen || videoWrapper.webkitRequestFullscreen;
+          const req = wrapper.requestFullscreen || wrapper.webkitRequestFullscreen;
           if (req) {
-            Promise.resolve(req.call(videoWrapper))
+            Promise.resolve(req.call(wrapper))
               .then(() => screen.orientation?.lock?.("landscape").catch(() => {}))
               .catch(() => video.webkitEnterFullscreen?.());
           } else if (video.webkitEnterFullscreen) {
             video.webkitEnterFullscreen();
           }
         }
-
         function syncFullscreenIcon() {
-          fullscreenIcon.className = isFullscreen()
-            ? "ph ph-arrows-in text-xl"
-            : "ph ph-arrows-out text-xl";
-          if (!isFullscreen()) screen.orientation?.unlock?.();
+          const fs = isFullscreen();
+          fullscreenIcon.className = fs ? "ph ph-corners-in" : "ph ph-corners-out";
+          fullscreenBtn.setAttribute("aria-label", fs ? "Exit full screen (f)" : "Full screen (f)");
+          if (!fs) screen.orientation?.unlock?.();
         }
-
         fullscreenBtn.addEventListener("click", toggleFullscreen);
         document.addEventListener("fullscreenchange", syncFullscreenIcon);
         document.addEventListener("webkitfullscreenchange", syncFullscreenIcon);
         video.addEventListener("webkitbeginfullscreen", syncFullscreenIcon);
         video.addEventListener("webkitendfullscreen", syncFullscreenIcon);
 
-        // Keyboard Shortcuts
+        // ── Keyboard (YouTube-style) ──────────────────────────────────────
         window.addEventListener("keydown", (e) => {
-          if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-
-          switch(e.key.toLowerCase()) {
-            case " ":
-            case "k":
-              e.preventDefault();
-              togglePlay();
-              break;
-            case "m":
-              video.muted = !video.muted;
-              updateVolumeIcon();
-              break;
-            case "f":
-              toggleFullscreen();
-              break;
-            case "arrowleft":
-              video.currentTime = Math.max(0, video.currentTime - 15);
-              updateUI();
-              break;
-            case "arrowright":
-              let totalSec = authoritativeDurationMs / 1000;
-              if (!totalSec && video.duration && isFinite(video.duration)) totalSec = video.duration;
-              video.currentTime = Math.min(totalSec || video.currentTime + 15, video.currentTime + 15);
-              updateUI();
-              break;
+          if (e.ctrlKey || e.metaKey || e.altKey) return;
+          const tag = e.target.tagName;
+          if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return;
+          if (wrapper.classList.contains("hidden")) return;
+          const key = e.key;
+          let handled = true;
+          if (key === " " || key === "k" || key === "K") {
+            if (key === " " && tag === "BUTTON") return; // let buttons activate normally
+            togglePlay();
+            flashIcon(video.paused ? "ph-pause" : "ph-play");
           }
+          else if (key === "j" || key === "J") skip(-10);
+          else if (key === "l" || key === "L") skip(10);
+          else if (key === "ArrowLeft") skip(-5);
+          else if (key === "ArrowRight") skip(5);
+          else if (key === "ArrowUp") { setVolume(video.volume + 0.1); video.muted = false; flashIcon("ph-speaker-high", Math.round(video.volume * 100) + "%"); }
+          else if (key === "ArrowDown") { setVolume(video.volume - 0.1); flashIcon("ph-speaker-low", Math.round(video.volume * 100) + "%"); }
+          else if (key === "m" || key === "M") { video.muted = !video.muted; flashIcon(video.muted ? "ph-speaker-x" : "ph-speaker-high"); }
+          else if (key === "f" || key === "F") toggleFullscreen();
+          else if (key === ">") stepSpeed(1);
+          else if (key === "<") stepSpeed(-1);
+          else if (key === "Home") seekTo(0);
+          else if (key === "End" && duration()) seekTo(duration());
+          else if (/^[0-9]$/.test(key) && duration()) seekTo((parseInt(key, 10) / 10) * duration());
+          else handled = false;
+          if (handled) { e.preventDefault(); nudgeControls(); }
         });
 
-        // Auto-hide controls (including the center play/pause button) during
-        // playback after ~2.5s of no mouse movement, even while the cursor
-        // is still resting over the player.
-        let hideControlsTimer = null;
-        const controlsBar = document.getElementById("controls-bar");
-        const IDLE_HIDE_MS = 2500;
-
-        function showControls() {
-          videoWrapper.classList.add("controls-visible");
-          videoWrapper.classList.remove("controls-idle");
-          if (hideControlsTimer) clearTimeout(hideControlsTimer);
-          hideControlsTimer = null;
+        // ── Media element events ──────────────────────────────────────────
+        let frameReq = 0;
+        function tick() {
+          render();
+          frameReq = !video.paused && !video.ended ? requestAnimationFrame(tick) : 0;
         }
-
-        function scheduleHide() {
-          if (hideControlsTimer) clearTimeout(hideControlsTimer);
-          hideControlsTimer = setTimeout(() => {
-            if (!video.paused) {
-              videoWrapper.classList.remove("controls-visible");
-              videoWrapper.classList.add("controls-idle");
-            }
-          }, IDLE_HIDE_MS);
-        }
-
-        videoWrapper.addEventListener("mousemove", () => {
-          showControls();
-          if (!video.paused) scheduleHide();
+        video.addEventListener("play", () => { renderPlayState(); if (!frameReq) frameReq = requestAnimationFrame(tick); });
+        video.addEventListener("pause", renderPlayState);
+        video.addEventListener("ended", () => { renderPlayState(); render(); });
+        video.addEventListener("timeupdate", render);
+        video.addEventListener("progress", render);
+        video.addEventListener("seeked", render);
+        video.addEventListener("volumechange", () => {
+          renderVolume();
+          store.set("svp-volume", String(video.volume));
+          store.set("svp-muted", video.muted ? "1" : "0");
         });
+        video.addEventListener("durationchange", () => {
+          if (isFinite(video.duration) && video.duration > 0) setDuration(video.duration, "element");
+          render();
+        });
+        const setWaiting = (on) => wrapper.classList.toggle("svp-waiting", on);
+        video.addEventListener("waiting", () => setWaiting(true));
+        video.addEventListener("seeking", () => { if (!video.paused) setWaiting(true); });
+        ["playing", "canplay", "seeked", "pause"].forEach((ev) => video.addEventListener(ev, () => setWaiting(false)));
+        // Phones (iOS Safari, data saver) may not preload anything until play is
+        // pressed, so 'loadeddata' never comes: don't hide the play button behind a spinner.
+        ["loadedmetadata", "suspend"].forEach((ev) => video.addEventListener(ev, () => { if (video.paused) setWaiting(false); }));
 
-        videoWrapper.addEventListener("mouseleave", () => {
-          if (!video.paused) {
-            if (hideControlsTimer) clearTimeout(hideControlsTimer);
-            videoWrapper.classList.remove("controls-visible");
-            videoWrapper.classList.add("controls-idle");
+        let firstFrame = true;
+        video.addEventListener("loadeddata", () => {
+          setWaiting(false);
+          if (firstFrame) {
+            firstFrame = false;
+            render();
+            renderPlayState();
+            showToast(DELIGHT[Math.floor(Math.random() * DELIGHT.length)], "ph-lightning", "text-yellow-400");
           }
         });
 
-        video.addEventListener("play", () => {
-          scheduleHide();
-        });
-
-        video.addEventListener("pause", () => {
-          if (hideControlsTimer) clearTimeout(hideControlsTimer);
-          videoWrapper.classList.remove("controls-idle");
-          videoWrapper.classList.add("controls-visible");
-        });
-
-        // Loop Logic & UI Sync
-        video.addEventListener("timeupdate", () => {
-          if (previewLoopActive && video.currentTime >= 4) {
-            video.currentTime = 0;
-          }
-          updateUI();
-        });
-
-        video.addEventListener("play", updateUI);
-        video.addEventListener("pause", updateUI);
-        video.addEventListener("volumechange", updateVolumeIcon);
+        // A mid-stream error (e.g. a decode glitch) used to restart long videos from 0:00.
+        // Resume where it failed instead, nudging past a spot that fails twice.
+        let retryCount = 0, resumeAt = null, lastFailAt = -10, resumePlay = false, userStarted = false;
+        video.addEventListener("play", () => { userStarted = true; });
         video.addEventListener("loadedmetadata", () => {
           if (resumeAt !== null) {
             video.currentTime = resumeAt;
             resumeAt = null;
-            if (hasUserPlayed || previewLoopActive) video.play().catch(() => {});
+            if (resumePlay) play();
           }
-          updateUI();
+          render();
         });
         video.addEventListener("timeupdate", () => {
           if (retryCount > 0 && video.currentTime > lastFailAt + 10) retryCount = 0;
         });
-        video.addEventListener("durationchange", updateUI);
-
-        video.addEventListener("canplay", () => {
-          loader.style.opacity = "0";
-          setTimeout(() => (loader.style.display = "none"), 300);
-          video.classList.add("loaded");
-          videoWrapper.classList.add("preview");
-          updateUI();
-          showToast(delightMessages[Math.floor(Math.random() * delightMessages.length)], "ph-lightning", "text-yellow-400");
-        }, { once: true });
-
-        // A mid-stream error (e.g. a decode glitch Chrome only hits when playing
-        // straight through) used to reload from 0:00, so long videos restarted over
-        // and over. Resume from where it failed instead, nudging past the bad spot
-        // if the same spot fails twice. Retries reset once playback gets well past it.
-        let retryCount = 0;
-        let resumeAt = null;
-        let lastFailAt = -10;
-        video.addEventListener("error", () => {
+        let fileChecked = false;
+        video.addEventListener("error", async () => {
+          // Nothing ever loaded: check once whether the file exists at all, so a
+          // missing recording gets a clear message now instead of after 6 retries.
+          if (!fileChecked && video.readyState === 0 && !userStarted) {
+            fileChecked = true;
+            const status = await fetch(video.currentSrc || video.src, { headers: { Range: "bytes=0-0" } })
+              .then((r) => r.status).catch(() => 0);
+            if (status === 404) {
+              showError("Recording not available", "This recording has no video file. It may not have finished uploading, or it was deleted.");
+              return;
+            }
+          }
           const failedAt = video.currentTime || 0;
           if (retryCount < 6) {
             retryCount++;
+            resumePlay = userStarted;
             resumeAt = Math.abs(failedAt - lastFailAt) < 2 ? failedAt + 2 : failedAt;
             lastFailAt = failedAt;
-            setTimeout(() => { video.load(); }, 500);
+            setTimeout(() => video.load(), 500);
             return;
           }
-          fetch('https://screenvault-proxy.tushar-abf.workers.dev/event', {
-            method: 'POST',
-            body: JSON.stringify({ type: 'browser_video_error', sessionId, metadata: { code: video.error?.code } })
+          fetch(`${PROXY}/event`, {
+            method: "POST",
+            body: JSON.stringify({ type: "browser_video_error", sessionId, metadata: { code: video.error?.code } }),
           }).catch(() => {});
           showError("Playback Error", "We encountered an issue streaming this video. Please try refreshing.");
         });
 
-        initPlayer();
+        // ── Restore preferences ───────────────────────────────────────────
+        const savedVol = parseFloat(store.get("svp-volume"));
+        if (isFinite(savedVol)) video.volume = Math.max(0, Math.min(1, savedVol));
+        video.muted = store.get("svp-muted") === "1";
+        const savedSpeed = parseFloat(store.get("svp-speed"));
+        setSpeed(SPEEDS.includes(savedSpeed) ? savedSpeed : 1);
+        renderVolume();
+        renderPlayState();
+
+        // ── Load ──────────────────────────────────────────────────────────
+        async function initPlayer() {
+          if (urlTitle) titleEl.textContent = decodeURIComponent(urlTitle);
+          wrapper.classList.remove("hidden");
+
+          const streamUrl = window.SV && typeof window.SV.getPlayableUrl === "function"
+            ? await window.SV.getPlayableUrl(fileId, sessionId)
+            : `${PROXY}/?id=${fileId}&sid=${sessionId}`;
+
+          // Fetch metadata and start the video in parallel: the first frame
+          // shouldn't wait for a second round trip.
+          const metaPromise = fetch(`${PROXY}/meta?id=${fileId}&sid=${sessionId}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+
+          const data = await Promise.race([metaPromise, new Promise((r) => setTimeout(() => r(undefined), 1500))]);
+          const meta = data === undefined ? await metaPromise : data;
+
+          if (meta) {
+            if (meta.name) titleEl.textContent = meta.name.replace(/\.webm$/i, "");
+            if (meta.actualDurationMs) setDuration(meta.actualDurationMs / 1000, "backend");
+            if (meta.contentType && !/^(video|audio|image)\//.test(meta.contentType)) {
+              showError("This is a file", "This item is a stored file, not a video. Only its owner can download it, from their dashboard.");
+              return;
+            }
+            if (meta.contentType && meta.contentType.startsWith("image/")) {
+              const img = document.createElement("img");
+              img.src = streamUrl;
+              img.alt = titleEl.textContent;
+              img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000";
+              video.replaceWith(img);
+              ["center-play-btn", "controls-bar"].forEach((id) => $(id)?.remove());
+              wrapper.classList.remove("svp-waiting");
+              return;
+            }
+          }
+          document.title = `${titleEl.textContent.trim()} | Foyr Screen Recorder`;
+          if ("mediaSession" in navigator) {
+            try { navigator.mediaSession.metadata = new MediaMetadata({ title: titleEl.textContent.trim(), artist: "Foyr Screen Recorder" }); } catch {}
+          }
+
+          video.src = streamUrl;
+          video.load();
+
+          // No backend duration (older recordings): read it from the file's tail.
+          if (!knownDuration && (!meta || !meta.contentType || /webm/.test(meta.contentType))) {
+            webmDurationFromTail(streamUrl).then((sec) => setDuration(sec, "tail")).catch(() => {});
+          }
+        }
+
+        initPlayer().catch(() => showError("Connection Failed", "We couldn't connect to the stream."));
       });
     </script>
-    <style>
-      /* Show controls when paused or when mouse is active */
-      #video-wrapper.paused #controls-bar,
-      #video-wrapper.controls-visible #controls-bar {
-        opacity: 1 !important;
-        pointer-events: auto !important;
-      }
-
-      /* Force-hide the center play/pause button and control bar after
-         mouse inactivity, even while the cursor is still resting over the
-         player — group-hover alone can't express "idle", only "hovering". */
-      #video-wrapper.controls-idle:not(.preview) #center-play-btn,
-      #video-wrapper.controls-idle:not(.preview) #controls-bar {
-        opacity: 0 !important;
-        pointer-events: none !important;
-      }
-
-      /* Hide cursor when controls are hidden during playback */
-      #video-wrapper:not(.paused):not(.controls-visible):not(.preview) {
-        cursor: none;
-      }
-
-      /* Auto-hide loader the instant video gets .loaded — no JS timing needed */
-      #video-wrapper:has(#player.loaded) #loader {
-        display: none;
-      }
-
-      /* Preview loop mode: GIF-like, only play button visible */
-      #video-wrapper.preview #controls-bar {
-        display: none !important;
-      }
-      #video-wrapper.preview #center-play-btn {
-        background: transparent;
-        pointer-events: auto;
-      }
-      #video-wrapper.preview #center-play-btn > div {
-        transform: scale(1);
-      }
-      
-      /* Progress slider styling */
-      #seek-slider::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        width: 12px;
-        height: 12px;
-        background: white;
-        border-radius: 50%;
-        cursor: pointer;
-        box-shadow: 0 0 10px rgba(0,0,0,0.5);
-      }
-      
-      #volume-slider::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        width: 10px;
-        height: 10px;
-        background: white;
-        border-radius: 50%;
-        cursor: pointer;
-      }
-
-      .ph-fill {
-        font-family: "Phosphor-Fill" !important;
-      }
-    </style>
   </body>
 </html>
