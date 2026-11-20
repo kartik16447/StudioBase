@@ -755,22 +755,45 @@ function startMediaRecorder(stream: MediaStream) {
           // Update backend DB in background — the video row's fileId already
           // points at this key since it was set at creation time, so no
           // fileId swap is needed (unlike the old Drive placeholder flow).
-          if (activeBackendVideoId && finalToken) {
-            fetch(`${BACKEND_URL}/videos/${activeBackendVideoId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${finalToken}` },
-              body: JSON.stringify({
-                status: 'ready',
-                duration,
-                actualDurationMs: finalActualDurationMs,
-                sessionId: activeSessionId,
-                fileSizeBytes: completed.size
-              })
-            }).then(() => {
-                svLog("BACKEND_FINALIZATION_COMPLETE", { sessionId: activeSessionId, timestamp: Date.now() });
-            }).catch(e => {
-                svLog("BACKEND_FINALIZATION_FAILED", { sessionId: activeSessionId, error: String(e) });
+          // The id from START_SCREEN is often missing (pre-allocation's POST
+          // failed); syncBackend writes it into session metadata a bit later,
+          // so fall back to that. Without this, live rows stayed 'uploading' forever.
+          const finalVideoId = activeBackendVideoId || latestMeta?.backendVideoId || null;
+          if (!finalVideoId) {
+            svLog("BACKEND_FINALIZATION_NO_VIDEO_ID", { sessionId: activeSessionId, key: activeUploadKey });
+          } else {
+            const patchBody = JSON.stringify({
+              status: 'ready',
+              duration,
+              actualDurationMs: finalActualDurationMs,
+              sessionId: activeSessionId,
+              fileSizeBytes: completed.size
             });
+            let lastErr = '';
+            for (let attempt = 1; attempt <= 3; attempt++) {
+              try {
+                const patchToken = attempt === 1 && finalToken
+                  ? finalToken
+                  : await getFreshToken(activeAccount.id, false).catch(() => finalToken);
+                const res = await fetch(`${BACKEND_URL}/videos/${finalVideoId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${patchToken}` },
+                  body: patchBody
+                });
+                if (res.ok) {
+                  lastErr = '';
+                  svLog("BACKEND_FINALIZATION_COMPLETE", { sessionId: activeSessionId, videoId: finalVideoId, attempt, timestamp: Date.now() });
+                  break;
+                }
+                lastErr = `HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`;
+              } catch (e) {
+                lastErr = String(e);
+              }
+              await new Promise(r => setTimeout(r, 1000 * attempt));
+            }
+            if (lastErr) {
+              svLog("BACKEND_FINALIZATION_FAILED", { sessionId: activeSessionId, videoId: finalVideoId, error: lastErr });
+            }
           }
 
 

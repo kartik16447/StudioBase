@@ -463,6 +463,8 @@ async function preAllocateUpload(account: StorageAccount, title?: string): Promi
       url = data.playerUrl;
       videoId = data.id;
       encryptedFileId = data.encryptedFileId;
+    } else {
+      svLog("PREALLOC_VIDEO_POST_FAILED", { status: videoRes.status, body: (await videoRes.text().catch(() => '')).slice(0, 200) });
     }
   } catch (err) {
     console.warn("Pre-allocation video registration failed, will retry during syncBackend:", err);
@@ -608,39 +610,35 @@ chrome.runtime.onMessage.addListener(
       // PRE-WARM: Start offscreen document during the countdown to save ~500ms later
       startOffscreenDocument().catch(() => {});
 
-      selectBestAccount()
-        .then(async (bestAccount) => {
-          if (bestAccount) {
-            let prom = preAllocateUpload(bestAccount).catch(async (err) => {
-              if (err.message.includes("401") || err.message.includes("Token expired")) {
-                svLog("PREALLOCATION_RETRY", { accountEmail: bestAccount.email });
-                updateState({ errorMessage: "Restoring your account..." });
-                try {
-                  const refreshed = await trySilentRefresh(bestAccount);
-                  updateState({ errorMessage: null });
-                  return await preAllocateUpload(refreshed);
-                } catch (refreshErr) {
-                  await validateToken(bestAccount).catch(() => {});
-                  throw err;
-                }
-              }
+      // Register "latest" synchronously: the popup sends START_RECORDING right
+      // after this, and if startRecording can't see it yet it allocates a second
+      // upload, leaving an empty twin row in the library for every recording.
+      const prom: Promise<PreAllocationResult> = selectBestAccount().then(async (bestAccount) => {
+        if (!bestAccount) throw new Error("No connected accounts");
+        return preAllocateUpload(bestAccount).catch(async (err) => {
+          if (err.message.includes("401") || err.message.includes("Token expired")) {
+            svLog("PREALLOCATION_RETRY", { accountEmail: bestAccount.email });
+            updateState({ errorMessage: "Restoring your account..." });
+            try {
+              const refreshed = await trySilentRefresh(bestAccount);
+              updateState({ errorMessage: null });
+              return await preAllocateUpload(refreshed);
+            } catch (refreshErr) {
+              await validateToken(bestAccount).catch(() => {});
               throw err;
-            });
-
-            preAllocationMap.set("latest", prom);
-            prom
-              .then((data) => {
-                sendResponse({ url: data.url });
-              })
-              .catch(async (err) => {
-                sendResponse({ error: err.message });
-                preAllocationMap.delete("latest");
-              });
-          } else {
-            sendResponse({ error: "No connected accounts" });
+            }
           }
-        })
-        .catch((err) => sendResponse({ error: err.message }));
+          throw err;
+        });
+      });
+
+      preAllocationMap.set("latest", prom);
+      prom
+        .then((data) => sendResponse({ url: data.url }))
+        .catch((err) => {
+          sendResponse({ error: err.message });
+          if (preAllocationMap.get("latest") === prom) preAllocationMap.delete("latest");
+        });
       return true; // async
     } else if (msg.type === "GET_PENDING_SESSIONS") {
       getPendingSessions().then(sendResponse);
@@ -920,6 +918,8 @@ async function startRecording(target: AppState["target"]) {
     let allocationProm = preAllocationMap.get("latest");
     if (allocationProm) {
       preAllocationMap.delete("latest");
+      // A failed popup pre-allocation must not block recording: fall through to a fresh one.
+      if (!(await allocationProm.then(() => true, () => false))) allocationProm = undefined;
     }
 
     if (!allocationProm) {
@@ -1197,6 +1197,16 @@ function stopRecording() {
 
       if (!uploadDone && !timedOut) {
         setTimeout(checkAndForce, POLL_INTERVAL_MS);
+        return;
+      }
+
+      // Ported from the live 1.0.5 build (never committed): a 20s+ recording
+      // with zero uploaded bytes would get a dead link, so show an error instead.
+      const uploadedSoFar = (sessionMeta as any)?.uploadedBytes || 0;
+      const recordedMs = currentState.startedAt ? earlyLinkStart - currentState.startedAt : 0;
+      if (!uploadDone && timedOut && uploadedSoFar === 0 && recordedMs > 20_000) {
+        svLog("EARLY_LINK_BLOCKED_NO_UPLOAD", { sessionId, fileId, recordedMs });
+        updateState({ status: "error", errorMessage: "The recording didn't upload. Please try again." });
         return;
       }
 
